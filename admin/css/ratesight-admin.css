@@ -1,0 +1,117 @@
+/* Ratesight Admin — supplemental styles (structural styles are inlined in page-wrapper.php) */
+
+/* ── Form inputs inside our cards ──────────────────────────────────────────── */
+.rs-card input[type="text"]:focus,
+.rs-card input[type="number"]:focus,
+.rs-card select:focus,
+.rs-card textarea:focus {
+	border-color: #1877F2 !important;
+	box-shadow: 0 0 0 2px rgba(24,119,242,.12) !important;
+	outline: none !important;
+}
+
+/* ── Shortcode rows ──────────────────────────────────────────────────────────── */
+.rs-sc-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 14px;
+	background: #f6f7f7;
+	border: 1px solid #e5e5e5;
+	border-radius: 4px;
+	margin-bottom: 8px;
+}
+.rs-sc-row:last-of-type { margin-bottom: 0; }
+.rs-sc-name { width: 130px; font-size: 12px; font-weight: 600; color: #646970; flex-shrink: 0; }
+.rs-sc-code { flex: 1; font-family: ui-monospace, Consolas, monospace; font-size: 13px; color: #1d2327; }
+
+/* ── Endpoint URL box ────────────────────────────────────────────────────────── */
+.rs-url-box {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	border-radius: 3px;
+	padding: 7px 10px;
+	max-width: 100%;
+}
+.rs-url-box input[type="text"] {
+	flex: 1 !important;
+	border: none !important;
+	background: transparent !important;
+	box-shadow: none !important;
+	font-family: ui-monospace, Consolas, monospace !important;
+	font-size: 12px !important;
+	color: #646970 !important;
+	padding: 0 !important;
+	min-width: 0;
+}
+.rs-url-box input[type="text"]:focus {
+	border: none !important;
+	box-shadow: none !important;
+	outline: none !important;
+}
+
+/* ── Color row ───────────────────────────────────────────────────────────────── */
+.rs-color-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+
+/* ── Feedback ────────────────────────────────────────────────────────────────── */
+.rs-feedback     { font-size: 13px; margin-left: 8px; }
+.rs-feedback.ok  { color: #00a32a; }
+.rs-feedback.err { color: #d63638; }
+.rs-copied { color: #00a32a !important; border-color: #00a32a !important; }
+
+/* ── Submit row ──────────────────────────────────────────────────────────────── */
+.rs-submit { margin-top: 20px; padding-top: 16px; border-top: 1px solid #e5e5e5; }
+
+/* ── Log ─────────────────────────────────────────────────────────────────────── */
+.rs-log-bar { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+.rs-log-bar h2 { font-size: 14px !important; font-weight: 600 !important; color: #1d2327 !important; margin: 0 !important; padding: 0 !important; border: none !important; }
+.rs-log-meta { font-size: 12px; color: #787c82; margin: 2px 0 0; }
+.rs-post-link { color: #1877F2; text-decoration: none; font-weight: 500; }
+.rs-post-link:hover { text-decoration: underline; }
+.rs-note { color: #7a5800; font-size: 12px; }
+.rs-err  { color: #d63638; font-size: 12px; }
+.rs-empty { text-align: center; padding: 44px 20px; background: #fff; border: 1px solid #dcdcde; border-radius: 4px; color: #646970; font-size: 14px; }
+
+/* ── Status pills ────────────────────────────────────────────────────────────── */
+.rs-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 20px; white-space: nowrap; }
+.rs-pill::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; display: inline-block; }
+.rs-pill.success  { background: #edfaef; color: #00a32a; }
+.rs-pill.warnings { background: #fef8e7; color: #7a5800; }
+.rs-pill.failed   { background: #fef0f0; color: #d63638; }
+.rs-pill.modified { background: #f0f0f1; color: #646970; }
+.rs-pill.pending  { background: #e8f4fb; color: #0a5b8a; }
+
+/* ── Reference code blocks ───────────────────────────────────────────────────── */
+pre.rs-code {
+	background: #1e2329;
+	color: #abb2bf;
+	padding: 16px 20px;
+	border-radius: 4px;
+	font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+	font-size: 12.5px;
+	line-height: 1.65;
+	overflow-x: auto;
+	white-space: pre;
+	margin: 0 0 14px;
+	-webkit-font-smoothing: antialiased;
+}
+
+.rs-ref-h { font-size: 13px; font-weight: 600; color: #1d2327; margin: 16px 0 8px; }
+
+/* ── Connections tab ─────────────────────────────────────────────────────────── */
+.rs-connected-dot {
+	display: inline-block;
+	width: 8px; height: 8px;
+	border-radius: 50%;
+	background: #00a32a;
+	margin-right: 4px;
+	vertical-align: middle;
+}
+
+.rs-btn-danger { color: #d63638 !important; border-color: #f0b8b8 !important; background: transparent !important; }
+.rs-btn-danger:hover { background: #fef0f0 !important; border-color: #d63638 !important; }
+
+.rs-disconnect-row { display: flex; align-items: center; gap: 8px; }

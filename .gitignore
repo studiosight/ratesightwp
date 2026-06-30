@@ -1,0 +1,27 @@
+# Secrets / local config — never commit
+.env
+.env.local
+wp-config.php
+
+# Dependencies
+/vendor/
+/node_modules/
+
+# Build / dist
+/build/
+/dist/
+*.zip
+
+# Editor / OS
+.vscode/
+.idea/
+*.sublime-*
+.DS_Store
+Thumbs.db
+*.swp
+
+# Logs
+*.log
+
+# Claude
+.claude/

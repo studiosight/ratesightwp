@@ -1,0 +1,29 @@
+/* Ratesight public widget styles */
+.rs-leave-a-review { text-align: center; margin: 1em 0; }
+
+.rs-prompt {
+	font-size: 18px;
+	margin-bottom: 16px;
+}
+
+.rs-star-link {
+	display: block;
+	text-decoration: none;
+	line-height: 1;
+}
+
+.rs-star {
+	display: inline-block;
+	font-size: 2em;
+	padding: 0 3px;
+	transition: opacity .15s;
+}
+
+.rs-star-link:hover .rs-star { opacity: .8; }
+
+.rs-all-link {
+	display: block;
+	margin-top: 12px;
+	font-size: 16px;
+	text-decoration: underline;
+}
