@@ -584,15 +584,14 @@ class Ratesight_Admin {
 		// JSON_UNESCAPED_SLASHES (PHP escapes / as \/ by default; JS does not)
 		// and JSON_UNESCAPED_UNICODE to match JS exactly.
 		$posts_json = json_encode( $data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
-		$hmac       = hash_hmac( 'sha256', $posts_json, Ratesight_OAuth_Client::token_secret() );
+		$auth       = Ratesight_OAuth_Client::sign_request( $posts_json );
 
 		$request_args = array(
 			'timeout' => 120,
 			'headers' => array( 'Content-Type' => 'application/json' ),
 			'body'    => wp_json_encode( array(
 				'posts' => $data,
-				'hmac'  => $hmac,
-			) ),
+			) + $auth ),
 		);
 
 		// Use DeepSeek AI client directly.
@@ -696,7 +695,7 @@ class Ratesight_Admin {
 			wp_send_json_error( array( 'message' => 'Missing parameters.' ), 400 );
 		}
 
-		$expected = hash_hmac( 'sha256', $site_url . '|sync', Ratesight_OAuth_Client::token_secret() );
+		$expected = hash_hmac( 'sha256', $site_url . '|sync', Ratesight_OAuth_Client::active_secret() );
 		if ( ! hash_equals( $expected, $hmac ) ) {
 			wp_send_json_error( array( 'message' => 'Invalid HMAC.' ), 403 );
 		}
@@ -842,7 +841,7 @@ class Ratesight_Admin {
 			wp_send_json_error( array( 'message' => 'Not enough keyword data yet — sync a few times first.' ) );
 		}
 
-		$hmac = hash_hmac( 'sha256', wp_json_encode( $keywords ) . '|recommend', Ratesight_OAuth_Client::token_secret() );
+		$hmac = hash_hmac( 'sha256', wp_json_encode( $keywords ) . '|recommend', Ratesight_OAuth_Client::active_secret() );
 
 		$result = Ratesight_AI_Client::get_recommendations( $keywords, $existing_titles );
 
@@ -1754,9 +1753,9 @@ class Ratesight_Admin {
 		}
 
 		// Check Bing via Worker
-		$hmac     = hash_hmac( 'sha256', $host . '|check', Ratesight_OAuth_Client::token_secret() );
+		$auth     = Ratesight_OAuth_Client::sign_request( $host . '|check' );
 		$response = wp_remote_get(
-			add_query_arg( array( 'host' => $host, 'hmac' => $hmac ), 'https://oauth.ratesight.com/sitemap-status' ),
+			add_query_arg( array( 'host' => $host ) + $auth, 'https://oauth.ratesight.com/sitemap-status' ),
 			array( 'timeout' => 8 )
 		);
 

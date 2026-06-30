@@ -38,12 +38,12 @@ class Ratesight_AI_Client {
 			'prompt'  => $prompt,
 			'context' => $context_data,
 		) );
-		$hmac = hash_hmac( 'sha256', $payload, Ratesight_OAuth_Client::token_secret() );
+		$auth = Ratesight_OAuth_Client::sign_request( $payload );
 
 		$response = wp_remote_post( self::WORKER_BASE . '/ai-chat', array(
 			'timeout' => $timeout,
 			'headers' => array( 'Content-Type' => 'application/json' ),
-			'body'    => wp_json_encode( array( 'payload' => $payload, 'hmac' => $hmac ) ),
+			'body'    => wp_json_encode( array( 'payload' => $payload ) + $auth ),
 		) );
 
 		return self::parse( $response );
@@ -56,12 +56,12 @@ class Ratesight_AI_Client {
 	 */
 	public static function get_insights( array $performance_data, int $timeout = 120 ): array {
 		$posts_json = json_encode( $performance_data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
-		$hmac       = hash_hmac( 'sha256', $posts_json, Ratesight_OAuth_Client::token_secret() );
+		$auth       = Ratesight_OAuth_Client::sign_request( $posts_json );
 
 		$response = wp_remote_post( self::WORKER_BASE . '/insights', array(
 			'timeout' => $timeout,
 			'headers' => array( 'Content-Type' => 'application/json' ),
-			'body'    => wp_json_encode( array( 'posts' => $performance_data, 'hmac' => $hmac ) ),
+			'body'    => wp_json_encode( array( 'posts' => $performance_data ) + $auth ),
 		) );
 
 		return self::parse( $response );
@@ -72,7 +72,7 @@ class Ratesight_AI_Client {
 	 * Returns { ok: true, recommendations: [...] }.
 	 */
 	public static function get_recommendations( array $keywords, array $existing_titles, int $timeout = 30 ): array {
-		$hmac = hash_hmac( 'sha256', wp_json_encode( $keywords ) . '|recommend', Ratesight_OAuth_Client::token_secret() );
+		$auth = Ratesight_OAuth_Client::sign_request( wp_json_encode( $keywords ) . '|recommend' );
 
 		$response = wp_remote_post( self::WORKER_BASE . '/recommend', array(
 			'timeout' => $timeout,
@@ -80,8 +80,7 @@ class Ratesight_AI_Client {
 			'body'    => wp_json_encode( array(
 				'keywords'        => $keywords,
 				'existing_titles' => $existing_titles,
-				'hmac'            => $hmac,
-			) ),
+			) + $auth ),
 		) );
 
 		return self::parse( $response );

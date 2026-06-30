@@ -147,7 +147,7 @@ class Ratesight_Publisher {
 
 		if ( ! $url || ! $host ) return;
 
-		$hmac     = hash_hmac( 'sha256', $host . '|' . $url, Ratesight_OAuth_Client::token_secret() );
+		$auth     = Ratesight_OAuth_Client::sign_request( $host . '|' . $url );
 		$response = wp_remote_post( 'https://oauth.ratesight.com/auto-submit', array(
 			'timeout'  => 8,
 			'blocking' => true, // Keep blocking so we can log the result
@@ -155,8 +155,7 @@ class Ratesight_Publisher {
 			'body'     => wp_json_encode( array(
 				'host' => $host,
 				'url'  => $url,
-				'hmac' => $hmac,
-			) ),
+			) + $auth ),
 		) );
 
 		if ( is_wp_error( $response ) ) {

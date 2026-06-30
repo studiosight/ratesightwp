@@ -79,7 +79,9 @@ class Ratesight_License {
 		}
 
 		$site_url = home_url();
-		$hmac     = hash_hmac( 'sha256', $ratesight_id . '|' . $site_url, Ratesight_OAuth_Client::token_secret() );
+		// Already carries ratesight_id (the OID), so the Worker can derive the
+		// per-site key; just sign with the active secret.
+		$hmac     = hash_hmac( 'sha256', $ratesight_id . '|' . $site_url, Ratesight_OAuth_Client::active_secret() );
 
 		$response = wp_remote_post( self::VALIDATE_URL, array(
 			'timeout' => 10,

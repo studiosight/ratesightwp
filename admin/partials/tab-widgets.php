@@ -26,6 +26,13 @@ $o = Ratesight_Options::get_all();
 		</td>
 	</tr>
 	<tr>
+		<th scope="row"><label for="rs-site-key">Site Key</label></th>
+		<td>
+			<input type="password" id="rs-site-key" name="wp_ratesight_site_key" class="regular-text" value="<?php echo esc_attr( $o['site_key'] ); ?>" autocomplete="off" spellcheck="false">
+			<p class="description">Secret key for your site, shown next to your Ratesight ID in your Ratesight dashboard. Paste it once to authenticate this site.</p>
+		</td>
+	</tr>
+	<tr>
 		<th scope="row"><label for="rs-campaign-id">Campaign ID</label></th>
 		<td>
 			<input type="text" id="rs-campaign-id" name="wp_ratesight_campaign_id" class="regular-text" value="<?php echo esc_attr( $o['campaign_id'] ); ?>">
