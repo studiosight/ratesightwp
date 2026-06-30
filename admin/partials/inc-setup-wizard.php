@@ -31,7 +31,7 @@ $steps = array(
 		'id'      => 'credentials',
 		'label'   => 'OAuth credentials configured',
 		'done'    => Ratesight_OAuth_Client::credentials_configured(),
-		'action'  => 'Edit <code>class-ratesight-oauth-client.php</code> and replace the placeholder values.',
+		'action'  => 'Bundled by default. Optionally override <code>RATESIGHT_STATE_SECRET</code> / <code>RATESIGHT_TOKEN_SECRET</code> in <code>wp-config.php</code>.',
 		'url'     => null,
 	),
 	array(
