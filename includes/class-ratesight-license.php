@@ -32,6 +32,7 @@ class Ratesight_License {
 	const LICENSE_ENFORCEMENT = false; // ← flip to true when Worker is live
 	const TRANSIENT_KEY   = 'ratesight_license_status';
 	const CACHE_DURATION  = DAY_IN_SECONDS; // 24 hours
+	const VALIDATE_URL    = 'https://oauth.ratesight.com/validate';
 
 	// -------------------------------------------------------------------------
 	// Public API
@@ -47,6 +48,16 @@ class Ratesight_License {
 		}
 
 		$cached = get_transient( self::TRANSIENT_KEY );
+		if ( 'valid' === $cached ) {
+			return true;
+		}
+		if ( 'invalid' === $cached ) {
+			return false;
+		}
+
+		// No cached result yet (or it expired) — check now and cache it.
+		// check_and_cache() fails closed on any error.
+		return self::check_and_cache();
 	}
 
 	/**

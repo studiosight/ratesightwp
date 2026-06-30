@@ -65,6 +65,24 @@ $steps = array(
 	),
 );
 
+// Per-site auth (Option C): once enabled, the Site Key is required to
+// authenticate this site to the Worker. Shown only when the feature is live so
+// existing installs aren't nagged about a step that does nothing yet.
+if ( Ratesight_OAuth_Client::PER_SITE_AUTH ) {
+	$site_key_step = array(
+		'id'     => 'site_key',
+		'label'  => 'Site Key entered',
+		'done'   => Ratesight_OAuth_Client::site_key() !== '',
+		'action' => 'Paste your Site Key on the Widgets tab (shown next to your Ratesight ID in your dashboard).',
+		'url'    => $widgets_url,
+	);
+	$insert_at = count( $steps );
+	foreach ( $steps as $i => $s ) {
+		if ( 'widget_id' === $s['id'] ) { $insert_at = $i + 1; break; }
+	}
+	array_splice( $steps, $insert_at, 0, array( $site_key_step ) );
+}
+
 $incomplete   = array_filter( $steps, static fn( $s ) => ! $s['done'] );
 $required     = array_filter( $incomplete, static fn( $s ) => empty( $s['optional'] ) );
 $all_required = empty( $required );
