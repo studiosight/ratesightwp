@@ -10,15 +10,16 @@
  *   TOKEN_SECRET — Worker signs responses; plugin verifies them.
  *                  Also used to authenticate refresh requests to the Worker.
  *
- * To configure: define these two constants in wp-config.php (above the
- * "stop editing" line), using the matching values you set as STATE_SECRET
- * and TOKEN_SECRET in your Cloudflare Worker:
+ * These ship with sensible defaults baked in, so no per-site setup is needed.
+ * A site may OPTIONALLY override either value (e.g. to use rotated secrets)
+ * by defining the matching constant in wp-config.php, above the "stop editing"
+ * line:
  *
  *   define( 'RATESIGHT_STATE_SECRET', '...' );
  *   define( 'RATESIGHT_TOKEN_SECRET', '...' );
  *
- * Keeping them in wp-config.php (not in the plugin source) keeps the secrets
- * out of version control. See .env.example in the repo root for a template.
+ * Any override must match the value set as STATE_SECRET / TOKEN_SECRET on the
+ * Cloudflare Worker. See .env.example in the repo root for a template.
  *
  * @package    Ratesight
  * @subpackage Ratesight/includes
@@ -33,37 +34,41 @@ class Ratesight_OAuth_Client {
 	const AUTH_URL    = 'https://accounts.google.com/o/oauth2/v2/auth';
 
 	// ── Configuration ─────────────────────────────────────────────────────────
-	// STATE_SECRET and TOKEN_SECRET are sensitive and must match your Cloudflare
-	// Worker secrets. They are NOT stored here — define them in wp-config.php as
-	// RATESIGHT_STATE_SECRET and RATESIGHT_TOKEN_SECRET (see state_secret() and
-	// token_secret() below). This keeps the secrets out of version control.
+	// STATE_SECRET and TOKEN_SECRET are a shared (symmetric) secret: the same
+	// value must exist here and on the Cloudflare Worker, because the plugin
+	// signs requests locally before they reach the Worker. The defaults below
+	// ship with the plugin so it works out of the box. A site MAY override
+	// either value by defining RATESIGHT_STATE_SECRET / RATESIGHT_TOKEN_SECRET
+	// in wp-config.php (see state_secret() / token_secret()); the override must
+	// match whatever you set on the Worker.
 	//
 	// CLIENT_ID_GSC and CLIENT_ID_GBP are the Google OAuth client IDs from
-	// Google Cloud Console — these are not sensitive (visible in any OAuth URL),
-	// so they remain in source.
+	// Google Cloud Console — these are not sensitive (visible in any OAuth URL).
+
+	const DEFAULT_STATE_SECRET = 'REDACTED_ROTATED_SECRET';
+	const DEFAULT_TOKEN_SECRET = 'REDACTED_ROTATED_SECRET';
 
 	const CLIENT_ID_GSC = '849914350445-a305oqjt7nckqjfsa66nkepn12hn5no5.apps.googleusercontent.com';
 	const CLIENT_ID_GBP = '745585688545-hehrvb8q8kb2j0h3radppbb2r4eucsu2.apps.googleusercontent.com'; // Same as GSC if using one project
 
 	/**
-	 * Plugin↔Worker state-signing secret. Define RATESIGHT_STATE_SECRET in
-	 * wp-config.php. Returns '' when unset so credentials_configured() reports
-	 * the plugin as not yet configured.
+	 * Plugin↔Worker state-signing secret. Uses the bundled default unless a site
+	 * overrides it by defining RATESIGHT_STATE_SECRET in wp-config.php.
 	 */
 	public static function state_secret(): string {
 		return ( defined( 'RATESIGHT_STATE_SECRET' ) && RATESIGHT_STATE_SECRET )
 			? (string) RATESIGHT_STATE_SECRET
-			: '';
+			: self::DEFAULT_STATE_SECRET;
 	}
 
 	/**
-	 * Worker response/refresh-signing secret. Define RATESIGHT_TOKEN_SECRET in
-	 * wp-config.php. Returns '' when unset.
+	 * Worker response/refresh-signing secret. Uses the bundled default unless a
+	 * site overrides it by defining RATESIGHT_TOKEN_SECRET in wp-config.php.
 	 */
 	public static function token_secret(): string {
 		return ( defined( 'RATESIGHT_TOKEN_SECRET' ) && RATESIGHT_TOKEN_SECRET )
 			? (string) RATESIGHT_TOKEN_SECRET
-			: '';
+			: self::DEFAULT_TOKEN_SECRET;
 	}
 
 	// ─────────────────────────────────────────────────────────────────────────
