@@ -148,6 +148,10 @@ class Ratesight {
 		// Fallback SEO rendering — only activates when no SEO plugin is detected.
 		add_action( 'init', array( 'Ratesight_Public', 'register_fallback_seo_hooks' ), 20 );
 
+		// Render-time "Related services" block — appended after builder content.
+		// Priority 20 so it runs after builders/shortcodes have rendered.
+		add_filter( 'the_content', array( 'Ratesight_Related_Links', 'render_block' ), 20 );
+
 		// Link Manager — invalidate cache when content changes, reapply manual links after webhook updates.
 		add_action( 'post_updated', function( int $post_id, \WP_Post $after ) {
 			if ( $after->post_type === 'ratesight_page' && $after->post_status === 'publish' ) {
@@ -182,6 +186,9 @@ class Ratesight {
 	private function define_webhook_hooks() {
 		$webhook = new Ratesight_Webhook_Handler();
 		$this->loader->add_action( 'rest_api_init', $webhook, 'register_route' );
+
+		// Related-services internal links — REST endpoints (static handlers).
+		add_action( 'rest_api_init', array( 'Ratesight_Related_Links', 'register_routes' ) );
 	}
 
 	private function define_cron_hooks() {

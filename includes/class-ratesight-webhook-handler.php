@@ -1079,6 +1079,7 @@ class Ratesight_Webhook_Handler {
 			'can_recreate'         => $can_recreate,
 			'seo_plugin'           => Ratesight_SEO_Writer::active_plugin(),
 			'update_page'          => true,
+			'related_links'        => true,
 			'runtime_404_routing'  => true,
 			'runtime_404_threshold'=> Ratesight_Runtime_404_Router::THRESHOLD,
 			'post_types'           => array(

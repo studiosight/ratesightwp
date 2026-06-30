@@ -72,6 +72,7 @@ foreach ( array(
 	'includes/class-ratesight-bulk-operations.php',
 	'includes/class-ratesight-sitemap.php',
 	'includes/class-ratesight-webhook-handler.php',
+	'includes/class-ratesight-related-links.php',
 	'includes/class-ratesight-recovery-log.php',
 	'includes/class-ratesight-redirect-health.php',
 	'includes/class-ratesight-redirect-serve-log.php',
