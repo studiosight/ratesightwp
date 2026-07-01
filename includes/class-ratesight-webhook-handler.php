@@ -389,8 +389,11 @@ class Ratesight_Webhook_Handler {
 		// post_type mapping:
 		//   "rs_page" | "page" → ratesight_page (RS custom post type)
 		//   "post"             → standard blog post
-		//   omitted            → ratesight_page (default for 404-recovery)
-		$raw_post_type = strtolower( trim( $data['post_type'] ?? 'rs_page' ) );
+		//   omitted            → standard blog post (restores the long-standing
+		//                        default; the blog-post integration omits post_type
+		//                        and must keep creating posts). RS landing pages
+		//                        MUST send post_type: "rs_page" explicitly.
+		$raw_post_type = strtolower( trim( $data['post_type'] ?? 'post' ) );
 		$post_type     = in_array( $raw_post_type, array( 'rs_page', 'page' ), true ) ? 'ratesight_page' : 'post';
 
 		// Guard: ensure ratesight_page CPT is registered before trying to use it.
@@ -1260,8 +1263,8 @@ class Ratesight_Webhook_Handler {
 			'runtime_404_routing'  => true,
 			'runtime_404_threshold'=> Ratesight_Runtime_404_Router::THRESHOLD,
 			'post_types'           => array(
-				'rs_page' => 'Ratesight page (city/service landing pages) — default if post_type omitted',
-				'post'    => 'Standard WordPress blog post',
+				'rs_page' => 'Ratesight page (city/service landing pages) — send post_type: "rs_page" explicitly',
+				'post'    => 'Standard WordPress blog post — default when post_type is omitted',
 			),
 		), 200 );
 	}

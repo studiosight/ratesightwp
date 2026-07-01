@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.13
+Stable tag: 3.2.14
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,18 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+3.2.14 — Restore blog-post default when post_type is omitted
+  - create-page defaulted an omitted post_type to rs_page; the long-standing
+    blog-post integration omits post_type and so was silently getting landing
+    pages instead of posts. Omitted post_type now maps to a standard blog post
+    again. RS landing pages must send post_type: "rs_page" explicitly. Both
+    types remain fully supported.
+
+3.2.13 — Add /inbound-log endpoint for self-service request diagnosis
+  - GET /wp-json/ratesight/v1/inbound-log returns the last ~25 requests that
+    reached WordPress on the ratesight routes, so whether an integration's
+    request arrives can be confirmed over the API without server log access.
+
 3.2.12 — Inbound request logging (diagnostic)
   - Log every inbound write (POST/PUT/PATCH/DELETE) to a ratesight/v1 route at
     the WordPress boundary via error_log: method, route, caller IP, content-type,
