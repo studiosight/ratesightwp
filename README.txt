@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.5
+Stable tag: 3.2.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,11 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+3.2.6 — De-duplicate the setup checklist
+  - In per-site mode the "OAuth credentials configured" checklist item duplicated
+    the "Site Key entered" item and still showed the old wp-config guidance.
+    Removed it in per-site mode so the checklist shows one clear auth step.
+
 3.2.5 — Auto-provision the per-site Site Key
   - The Site Key is now fetched automatically from the Worker (POST /site-key
     with the site's OID + URL, license-validated server-side) once the Ratesight

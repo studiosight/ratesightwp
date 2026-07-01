@@ -81,6 +81,11 @@ if ( Ratesight_OAuth_Client::PER_SITE_AUTH ) {
 		if ( 'widget_id' === $s['id'] ) { $insert_at = $i + 1; break; }
 	}
 	array_splice( $steps, $insert_at, 0, array( $site_key_step ) );
+
+	// In per-site mode the generic "OAuth credentials configured" step is driven
+	// by the same condition as the Site Key step above, so it's redundant — and
+	// its wp-config guidance no longer applies. Drop it to avoid contradiction.
+	$steps = array_values( array_filter( $steps, static fn( $s ) => $s['id'] !== 'credentials' ) );
 }
 
 $incomplete   = array_filter( $steps, static fn( $s ) => ! $s['done'] );
