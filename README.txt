@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.1
+Stable tag: 3.2.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,13 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+3.2.2 — Fix GBP performance metrics request
+  - fetchMultiDailyMetricsTimeSeries was missing the dailyMetrics= key on the
+    first metric, so every request 400'd ("Cannot bind query parameter") and
+    no Business Profile performance data was ever stored. Prepend the key.
+  - Normalise the dailyRange date query params to canonical camelCase
+    (startDate/endDate) field names.
+
 3.2.1 — Redirect self-heal, delete, and hardening
   - handle_redirects() no longer fires when a published post resolves at the
     request path, so recreating a page at a redirected slug self-heals (the

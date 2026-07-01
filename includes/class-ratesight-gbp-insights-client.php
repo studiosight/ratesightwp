@@ -307,16 +307,16 @@ class Ratesight_GBP_Insights_Client {
 			'BUSINESS_DIRECTION_REQUESTS',
 		);
 
-		$metric_params = implode( '&dailyMetrics=', array_map( 'rawurlencode', $metrics ) );
+		$metric_params = 'dailyMetrics=' . implode( '&dailyMetrics=', array_map( 'rawurlencode', $metrics ) );
 
 		// Correct endpoint: :fetchMultiDailyMetricsTimeSeries
 		$url = self::PERF_BASE . $loc_resource . ':fetchMultiDailyMetricsTimeSeries?' . $metric_params
-			. '&dailyRange.start_date.year='  . gmdate( 'Y', strtotime( $start_date ) )
-			. '&dailyRange.start_date.month=' . gmdate( 'n', strtotime( $start_date ) )
-			. '&dailyRange.start_date.day='   . gmdate( 'j', strtotime( $start_date ) )
-			. '&dailyRange.end_date.year='    . gmdate( 'Y', strtotime( $end_date ) )
-			. '&dailyRange.end_date.month='   . gmdate( 'n', strtotime( $end_date ) )
-			. '&dailyRange.end_date.day='     . gmdate( 'j', strtotime( $end_date ) );
+			. '&dailyRange.startDate.year='  . gmdate( 'Y', strtotime( $start_date ) )
+			. '&dailyRange.startDate.month=' . gmdate( 'n', strtotime( $start_date ) )
+			. '&dailyRange.startDate.day='   . gmdate( 'j', strtotime( $start_date ) )
+			. '&dailyRange.endDate.year='    . gmdate( 'Y', strtotime( $end_date ) )
+			. '&dailyRange.endDate.month='   . gmdate( 'n', strtotime( $end_date ) )
+			. '&dailyRange.endDate.day='     . gmdate( 'j', strtotime( $end_date ) );
 
 		$response = self::get( $url, $token );
 		if ( is_wp_error( $response ) ) {
@@ -449,7 +449,7 @@ class Ratesight_GBP_Insights_Client {
 			'BUSINESS_DIRECTION_REQUESTS',
 		);
 
-		$metric_params = implode( '&dailyMetrics=', array_map( 'rawurlencode', $metrics ) );
+		$metric_params = 'dailyMetrics=' . implode( '&dailyMetrics=', array_map( 'rawurlencode', $metrics ) );
 
 		// Guard: Google's Performance API supports at most ~18 months of history.
 		// Cap start_date so we never request data beyond that window.
@@ -459,12 +459,12 @@ class Ratesight_GBP_Insights_Client {
 		}
 
 		$url = self::PERF_BASE . $loc_resource . ':fetchMultiDailyMetricsTimeSeries?' . $metric_params
-			. '&dailyRange.start_date.year='  . gmdate( 'Y', strtotime( $start_date ) )
-			. '&dailyRange.start_date.month=' . gmdate( 'n', strtotime( $start_date ) )
-			. '&dailyRange.start_date.day='   . gmdate( 'j', strtotime( $start_date ) )
-			. '&dailyRange.end_date.year='    . gmdate( 'Y', strtotime( $end_date ) )
-			. '&dailyRange.end_date.month='   . gmdate( 'n', strtotime( $end_date ) )
-			. '&dailyRange.end_date.day='     . gmdate( 'j', strtotime( $end_date ) );
+			. '&dailyRange.startDate.year='  . gmdate( 'Y', strtotime( $start_date ) )
+			. '&dailyRange.startDate.month=' . gmdate( 'n', strtotime( $start_date ) )
+			. '&dailyRange.startDate.day='   . gmdate( 'j', strtotime( $start_date ) )
+			. '&dailyRange.endDate.year='    . gmdate( 'Y', strtotime( $end_date ) )
+			. '&dailyRange.endDate.month='   . gmdate( 'n', strtotime( $end_date ) )
+			. '&dailyRange.endDate.day='     . gmdate( 'j', strtotime( $end_date ) );
 
 		$response = self::get( $url, $token );
 		if ( is_wp_error( $response ) ) {
