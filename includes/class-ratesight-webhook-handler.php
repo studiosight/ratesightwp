@@ -119,7 +119,29 @@ class Ratesight_Webhook_Handler {
 		if ( strpos( $route, '/ratesight/v1/' ) !== 0 ) {
 			return $result;
 		}
-		$body = $request->get_body();
+
+		$method = $request->get_method();
+		$body   = $request->get_body();
+
+		// Diagnostic: record every inbound write at the WordPress boundary, so a
+		// request that reaches WP is ALWAYS visible — even if it fails before the
+		// normal activity log, or if a security layer would otherwise hide it.
+		// If this line never appears when the integration sends, the request is
+		// being blocked before WordPress (nginx / WAF / wrong URL), not here.
+		if ( in_array( $method, array( 'POST', 'PUT', 'PATCH', 'DELETE' ), true ) ) {
+			$utf8_ok = function_exists( 'mb_check_encoding' ) && mb_check_encoding( (string) $body, 'UTF-8' );
+			error_log( sprintf(  // phpcs:ignore
+				'[Ratesight] inbound %s %s ip=%s ct=%s bytes=%d utf8=%s',
+				$method,
+				$route,
+				(string) ( $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? '?' ),  // phpcs:ignore
+				(string) ( $request->get_header( 'content_type' ) ?: '?' ),
+				strlen( (string) $body ),
+				$utf8_ok ? 'ok' : 'bad'
+			) );
+		}
+
+		// Repair non-UTF-8 bodies so WP doesn't reject them with rest_invalid_json.
 		if ( $body !== '' && function_exists( 'mb_check_encoding' ) && ! mb_check_encoding( $body, 'UTF-8' ) ) {
 			$request->set_body( mb_convert_encoding( $body, 'UTF-8', 'Windows-1252' ) );
 		}

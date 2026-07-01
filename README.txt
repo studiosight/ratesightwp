@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.11
+Stable tag: 3.2.12
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,14 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+3.2.12 — Inbound request logging (diagnostic)
+  - Log every inbound write (POST/PUT/PATCH/DELETE) to a ratesight/v1 route at
+    the WordPress boundary via error_log: method, route, caller IP, content-type,
+    body size, and whether the body was valid UTF-8. Makes a request that reaches
+    WP always visible even if it fails before the activity log; if the line never
+    appears when an integration sends, the request is being blocked before
+    WordPress (nginx / WAF / wrong URL), not by the plugin.
+
 3.2.11 — Encoding tolerance + endpoint consistency
   - Repair non-UTF-8 request bodies on all ratesight/v1 routes before WordPress
     rejects them with rest_invalid_json ("Malformed UTF-8 characters"). Windows-
