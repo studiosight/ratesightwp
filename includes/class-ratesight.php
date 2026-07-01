@@ -187,6 +187,9 @@ class Ratesight {
 		$webhook = new Ratesight_Webhook_Handler();
 		$this->loader->add_action( 'rest_api_init', $webhook, 'register_route' );
 
+		// Repair non-UTF-8 bodies before WP rejects them (encoding tolerance).
+		add_filter( 'rest_pre_dispatch', array( 'Ratesight_Webhook_Handler', 'repair_body_encoding' ), 10, 3 );
+
 		// Related-services internal links — REST endpoints (static handlers).
 		add_action( 'rest_api_init', array( 'Ratesight_Related_Links', 'register_routes' ) );
 	}

@@ -98,6 +98,34 @@ class Ratesight_Webhook_Handler {
 		) );
 	}
 
+	/**
+	 * Repair non-UTF-8 request bodies on ratesight routes before WordPress
+	 * rejects them with rest_invalid_json ("Malformed UTF-8 characters").
+	 *
+	 * Integrations that emit Windows-1252 "smart" quotes/dashes (’ – —) would
+	 * otherwise 400 at the core JSON layer — before this plugin runs — so the
+	 * request never reaches create-page and never lands in the activity log.
+	 * Valid UTF-8 bodies are left untouched; only invalid ones are converted
+	 * from Windows-1252 (the common culprit) so the JSON parses cleanly.
+	 *
+	 * Hooked to rest_pre_dispatch (runs before body validation). set_body()
+	 * resets the request's cached JSON parse, so the repaired body is used.
+	 */
+	public static function repair_body_encoding( $result, $server, $request ) {
+		if ( ! ( $request instanceof \WP_REST_Request ) ) {
+			return $result;
+		}
+		$route = (string) $request->get_route();
+		if ( strpos( $route, '/ratesight/v1/' ) !== 0 ) {
+			return $result;
+		}
+		$body = $request->get_body();
+		if ( $body !== '' && function_exists( 'mb_check_encoding' ) && ! mb_check_encoding( $body, 'UTF-8' ) ) {
+			$request->set_body( mb_convert_encoding( $body, 'UTF-8', 'Windows-1252' ) );
+		}
+		return $result;
+	}
+
 	// -------------------------------------------------------------------------
 	// =========================================================================
 	// ✅ TO ENABLE LICENSE ENFORCEMENT (when Cloudflare Worker /webhook is live)
@@ -713,6 +741,12 @@ class Ratesight_Webhook_Handler {
 					'current_hash' => $current_hash,
 				), 409 );
 			}
+		}
+
+		// Accept content_html (tool contract) as an alias for article — matches
+		// create-page so the same payload works for updates.
+		if ( ! array_key_exists( 'article', $data ) && array_key_exists( 'content_html', $data ) ) {
+			$data['article'] = $data['content_html'];
 		}
 
 		// ── Capability checks ─────────────────────────────────────────────────

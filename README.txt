@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.10
+Stable tag: 3.2.11
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,14 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+3.2.11 — Encoding tolerance + endpoint consistency
+  - Repair non-UTF-8 request bodies on all ratesight/v1 routes before WordPress
+    rejects them with rest_invalid_json ("Malformed UTF-8 characters"). Windows-
+    1252 "smart" quotes/dashes from integrations no longer 400 at the core layer
+    (which happened before the plugin ran, so the request never logged).
+  - /update-page now accepts content_html (the tool contract) as an alias for
+    article, matching /create-page — a content_html update was silently ignored.
+
 3.2.10 — Fix: no-status posts stuck as draft (ignored Final Post Status)
   - create-page defaulted the status to 'draft' when the payload omitted it.
     The deferred publisher only falls back to the Final Post Status / Reference
