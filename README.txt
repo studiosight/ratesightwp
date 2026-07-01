@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.7
+Stable tag: 3.2.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,13 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+3.2.8 — Fix: create-page silently rejected on signature mismatch
+  - check_auth hard-failed create-page with 403 (before any activity-log entry)
+    when an incoming X-Ratesight-Signature didn't match ratesight_webhook_secret.
+    Content/read endpoints now accept the request when LICENSE_ENFORCEMENT is off
+    (restoring the prior behaviour). Redirect mutations keep the strict signed
+    check (check_auth_signed).
+
 3.2.7 — Simplify to OID-only authentication
   - Removed the Site Key field, the auto-provision exchange, and the per-site /
     shared-secret setup steps. The site now authenticates to the Worker by its

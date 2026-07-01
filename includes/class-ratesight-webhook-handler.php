@@ -127,28 +127,13 @@ class Ratesight_Webhook_Handler {
 	);
 
 	public function check_auth( \WP_REST_Request $request ): bool|WP_Error {
-		// ── Optional HMAC signature check ────────────────────────────────────
-		// Only validated when the sender includes X-Ratesight-Signature header.
-		// Requests WITHOUT the header are allowed through (backwards compatible).
-		// To enforce signatures, update the sending integration to include the
-		// header — configure the secret in Settings → Webhook.
-		$secret     = get_option( 'ratesight_webhook_secret', '' );
-		$sig_header = $request->get_header( 'x_ratesight_signature' ) ?? '';
-
-		if ( $secret !== '' && $sig_header !== '' ) {
-			$raw_body = $request->get_body();
-			$expected = 'sha256=' . hash_hmac( 'sha256', $raw_body, $secret );
-
-			if ( ! hash_equals( $expected, $sig_header ) ) {
-				return new \WP_Error(
-					'rs_bad_signature',
-					'Forbidden: invalid X-Ratesight-Signature.',
-					array( 'status' => 403 )
-				);
-			}
-		}
-
-		// ── IP allowlist (only when LICENSE_ENFORCEMENT = true) ──────────────
+		// Content + read endpoints (create/update page, capabilities, redirect
+		// listing). In production these are gated by the Worker's license + IP
+		// allowlist (LICENSE_ENFORCEMENT); when it's off they accept the request —
+		// the long-standing behaviour. A mismatched *optional* X-Ratesight-
+		// Signature must NOT hard-block create-page: that silently dropped posts
+		// (rejected before any activity-log entry). Redirect *mutations* still
+		// require a valid signature via the stricter check_auth_signed().
 		if ( ! self::LICENSE_ENFORCEMENT ) {
 			return true;
 		}
