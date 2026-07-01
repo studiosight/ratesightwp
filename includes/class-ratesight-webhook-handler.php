@@ -856,6 +856,13 @@ class Ratesight_Webhook_Handler {
 	 */
 	public function handle_redirect( \WP_REST_Request $request ): \WP_REST_Response {
 		$data    = $request->get_json_params() ?: $request->get_body_params();
+
+		// Delete shape: { from, delete:true } — delegate to the DELETE handler so
+		// callers that can't send an HTTP DELETE can still remove a redirect.
+		if ( ! empty( $data['delete'] ) ) {
+			return $this->handle_redirect_delete( $request );
+		}
+
 		$from    = sanitize_text_field( $data['from'] ?? '' );
 		$to      = sanitize_text_field( $data['to']   ?? '' );
 		$code    = in_array( (int) ( $data['code'] ?? 301 ), array( 301, 302 ), true ) ? (int) $data['code'] : 301;
@@ -1074,6 +1081,7 @@ class Ratesight_Webhook_Handler {
 		return new \WP_REST_Response( array(
 			'create_page'          => true,
 			'set_redirect'         => true,
+			'delete_redirect'      => true,
 			'redirect_method'      => $redirect_method,
 			'page_builder'         => $page_builder,
 			'can_recreate'         => $can_recreate,

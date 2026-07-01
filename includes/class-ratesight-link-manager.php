@@ -116,6 +116,14 @@ class Ratesight_Link_Manager {
 
 		if ( ! $entry ) return;
 
+		// A recovery redirect must never shadow a real page. If a published post
+		// now resolves at this exact path (e.g. the page was recreated), let
+		// WordPress render it instead of redirecting — the redirect self-heals.
+		$live_id = url_to_postid( home_url( $path ) );
+		if ( $live_id && get_post_status( $live_id ) === 'publish' ) {
+			return;
+		}
+
 		$redirect_to = $entry['redirect_to'] ?? '';
 		$destination = $redirect_to ? $redirect_to : home_url( '/' );
 		$code        = in_array( (int) ( $entry['code'] ?? 301 ), array( 301, 302 ), true ) ? (int) $entry['code'] : 301;
