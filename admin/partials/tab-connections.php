@@ -44,7 +44,7 @@ $gsc_selection = Ratesight_GSC_Client::get_selection();
 if ( ! Ratesight_OAuth_Client::credentials_configured() ) :
 ?>
 <div class="notice notice-error inline" style="margin:0 0 16px;">
-	<p><strong>OAuth credentials are not configured.</strong> Define <code>RATESIGHT_STATE_SECRET</code> and <code>RATESIGHT_TOKEN_SECRET</code> in your site's <code>wp-config.php</code> (see <code>.env.example</code>) — they must match the values on the Ratesight OAuth Worker. Until then, Search Console and Business Profile connections can't be established or refreshed.</p>
+	<p><strong>This site isn't authenticated yet.</strong> Paste your <strong>Site Key</strong> on the <a href="<?php echo esc_url( admin_url( 'admin.php?page=ratesight&tab=widgets' ) ); ?>">Widgets tab</a> (it's shown next to your Ratesight ID in your dashboard). Until then, Search Console and Business Profile can't connect or refresh.</p>
 </div>
 <?php return; endif;
 

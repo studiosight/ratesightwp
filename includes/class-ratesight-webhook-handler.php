@@ -70,6 +70,14 @@ class Ratesight_Webhook_Handler {
 			'permission_callback' => array( $this, 'check_auth' ),
 		) );
 
+		// Live redirect set — the current explicit redirect map, so an external
+		// audit can read real state (not a local log) and stay idempotent.
+		register_rest_route( 'ratesight/v1', '/redirects', array(
+			'methods'             => \WP_REST_Server::READABLE,
+			'callback'            => array( $this, 'handle_redirects_list' ),
+			'permission_callback' => array( $this, 'check_auth' ),
+		) );
+
 		// Redirect serve log — all served redirects (explicit + fuzzy) since a timestamp.
 		register_rest_route( 'ratesight/v1', '/redirects-log', array(
 			'methods'             => \WP_REST_Server::READABLE,
@@ -1062,6 +1070,27 @@ class Ratesight_Webhook_Handler {
 	 * Returns every redirect served (explicit + fuzzy) since the given ISO timestamp.
 	 * Omit since= to get the last {limit} entries (default 100).
 	 */
+	/**
+	 * GET /wp-json/ratesight/v1/redirects
+	 * Returns the current explicit redirect map so an external audit can read
+	 * live state and stay idempotent (rather than replaying a local set-only log).
+	 */
+	public function handle_redirects_list( \WP_REST_Request $request ): \WP_REST_Response {
+		$map       = get_option( 'ratesight_rs_redirects', array() );
+		$redirects = array();
+		foreach ( (array) $map as $from => $entry ) {
+			$redirects[] = array(
+				'from' => (string) $from,
+				'to'   => (string) ( $entry['redirect_to'] ?? '' ),
+				'code' => (int) ( $entry['code'] ?? 301 ),
+			);
+		}
+		return new \WP_REST_Response( array(
+			'count'     => count( $redirects ),
+			'redirects' => $redirects,
+		), 200 );
+	}
+
 	public function handle_redirects_log( \WP_REST_Request $request ): \WP_REST_Response {
 		$since   = sanitize_text_field( $request->get_param( 'since' ) ?? '' );
 		$limit   = min( absint( $request->get_param( 'limit' ) ?: 100 ), 1000 );
@@ -1124,6 +1153,7 @@ class Ratesight_Webhook_Handler {
 			'create_page'          => true,
 			'set_redirect'         => true,
 			'delete_redirect'      => true,
+			'list_redirects'       => true,
 			'redirect_method'      => $redirect_method,
 			'page_builder'         => $page_builder,
 			'can_recreate'         => $can_recreate,

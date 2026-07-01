@@ -81,8 +81,10 @@ class Ratesight_OAuth_Client {
 	// plugin then behaves exactly as before (shared-secret signing, no OID).
 	//
 	// Flip to true only once the Worker derives-and-verifies per-OID keys.
+	// Enabled: the Worker (oauth.ratesight.com) has MASTER_KEY bound and
+	// rsVerify()/rsParseState() derive the per-site key from the OID.
 
-	const PER_SITE_AUTH = false;
+	const PER_SITE_AUTH = true;
 
 	/** The per-site Site Key the customer pastes from their Ratesight dashboard. */
 	public static function site_key(): string {
@@ -129,10 +131,17 @@ class Ratesight_OAuth_Client {
 	);
 
 	public static function credentials_configured() {
-		return self::state_secret()   !== ''
-			&& self::token_secret()   !== ''
-			&& self::CLIENT_ID_GSC !== 'REPLACE_WITH_GSC_CLIENT_ID'
-			&& self::CLIENT_ID_GBP !== 'REPLACE_WITH_GBP_CLIENT_ID';
+		if ( self::CLIENT_ID_GSC === 'REPLACE_WITH_GSC_CLIENT_ID'
+			|| self::CLIENT_ID_GBP === 'REPLACE_WITH_GBP_CLIENT_ID' ) {
+			return false;
+		}
+		// Per-site auth: a pasted Site Key is sufficient — the Worker derives and
+		// verifies the key from the OID, so no shared secret is needed.
+		if ( self::per_site_active() ) {
+			return true;
+		}
+		// Legacy shared-secret mode (STATE/TOKEN secret via wp-config).
+		return self::state_secret() !== '' && self::token_secret() !== '';
 	}
 
 	// -------------------------------------------------------------------------

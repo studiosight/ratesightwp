@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.3
+Stable tag: 3.2.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,15 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+3.2.4 — Enable per-site auth; add live redirect-list endpoint
+  - Turn on per-site (OID-bound) auth: each site authenticates to the Worker
+    with its own Site Key (pasted in the admin) instead of a shared secret.
+    No wp-config needed. credentials_configured() now treats a valid Site Key
+    as sufficient, and the setup copy points to the Site Key field.
+  - Add GET /wp-json/ratesight/v1/redirects returning the current redirect map
+    (capability: list_redirects) so external audits can read live state and
+    stay idempotent instead of replaying a local set-only log.
+
 3.2.3 — Correct the OAuth-credentials setup copy
   - The setup checklist and Connections tab still told admins the secrets were
     "bundled by default" / to edit REPLACE_WITH_ placeholders in the plugin
