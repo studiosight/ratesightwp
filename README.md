@@ -48,6 +48,7 @@ The settings are organized into four tabs:
 | --- | --- |
 | `[rs_leave_reviews]` | A five-star link to your Ratesight review form and a carousel of recent reviews. Suited to thank-you and landing pages. |
 | `[rs_all_reviews]` | Loads the full Ratesight reviews widget. Intended for your Reviews page. |
+| `[rs_jobs]` | Embeds your WorkSight jobs board. Requires a Code ID to be set in the plugin settings. |
 
 ## Webhook
 
