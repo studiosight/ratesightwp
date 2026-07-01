@@ -44,7 +44,7 @@ $gsc_selection = Ratesight_GSC_Client::get_selection();
 if ( ! Ratesight_OAuth_Client::credentials_configured() ) :
 ?>
 <div class="notice notice-error inline" style="margin:0 0 16px;">
-	<p><strong>This site isn't authenticated yet.</strong> Make sure your <strong>Ratesight ID</strong> is set on the <a href="<?php echo esc_url( admin_url( 'admin.php?page=ratesight&tab=widgets' ) ); ?>">Widgets tab</a> — the site key is provisioned automatically once it is (your license must be active). Until then, Search Console and Business Profile can't connect or refresh.</p>
+	<p><strong>This site isn't authenticated yet.</strong> Enter your <strong>Ratesight ID</strong> on the <a href="<?php echo esc_url( admin_url( 'admin.php?page=ratesight&tab=widgets' ) ); ?>">Widgets tab</a> — that's all that's needed to connect Search Console and Business Profile.</p>
 </div>
 <?php return; endif;
 

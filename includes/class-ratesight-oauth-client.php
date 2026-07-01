@@ -29,20 +29,20 @@ defined( 'ABSPATH' ) || die;
 
 class Ratesight_OAuth_Client {
 
-	const PROXY_URL    = 'https://oauth.ratesight.com/callback';
-	const REFRESH_URL  = 'https://oauth.ratesight.com/refresh';
-	const SITE_KEY_URL = 'https://oauth.ratesight.com/site-key';
-	const AUTH_URL     = 'https://accounts.google.com/o/oauth2/v2/auth';
+	const PROXY_URL   = 'https://oauth.ratesight.com/callback';
+	const REFRESH_URL = 'https://oauth.ratesight.com/refresh';
+	const AUTH_URL    = 'https://accounts.google.com/o/oauth2/v2/auth';
 
 	// ── Configuration ─────────────────────────────────────────────────────────
-	// STATE_SECRET and TOKEN_SECRET are a shared (symmetric) secret: the same
-	// value must exist on the site and on the Cloudflare Worker, because the
-	// plugin signs requests locally before they reach the Worker. There is no
-	// bundled default — each deployment MUST define RATESIGHT_STATE_SECRET and
-	// RATESIGHT_TOKEN_SECRET in wp-config.php (see state_secret() /
-	// token_secret()), and the values must match whatever is set on the Worker.
-	// Until both are defined, credentials_configured() returns false and the
-	// OAuth features stay disabled.
+	// The plugin authenticates to the Worker by its OID (Ratesight ID) alone —
+	// every request carries the OID and the Worker trusts known accounts (its
+	// ALLOWED_OIDS allowlist), revoking one via REVOKED_OIDS. No shared secret or
+	// per-site key is stored on the site.
+	//
+	// STATE_SECRET / TOKEN_SECRET remain OPTIONAL: a site may define
+	// RATESIGHT_STATE_SECRET / RATESIGHT_TOKEN_SECRET in wp-config.php to also
+	// HMAC-sign requests (matching the Worker). Left unset — the normal case —
+	// requests are authenticated by OID only.
 	//
 	// CLIENT_ID_GSC and CLIENT_ID_GBP are the Google OAuth client IDs from
 	// Google Cloud Console — these are not sensitive (visible in any OAuth URL).
@@ -72,103 +72,33 @@ class Ratesight_OAuth_Client {
 			: '';
 	}
 
-	// ── Per-site authentication (Option C) ────────────────────────────────────
-	// When PER_SITE_AUTH is on AND the site has pasted its Site Key, every Worker
-	// request is signed with that per-site key instead of the shared secret, and
-	// carries the site's OID (Ratesight ID). The Worker re-derives the expected
-	// key from the OID — siteKey = HMAC( master_key, oid ) — so it can both
-	// VERIFY the request and ATTRIBUTE it to a specific site, with no per-customer
-	// database. Until the Worker supports this, leave PER_SITE_AUTH = false; the
-	// plugin then behaves exactly as before (shared-secret signing, no OID).
-	//
-	// Flip to true only once the Worker derives-and-verifies per-OID keys.
-	// Enabled: the Worker (oauth.ratesight.com) has MASTER_KEY bound and
-	// rsVerify()/rsParseState() derive the per-site key from the OID.
+	// ── Authentication (OID-only) ─────────────────────────────────────────────
+	// The site presents its OID (Ratesight ID) on every Worker request. The
+	// Worker trusts known OIDs (ALLOWED_OIDS) and can revoke one (REVOKED_OIDS).
+	// No per-site key or shared secret is stored here.
 
-	const PER_SITE_AUTH = true;
-
-	/** The per-site Site Key. Normally auto-provisioned; may be set manually. */
-	public static function site_key(): string {
-		return trim( (string) Ratesight_Options::get( 'site_key' ) );
+	/** The site's OID (Ratesight ID) — the identity presented to the Worker. */
+	public static function oid(): string {
+		return trim( (string) Ratesight_Options::get( 'code_id' ) );
 	}
 
 	/**
-	 * Auto-provision the per-site key from the Worker when it's missing, so the
-	 * customer never has to paste anything. The Worker validates this site's
-	 * license (OID + site_url) and returns siteKey = HMAC( master_key, oid ).
-	 *
-	 * Rate-limited via a transient so a missing endpoint or an unlicensed site
-	 * doesn't POST on every admin load. Safe no-op until the OID is set.
-	 *
-	 * @return bool True if a Site Key is present after the call.
-	 */
-	public static function bootstrap_site_key(): bool {
-		if ( self::site_key() !== '' ) {
-			return true; // already provisioned (or manually set)
-		}
-
-		$oid = trim( (string) Ratesight_Options::get( 'code_id' ) );
-		if ( $oid === '' ) {
-			return false; // no Ratesight ID yet — nothing to exchange
-		}
-
-		// Back off between attempts so failures don't hammer the Worker.
-		if ( get_transient( 'ratesight_site_key_attempt' ) ) {
-			return false;
-		}
-		set_transient( 'ratesight_site_key_attempt', 1, 10 * MINUTE_IN_SECONDS );
-
-		$response = wp_remote_post( self::SITE_KEY_URL, array(
-			'timeout' => 15,
-			'headers' => array( 'Content-Type' => 'application/json' ),
-			'body'    => wp_json_encode( array(
-				'oid'      => $oid,
-				'site_url' => home_url(),
-			) ),
-		) );
-
-		if ( is_wp_error( $response ) ) {
-			return false;
-		}
-
-		$body = json_decode( wp_remote_retrieve_body( $response ), true );
-		$key  = is_array( $body ) ? trim( (string) ( $body['site_key'] ?? '' ) ) : '';
-		if ( $key === '' ) {
-			return false;
-		}
-
-		update_option( Ratesight_Options::option_name( 'site_key' ), $key, false );
-		delete_transient( 'ratesight_site_key_attempt' );
-		return true;
-	}
-
-	/** True when per-site auth is enabled and a Site Key is present. */
-	public static function per_site_active(): bool {
-		return self::PER_SITE_AUTH && self::site_key() !== '';
-	}
-
-	/**
-	 * The secret used to sign/verify Worker traffic: the per-site key when
-	 * active, otherwise the legacy shared secret.
+	 * Optional shared secret used to HMAC-sign Worker traffic. Empty in the
+	 * normal OID-only mode (no wp-config secret defined).
 	 */
 	public static function active_secret(): string {
-		return self::per_site_active() ? self::site_key() : self::token_secret();
+		return self::token_secret();
 	}
 
-	/**
-	 * Identity fields to merge into a Worker request so it can pick the right
-	 * key. Empty in legacy mode (preserves the exact pre-Option-C request shape).
-	 */
+	/** Identity fields merged into every Worker request so it can attribute + trust it. */
 	public static function auth_meta(): array {
-		return self::per_site_active()
-			? array( 'oid' => (string) Ratesight_Options::get( 'code_id' ) )
-			: array();
+		$oid = self::oid();
+		return $oid !== '' ? array( 'oid' => $oid ) : array();
 	}
 
 	/**
-	 * Sign a message for an outbound Worker request and return the fields to
-	 * merge into the JSON body / query args: { hmac } in legacy mode, or
-	 * { hmac, oid } when per-site auth is active.
+	 * Sign a message for an outbound Worker request. Always carries { oid }; also
+	 * adds { hmac } when the optional shared secret is configured.
 	 */
 	public static function sign_request( string $message ): array {
 		return array( 'hmac' => hash_hmac( 'sha256', $message, self::active_secret() ) ) + self::auth_meta();
@@ -186,13 +116,9 @@ class Ratesight_OAuth_Client {
 			|| self::CLIENT_ID_GBP === 'REPLACE_WITH_GBP_CLIENT_ID' ) {
 			return false;
 		}
-		// Per-site auth: a pasted Site Key is sufficient — the Worker derives and
-		// verifies the key from the OID, so no shared secret is needed.
-		if ( self::per_site_active() ) {
-			return true;
-		}
-		// Legacy shared-secret mode (STATE/TOKEN secret via wp-config).
-		return self::state_secret() !== '' && self::token_secret() !== '';
+		// OID-only: the Ratesight ID is the credential. (A site may additionally
+		// define the optional shared secret, but it is not required.)
+		return self::oid() !== '';
 	}
 
 	// -------------------------------------------------------------------------
@@ -358,9 +284,9 @@ class Ratesight_OAuth_Client {
 			'service'  => $service,
 			'site_url' => home_url(),
 			'nonce'    => wp_generate_password( 16, false ),
-		) + self::auth_meta(); // adds 'oid' when per-site auth is active, so the Worker can derive the key
+		) + self::auth_meta(); // carries 'oid' so the Worker can attribute + trust the request
 		$data_b64 = rtrim( strtr( base64_encode( wp_json_encode( $payload ) ), '+/', '-_' ), '=' );
-		$sig      = hash_hmac( 'sha256', $data_b64, self::per_site_active() ? self::site_key() : self::state_secret() );
+		$sig      = hash_hmac( 'sha256', $data_b64, self::state_secret() );
 		return $data_b64 . '.' . $sig;
 	}
 
@@ -376,10 +302,16 @@ class Ratesight_OAuth_Client {
 
 		$data_b64 = substr( $raw, 0, $dot );
 		$sig      = substr( $raw, $dot + 1 );
-		$expected = hash_hmac( 'sha256', $data_b64, self::active_secret() );
 
-		if ( ! hash_equals( $expected, $sig ) ) {
-			return new \WP_Error( 'rs_bad_sig', 'Worker payload signature verification failed.' );
+		// Verify the Worker's signature only when the optional shared secret is
+		// configured. In OID-only mode there's no shared secret to verify against,
+		// so we rely on TLS for transport integrity and decode the payload directly.
+		$secret = self::active_secret();
+		if ( $secret !== '' ) {
+			$expected = hash_hmac( 'sha256', $data_b64, $secret );
+			if ( ! hash_equals( $expected, $sig ) ) {
+				return new \WP_Error( 'rs_bad_sig', 'Worker payload signature verification failed.' );
+			}
 		}
 
 		$json = base64_decode( strtr( $data_b64, '-_', '+/' ) );

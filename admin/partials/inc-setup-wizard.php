@@ -28,17 +28,10 @@ $settings_url    = admin_url( 'admin.php?page=ratesight&tab=seo-pages' );
 // Evaluate each step.
 $steps = array(
 	array(
-		'id'      => 'credentials',
-		'label'   => 'OAuth credentials configured',
-		'done'    => Ratesight_OAuth_Client::credentials_configured(),
-		'action'  => 'Define <code>RATESIGHT_STATE_SECRET</code> and <code>RATESIGHT_TOKEN_SECRET</code> in <code>wp-config.php</code> (they must match the values on the Ratesight OAuth Worker). See <code>.env.example</code>.',
-		'url'     => null,
-	),
-	array(
 		'id'      => 'widget_id',
 		'label'   => 'Ratesight ID entered',
 		'done'    => ! empty( Ratesight_Options::get( 'code_id' ) ),
-		'action'  => 'Enter your Ratesight ID on the Widgets tab.',
+		'action'  => 'Enter your Ratesight ID on the Widgets tab — this authenticates the site.',
 		'url'     => $widgets_url,
 	),
 	array(
@@ -64,29 +57,6 @@ $steps = array(
 		'optional' => true,
 	),
 );
-
-// Per-site auth (Option C): once enabled, the Site Key is required to
-// authenticate this site to the Worker. Shown only when the feature is live so
-// existing installs aren't nagged about a step that does nothing yet.
-if ( Ratesight_OAuth_Client::PER_SITE_AUTH ) {
-	$site_key_step = array(
-		'id'     => 'site_key',
-		'label'  => 'Site Key entered',
-		'done'   => Ratesight_OAuth_Client::site_key() !== '',
-		'action' => 'Provisioned automatically once your Ratesight ID is saved and your license is active. No action needed unless support asks.',
-		'url'    => $widgets_url,
-	);
-	$insert_at = count( $steps );
-	foreach ( $steps as $i => $s ) {
-		if ( 'widget_id' === $s['id'] ) { $insert_at = $i + 1; break; }
-	}
-	array_splice( $steps, $insert_at, 0, array( $site_key_step ) );
-
-	// In per-site mode the generic "OAuth credentials configured" step is driven
-	// by the same condition as the Site Key step above, so it's redundant — and
-	// its wp-config guidance no longer applies. Drop it to avoid contradiction.
-	$steps = array_values( array_filter( $steps, static fn( $s ) => $s['id'] !== 'credentials' ) );
-}
 
 $incomplete   = array_filter( $steps, static fn( $s ) => ! $s['done'] );
 $required     = array_filter( $incomplete, static fn( $s ) => empty( $s['optional'] ) );

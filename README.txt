@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.6
+Stable tag: 3.2.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,14 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+3.2.7 — Simplify to OID-only authentication
+  - Removed the Site Key field, the auto-provision exchange, and the per-site /
+    shared-secret setup steps. The site now authenticates to the Worker by its
+    OID (Ratesight ID) alone — enter the Ratesight ID and it connects. The Worker
+    trusts known OIDs (ALLOWED_OIDS) and revokes via REVOKED_OIDS.
+  - RATESIGHT_STATE_SECRET / RATESIGHT_TOKEN_SECRET remain optional HMAC signing.
+  - Setup checklist collapses to a single "Ratesight ID entered" auth step.
+
 3.2.6 — De-duplicate the setup checklist
   - In per-site mode the "OAuth credentials configured" checklist item duplicated
     the "Site Key entered" item and still showed the old wp-config guidance.

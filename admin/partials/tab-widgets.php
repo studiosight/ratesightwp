@@ -22,14 +22,7 @@ $o = Ratesight_Options::get_all();
 		<th scope="row"><label for="rs-code-id">Ratesight ID</label></th>
 		<td>
 			<input type="text" id="rs-code-id" name="wp_ratesight_code_id" class="regular-text" value="<?php echo esc_attr( $o['code_id'] ); ?>">
-			<p class="description">Your unique Ratesight account identifier (OID).</p>
-		</td>
-	</tr>
-	<tr>
-		<th scope="row"><label for="rs-site-key">Site Key</label></th>
-		<td>
-			<input type="password" id="rs-site-key" name="wp_ratesight_site_key" class="regular-text" value="<?php echo esc_attr( $o['site_key'] ); ?>" autocomplete="off" spellcheck="false">
-			<p class="description">Configured automatically once your Ratesight ID is saved and your license is active — you normally don't need to touch this. Only paste a key manually if Ratesight support asks you to.</p>
+			<p class="description">Your unique Ratesight account identifier (OID). This authenticates the site to Ratesight — no other key needed.</p>
 		</td>
 	</tr>
 	<tr>
