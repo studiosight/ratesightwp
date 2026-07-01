@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.0
+Stable tag: 3.2.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,16 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+3.2.1 — Redirect self-heal, delete, and hardening
+  - handle_redirects() no longer fires when a published post resolves at the
+    request path, so recreating a page at a redirected slug self-heals (the
+    redirect goes inert with no manual cleanup)
+  - POST /redirect accepts { from, delete:true } (delegates to the DELETE
+    handler) for callers that can't send an HTTP DELETE
+  - /capabilities now reports delete_redirect: true
+  - Redirect set/delete require a configured webhook secret AND a valid HMAC
+    signature (fail closed) — no more unsigned redirect changes
+
 3.0.0 — Merged & rebuilt
   - Merged Ratesight Widgets and Ratesight AI SEO Pages into one plugin
     (two separate plugins both defined RATESIGHT_VERSION, causing a fatal
