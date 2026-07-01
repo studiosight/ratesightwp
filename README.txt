@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.14
+Stable tag: 3.2.15
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,14 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+3.2.15 — Fix: browser (CORS) requests with the signature header were blocked
+  - A web app posting create-page cross-origin with X-Ratesight-Signature was
+    blocked by the browser's CORS preflight: WordPress's Access-Control-Allow-
+    Headers did not include X-Ratesight-Signature, so the browser never sent the
+    POST — it never reached WordPress and never logged. Add X-Ratesight-Signature
+    to the allowed CORS headers (rest_allowed_cors_headers) so signed browser
+    requests are permitted. Server-to-server callers (curl/node) were unaffected.
+
 3.2.14 — Restore blog-post default when post_type is omitted
   - create-page defaulted an omitted post_type to rs_page; the long-standing
     blog-post integration omits post_type and so was silently getting landing
