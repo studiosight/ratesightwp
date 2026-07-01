@@ -29,7 +29,7 @@ $o = Ratesight_Options::get_all();
 		<th scope="row"><label for="rs-site-key">Site Key</label></th>
 		<td>
 			<input type="password" id="rs-site-key" name="wp_ratesight_site_key" class="regular-text" value="<?php echo esc_attr( $o['site_key'] ); ?>" autocomplete="off" spellcheck="false">
-			<p class="description">Secret key for your site, shown next to your Ratesight ID in your Ratesight dashboard. Paste it once to authenticate this site.</p>
+			<p class="description">Configured automatically once your Ratesight ID is saved and your license is active — you normally don't need to touch this. Only paste a key manually if Ratesight support asks you to.</p>
 		</td>
 	</tr>
 	<tr>

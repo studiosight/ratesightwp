@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.4
+Stable tag: 3.2.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,12 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+3.2.5 — Auto-provision the per-site Site Key
+  - The Site Key is now fetched automatically from the Worker (POST /site-key
+    with the site's OID + URL, license-validated server-side) once the Ratesight
+    ID is set — no manual paste, no dashboard lookup. The manual field remains as
+    a support/override fallback. Attempts are rate-limited via a transient.
+
 3.2.4 — Enable per-site auth; add live redirect-list endpoint
   - Turn on per-site (OID-bound) auth: each site authenticates to the Worker
     with its own Site Key (pasted in the admin) instead of a shared secret.

@@ -73,7 +73,7 @@ if ( Ratesight_OAuth_Client::PER_SITE_AUTH ) {
 		'id'     => 'site_key',
 		'label'  => 'Site Key entered',
 		'done'   => Ratesight_OAuth_Client::site_key() !== '',
-		'action' => 'Paste your Site Key on the Widgets tab (shown next to your Ratesight ID in your dashboard).',
+		'action' => 'Provisioned automatically once your Ratesight ID is saved and your license is active. No action needed unless support asks.',
 		'url'    => $widgets_url,
 	);
 	$insert_at = count( $steps );

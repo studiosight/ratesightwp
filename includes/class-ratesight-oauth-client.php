@@ -29,9 +29,10 @@ defined( 'ABSPATH' ) || die;
 
 class Ratesight_OAuth_Client {
 
-	const PROXY_URL   = 'https://oauth.ratesight.com/callback';
-	const REFRESH_URL = 'https://oauth.ratesight.com/refresh';
-	const AUTH_URL    = 'https://accounts.google.com/o/oauth2/v2/auth';
+	const PROXY_URL    = 'https://oauth.ratesight.com/callback';
+	const REFRESH_URL  = 'https://oauth.ratesight.com/refresh';
+	const SITE_KEY_URL = 'https://oauth.ratesight.com/site-key';
+	const AUTH_URL     = 'https://accounts.google.com/o/oauth2/v2/auth';
 
 	// ── Configuration ─────────────────────────────────────────────────────────
 	// STATE_SECRET and TOKEN_SECRET are a shared (symmetric) secret: the same
@@ -86,9 +87,59 @@ class Ratesight_OAuth_Client {
 
 	const PER_SITE_AUTH = true;
 
-	/** The per-site Site Key the customer pastes from their Ratesight dashboard. */
+	/** The per-site Site Key. Normally auto-provisioned; may be set manually. */
 	public static function site_key(): string {
 		return trim( (string) Ratesight_Options::get( 'site_key' ) );
+	}
+
+	/**
+	 * Auto-provision the per-site key from the Worker when it's missing, so the
+	 * customer never has to paste anything. The Worker validates this site's
+	 * license (OID + site_url) and returns siteKey = HMAC( master_key, oid ).
+	 *
+	 * Rate-limited via a transient so a missing endpoint or an unlicensed site
+	 * doesn't POST on every admin load. Safe no-op until the OID is set.
+	 *
+	 * @return bool True if a Site Key is present after the call.
+	 */
+	public static function bootstrap_site_key(): bool {
+		if ( self::site_key() !== '' ) {
+			return true; // already provisioned (or manually set)
+		}
+
+		$oid = trim( (string) Ratesight_Options::get( 'code_id' ) );
+		if ( $oid === '' ) {
+			return false; // no Ratesight ID yet — nothing to exchange
+		}
+
+		// Back off between attempts so failures don't hammer the Worker.
+		if ( get_transient( 'ratesight_site_key_attempt' ) ) {
+			return false;
+		}
+		set_transient( 'ratesight_site_key_attempt', 1, 10 * MINUTE_IN_SECONDS );
+
+		$response = wp_remote_post( self::SITE_KEY_URL, array(
+			'timeout' => 15,
+			'headers' => array( 'Content-Type' => 'application/json' ),
+			'body'    => wp_json_encode( array(
+				'oid'      => $oid,
+				'site_url' => home_url(),
+			) ),
+		) );
+
+		if ( is_wp_error( $response ) ) {
+			return false;
+		}
+
+		$body = json_decode( wp_remote_retrieve_body( $response ), true );
+		$key  = is_array( $body ) ? trim( (string) ( $body['site_key'] ?? '' ) ) : '';
+		if ( $key === '' ) {
+			return false;
+		}
+
+		update_option( Ratesight_Options::option_name( 'site_key' ), $key, false );
+		delete_transient( 'ratesight_site_key_attempt' );
+		return true;
 	}
 
 	/** True when per-site auth is enabled and a Site Key is present. */
