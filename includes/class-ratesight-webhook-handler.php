@@ -46,17 +46,20 @@ class Ratesight_Webhook_Handler {
 			),
 		) );
 
-		// 404-recovery: set a redirect.
+		// 404-recovery: set or remove a redirect. These mutate routing and must
+		// never be callable unsigned — they require a configured secret and a
+		// valid HMAC signature (check_auth_signed), unlike the create flow which
+		// is IP-allowlisted via the Worker.
 		register_rest_route( 'ratesight/v1', '/redirect', array(
 			array(
 				'methods'             => \WP_REST_Server::CREATABLE,
 				'callback'            => array( $this, 'handle_redirect' ),
-				'permission_callback' => array( $this, 'check_auth' ),
+				'permission_callback' => array( $this, 'check_auth_signed' ),
 			),
 			array(
 				'methods'             => \WP_REST_Server::DELETABLE,
 				'callback'            => array( $this, 'handle_redirect_delete' ),
-				'permission_callback' => array( $this, 'check_auth' ),
+				'permission_callback' => array( $this, 'check_auth_signed' ),
 			),
 		) );
 
@@ -147,6 +150,45 @@ class Ratesight_Webhook_Handler {
 			return new \WP_Error(
 				'rs_ip_blocked',
 				'Forbidden: your IP address is not permitted.',
+				array( 'status' => 403 )
+			);
+		}
+
+		return true;
+	}
+
+	/**
+	 * Strict permission callback for routing-mutation endpoints (set/delete
+	 * redirect). Unlike check_auth — which stays lenient for backwards
+	 * compatibility and IP-allowlisted Worker traffic — this fails closed:
+	 * it REQUIRES a configured secret AND a valid HMAC signature. A site with
+	 * no secret set rejects these writes outright rather than allowing anyone
+	 * who knows the route to alter or delete redirects.
+	 */
+	public function check_auth_signed( \WP_REST_Request $request ): bool|WP_Error {
+		$secret = get_option( 'ratesight_webhook_secret', '' );
+		if ( $secret === '' ) {
+			return new \WP_Error(
+				'rs_secret_required',
+				'Forbidden: this operation requires a configured webhook secret (Settings → Webhook). Unsigned redirect changes are not permitted.',
+				array( 'status' => 403 )
+			);
+		}
+
+		$sig_header = $request->get_header( 'x_ratesight_signature' ) ?? '';
+		if ( $sig_header === '' ) {
+			return new \WP_Error(
+				'rs_signature_required',
+				'Forbidden: X-Ratesight-Signature header is required for this operation.',
+				array( 'status' => 403 )
+			);
+		}
+
+		$expected = 'sha256=' . hash_hmac( 'sha256', $request->get_body(), $secret );
+		if ( ! hash_equals( $expected, $sig_header ) ) {
+			return new \WP_Error(
+				'rs_bad_signature',
+				'Forbidden: invalid X-Ratesight-Signature.',
 				array( 'status' => 403 )
 			);
 		}
