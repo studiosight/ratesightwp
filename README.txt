@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.8
+Stable tag: 3.2.9
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,12 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+3.2.9 — Fix: create-page rejected content_html payloads
+  - validate_payload() required "article", but do_handle_request() accepts
+    "content_html" (the tool contract) as the body field. Every content_html
+    post failed validation with 'Required field "article" is missing' before the
+    handler could alias it. Validation now accepts content_html OR article.
+
 3.2.8 — Fix: create-page silently rejected on signature mismatch
   - check_auth hard-failed create-page with 403 (before any activity-log entry)
     when an incoming X-Ratesight-Signature didn't match ratesight_webhook_secret.

@@ -1162,10 +1162,13 @@ class Ratesight_Webhook_Handler {
 		if ( empty( $data ) || ! is_array( $data ) ) {
 			return new \WP_Error( 'rs_empty_payload', 'Request body is empty or not valid JSON.' );
 		}
-		foreach ( array( 'title', 'article' ) as $field ) {
-			if ( empty( $data[ $field ] ) ) {
-				return new \WP_Error( 'rs_missing_field', sprintf( 'Required field "%s" is missing or empty.', $field ) );
-			}
+		if ( empty( $data['title'] ) ) {
+			return new \WP_Error( 'rs_missing_field', 'Required field "title" is missing or empty.' );
+		}
+		// Body content: accept content_html (tool contract) or article (legacy
+		// field name) — do_handle_request() aliases one to the other.
+		if ( empty( $data['content_html'] ) && empty( $data['article'] ) ) {
+			return new \WP_Error( 'rs_missing_field', 'Required field "content_html" (or "article") is missing or empty.' );
 		}
 		return true;
 	}
