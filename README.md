@@ -5,7 +5,7 @@ AI-generated SEO pages, review widgets, and local-search performance tracking â€
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](LICENSE)
 ![WordPress](https://img.shields.io/badge/WordPress-5.9%2B-21759b.svg)
 ![PHP](https://img.shields.io/badge/PHP-8.0%2B-777bb4.svg)
-![Version](https://img.shields.io/badge/version-3.2.12-brightgreen.svg)
+![Version](https://img.shields.io/badge/version-3.2.13-brightgreen.svg)
 
 Ratesight unifies review generation and search visibility in one place. It publishes AI-generated, SEO-optimized pages through a secure webhook, embeds review widgets anywhere on your site, and surfaces local-search performance from Google Search Console and Business Profile â€” without loading any third-party dependencies in your admin.
 

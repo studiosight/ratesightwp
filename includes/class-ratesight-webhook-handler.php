@@ -78,6 +78,14 @@ class Ratesight_Webhook_Handler {
 			'permission_callback' => array( $this, 'check_auth' ),
 		) );
 
+		// Inbound request debug — the last ~25 requests that reached WP on these
+		// routes, so an integrator can confirm their request actually arrives.
+		register_rest_route( 'ratesight/v1', '/inbound-log', array(
+			'methods'             => \WP_REST_Server::READABLE,
+			'callback'            => array( $this, 'handle_inbound_log' ),
+			'permission_callback' => array( $this, 'check_auth' ),
+		) );
+
 		// Redirect serve log — all served redirects (explicit + fuzzy) since a timestamp.
 		register_rest_route( 'ratesight/v1', '/redirects-log', array(
 			'methods'             => \WP_REST_Server::READABLE,
@@ -141,11 +149,55 @@ class Ratesight_Webhook_Handler {
 			) );
 		}
 
+		// Capture a rolling record of inbound requests (readable via /inbound-log)
+		// so what actually reaches WordPress can be inspected without server log
+		// access. Skip the debug endpoint itself to avoid self-noise.
+		if ( strpos( $route, '/ratesight/v1/inbound-log' ) !== 0 ) {
+			$log = get_option( 'ratesight_inbound_log', array() );
+			if ( ! is_array( $log ) ) {
+				$log = array();
+			}
+			$snippet = (string) $body;
+			if ( function_exists( 'mb_substr' ) ) {
+				$snippet = mb_substr( $snippet, 0, 400, 'UTF-8' );
+			} else {
+				$snippet = substr( $snippet, 0, 400 );
+			}
+			$log[] = array(
+				'time'         => current_time( 'mysql' ),
+				'method'       => $method,
+				'route'        => $route,
+				'ip'           => (string) ( $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? '?' ),  // phpcs:ignore
+				'user_agent'   => substr( (string) ( $_SERVER['HTTP_USER_AGENT'] ?? '' ), 0, 160 ),  // phpcs:ignore
+				'content_type' => (string) ( $request->get_header( 'content_type' ) ?: '' ),
+				'bytes'        => strlen( (string) $body ),
+				'utf8'         => ( function_exists( 'mb_check_encoding' ) && mb_check_encoding( (string) $body, 'UTF-8' ) ) ? 'ok' : 'bad',
+				'body_snippet' => $snippet,
+			);
+			update_option( 'ratesight_inbound_log', array_slice( $log, -25 ), false );
+		}
+
 		// Repair non-UTF-8 bodies so WP doesn't reject them with rest_invalid_json.
 		if ( $body !== '' && function_exists( 'mb_check_encoding' ) && ! mb_check_encoding( $body, 'UTF-8' ) ) {
 			$request->set_body( mb_convert_encoding( $body, 'UTF-8', 'Windows-1252' ) );
 		}
 		return $result;
+	}
+
+	/**
+	 * GET /wp-json/ratesight/v1/inbound-log
+	 * Returns the last ~25 inbound requests that reached WordPress on the
+	 * ratesight/v1 routes (method, route, IP, user-agent, size, encoding, body
+	 * snippet). Lets an integrator confirm whether their request actually arrives
+	 * — if a send doesn't show up here but does in nginx's access log, it's being
+	 * blocked between nginx and PHP.
+	 */
+	public function handle_inbound_log( \WP_REST_Request $request ): \WP_REST_Response {
+		$log = get_option( 'ratesight_inbound_log', array() );
+		return new \WP_REST_Response( array(
+			'count'   => is_array( $log ) ? count( $log ) : 0,
+			'entries' => is_array( $log ) ? array_values( $log ) : array(),
+		), 200 );
 	}
 
 	// -------------------------------------------------------------------------
