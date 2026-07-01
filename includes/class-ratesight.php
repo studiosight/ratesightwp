@@ -190,13 +190,24 @@ class Ratesight {
 		// Repair non-UTF-8 bodies before WP rejects them (encoding tolerance).
 		add_filter( 'rest_pre_dispatch', array( 'Ratesight_Webhook_Handler', 'repair_body_encoding' ), 10, 3 );
 
-		// Allow the custom signature header on cross-origin (browser) requests.
-		// Without this, a browser's CORS preflight omits X-Ratesight-Signature
-		// from Access-Control-Allow-Headers and blocks the POST before it is sent
-		// — so a signed create-page call from a web app never reaches WordPress.
+		// Allow custom headers on cross-origin (browser) requests. Without this, a
+		// browser's CORS preflight omits X-Ratesight-Signature from Access-Control-
+		// Allow-Headers and blocks the POST before it is sent — so a signed create-
+		// page call from a web app never reaches WordPress. We add the signature
+		// header AND reflect whatever the preflight requests, so no header can block
+		// it. (Allow-Headers only lets the browser SEND them; auth still applies.)
 		add_filter( 'rest_allowed_cors_headers', static function ( $headers ) {
 			$headers[] = 'X-Ratesight-Signature';
-			return $headers;
+			$requested = isset( $_SERVER['HTTP_ACCESS_CONTROL_REQUEST_HEADERS'] )  // phpcs:ignore
+				? (string) wp_unslash( $_SERVER['HTTP_ACCESS_CONTROL_REQUEST_HEADERS'] )  // phpcs:ignore
+				: '';
+			foreach ( explode( ',', $requested ) as $h ) {
+				$h = trim( $h );
+				if ( $h !== '' ) {
+					$headers[] = $h;
+				}
+			}
+			return array_values( array_unique( $headers ) );
 		} );
 
 		// Related-services internal links — REST endpoints (static handlers).
