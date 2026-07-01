@@ -1,47 +1,62 @@
-# Per-site authentication (Option C)
+# Plugin ↔ Worker authentication (OID-only)
 
-Goal: make every plugin → Worker request **attributable** to a specific site and
-**un-spoofable**, without a per-customer database on the Worker.
+Goal: let every plugin → Worker request be **attributed** to a specific site and
+restricted to **known accounts**, with no secret shipped in the plugin, no
+per-site key to paste, and no per-customer database on the Worker.
 
-## Why the OID alone isn't enough
+## The model
 
-The Ratesight ID (OID, the `code_id` option) is rendered into the public review
-widget embed (`?oid=...`), so it is **public**. Anyone can claim any OID. To
-prove a request really comes from the owner of an OID, the site must hold a
-*secret* paired with that OID — the **Site Key**.
+Each site is identified by its **OID** (the Ratesight ID, stored in the `code_id`
+option). The plugin sends the `oid` on every Worker request. The Worker gates on
+the OID — no secret exchange, no lookup DB:
 
-## The scheme: stateless derived keys
+- **`REVOKED_OIDS`** — comma-separated denylist. A revoked OID is always rejected.
+- **`ALLOWED_OIDS`** — comma-separated allowlist. **Currently disabled** (the check
+  is commented out in the Worker), so every non-revoked OID is trusted. Uncomment
+  the allowlist lines in `rsVerify` / `rsParseStateAny` and populate `ALLOWED_OIDS`
+  to restrict access to known accounts.
 
-- The Worker holds one master secret, `RS_MASTER_KEY` (a Cloudflare secret;
-  never shipped in the plugin).
-- Each site's key is derived from its OID:
+Cutting a site off = add its OID to `REVOKED_OIDS`. When you later enable the
+allowlist, adding a client = append their OID to `ALLOWED_OIDS`.
 
-  ```
-  siteKey = hex( HMAC_SHA256( RS_MASTER_KEY, oid ) )
-  ```
+### Security posture (be honest about it)
 
-- The customer's Ratesight dashboard shows them their `siteKey` (computed
-  server-side from their OID). They paste it into **Widgets → Site Key** once.
-- The Worker **re-derives** `siteKey` from the `oid` in each request and verifies
-  the HMAC. No per-customer KV/DB lookup is required.
+The OID is **public** — it's rendered into the review-widget embed (`?oid=...`).
+With the allowlist disabled (current default), the Worker trusts any non-revoked
+OID; enabling `ALLOWED_OIDS` narrows that to known accounts. Neither, by itself,
+proves the caller *owns* the OID. That is an accepted trade-off here because the
+OID alone grants very little:
 
-Revocation (optional): keep a small denylist of revoked OIDs in KV. Far smaller
-than a full key store. Rotating `RS_MASTER_KEY` invalidates every key at once.
+- **Token refresh** additionally requires the site's `refresh_token`, which lives
+  only in that site's WordPress database and is never public.
+- **Connecting** GSC/GBP requires a real Google authorization; tokens are returned
+  to the `site_url` carried in the OAuth `state`.
+- Transport integrity is provided by **TLS**.
+
+If a deployment wants cryptographic proof-of-ownership on top, it can opt into the
+**optional shared secret** (below). Most installs don't need it.
+
+## Optional HMAC signing
+
+A site may define `RATESIGHT_STATE_SECRET` / `RATESIGHT_TOKEN_SECRET` in
+`wp-config.php` (matching values set on the Worker as `STATE_SECRET` /
+`TOKEN_SECRET`). When set, requests are also HMAC-signed and the Worker verifies
+them. When unset — the normal case — requests are authenticated by OID only and
+the plugin skips response-signature verification (relying on TLS).
+
+There is **no bundled default** for these; nothing secret ships in the repo.
 
 ## What the plugin sends
 
-Controlled by `Ratesight_OAuth_Client::PER_SITE_AUTH` (currently `false`). When
-`true` **and** a Site Key is set, every request gains an `oid` field and is
-signed with the Site Key instead of the shared `TOKEN_SECRET` / `STATE_SECRET`.
-When `false`, requests are exactly as before (shared-secret HMAC, no `oid`).
-
 Signing helpers live in `includes/class-ratesight-oauth-client.php`:
 
-- `active_secret()` → Site Key when active, else the shared secret.
-- `auth_meta()` → `{ oid }` when active, else `{}`.
-- `sign_request($message)` → `{ hmac, oid? }` to merge into a request body/query.
+- `oid()` → the site's Ratesight ID (the identity presented to the Worker).
+- `active_secret()` → the optional shared `TOKEN_SECRET`; `''` in OID-only mode.
+- `auth_meta()` → `{ oid }` (always, when an OID is set).
+- `sign_request($message)` → `{ hmac, oid }` to merge into a request body/query.
+  In OID-only mode `hmac` is computed over an empty key and the Worker ignores it.
 
-### Request shapes (per-site mode)
+### Request shapes
 
 | Endpoint | Method | Signed message | Body / query carries |
 |---|---|---|---|
@@ -50,46 +65,44 @@ Signing helpers live in `includes/class-ratesight-oauth-client.php`:
 | `/recommend` | POST | `JSON.stringify(keywords) + "\|recommend"` | `keywords, existing_titles, hmac, oid` |
 | `/auto-submit` | POST | `host + "\|" + url` | `host, url, hmac, oid` |
 | `/sitemap-status` | GET | `host + "\|check"` | `?host&hmac&oid` |
-| `/validate` | POST | `ratesight_id + "\|" + site_url` | `ratesight_id, site_url, hmac` (OID = `ratesight_id`) |
 | `/refresh` | POST | the `refresh_token` | `refresh_token, token_secret_hmac, service, oid` |
 | OAuth `state` | redirect | base64url(JSON payload incl. `oid`) | `state = data.sig`, OID inside `data` |
 
-The Worker also signs responses it sends back (`verify_worker_payload`) and the
-inbound GSC sync trigger (`admin: |sync`) with the same derived `siteKey`; the
-plugin verifies those with its own Site Key.
-
 ## Worker verification (reference)
 
+The Worker checks the OID allowlist first, then falls back to the (legacy)
+per-site derived key or the shared secret for installs that still sign:
+
 ```js
-async function siteKeyFor(oid, env) {
-  const mac = await hmacSha256(env.RS_MASTER_KEY, oid);   // raw bytes
-  return toHex(mac);
-}
-
-async function verify(req, env) {
-  const body = await req.json();
-  const oid  = body.oid;                                  // for /validate use body.ratesight_id
-  if (!oid) return reject('missing oid');
-  if (await isRevoked(oid, env)) return reject('revoked');
-
-  const key      = await siteKeyFor(oid, env);
-  const expected = await hmacSha256(key, signedMessageFor(req, body));
-  if (!timingSafeEqual(toHex(expected), body.hmac)) return reject('bad hmac');
-
-  // authentic + attributed to `oid` → apply per-OID rate limits, then proceed
-  return oid;
+async function rsVerify(message, providedHmac, oid, env) {
+  if (oid) {
+    const revoked = (env.REVOKED_OIDS || "").split(",").map(s => s.trim()).filter(Boolean);
+    if (revoked.includes(oid)) return { ok: false, reason: "revoked" };
+    const allowed = (env.ALLOWED_OIDS || "").split(",").map(s => s.trim()).filter(Boolean);
+    if (allowed.includes(oid)) return { ok: true, oid, mode: "oid" };
+    if (env.MASTER_KEY) { /* legacy per-site key = HMAC(MASTER_KEY, oid) */ }
+  }
+  if (env.TOKEN_SECRET) { /* legacy shared-secret HMAC */ }
+  return { ok: false, reason: "bad_hmac" };
 }
 ```
 
-`signedMessageFor` must reproduce the exact bytes the plugin signed (see the
-table). Note the JSON must match byte-for-byte: the plugin uses
-`JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE` to mirror JS `JSON.stringify`.
+OAuth `state` is verified the same way (`rsParseStateAny`): trust the `oid`
+embedded in the state when it's allowlisted, else fall back to the signed paths.
+
+## Worker configuration
+
+| Binding | Required? | Purpose |
+|---|---|---|
+| `REVOKED_OIDS` | Optional | Comma-separated OIDs to reject. |
+| `ALLOWED_OIDS` | Optional (disabled) | Comma-separated OIDs to trust. Only used once the allowlist check is uncommented in the Worker. |
+| `STATE_SECRET` / `TOKEN_SECRET` | Optional | Enable the optional HMAC layer. |
 
 ## Rollout
 
-1. Ship the plugin with `PER_SITE_AUTH = false` (done) — no behavior change.
-2. Update the Worker to accept **both** schemes: if `oid` + valid derived-key
-   HMAC is present, use it; otherwise fall back to the shared-secret HMAC.
-3. Surface each customer's Site Key in the dashboard; have sites paste it.
-4. Flip `PER_SITE_AUTH = true` and release a plugin update.
-5. Once installs have updated, drop the shared-secret path on the Worker.
+1. Deploy the Worker (allowlist disabled — any non-revoked OID is trusted).
+2. Deploy the plugin (OID-only; no per-site config on the site).
+3. On each site, enter the **Ratesight ID** — it authenticates and GSC/GBP connect.
+4. Revoke a site by adding its OID to `REVOKED_OIDS`.
+5. Later, to restrict to known accounts: uncomment the allowlist check in the
+   Worker and set `ALLOWED_OIDS`.
