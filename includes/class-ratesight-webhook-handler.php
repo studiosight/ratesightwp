@@ -313,7 +313,11 @@ class Ratesight_Webhook_Handler {
 		$show_title          = filter_var( $raw_show_title, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE ) ?? true;
 		$parent_slug         = ! empty( $data['parent_slug'] ) ? sanitize_title( $data['parent_slug'] ) : '';
 		$valid_statuses      = array( 'publish', 'draft', 'pending', 'private' );
-		$request_status      = ! empty( $data['status'] ) && in_array( $data['status'], $valid_statuses, true ) ? $data['status'] : 'draft';
+		// Empty (not 'draft') when the caller omits status, so the deferred
+		// publisher falls back to the configured Final Post Status / Reference
+		// Page Status setting. Defaulting to 'draft' here overrode that setting
+		// and left every no-status post stuck as a draft.
+		$request_status      = ! empty( $data['status'] ) && in_array( $data['status'], $valid_statuses, true ) ? $data['status'] : '';
 		$dry_run             = filter_var( $data['dry_run'] ?? false, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE ) ?? false;
 
 		// 3. Duplicate slug — update the existing post instead of rejecting.

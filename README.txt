@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.9
+Stable tag: 3.2.10
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,13 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+3.2.10 — Fix: no-status posts stuck as draft (ignored Final Post Status)
+  - create-page defaulted the status to 'draft' when the payload omitted it.
+    The deferred publisher only falls back to the Final Post Status / Reference
+    Page Status setting when the status is empty, so that default overrode the
+    setting and left every no-status post as a permanent draft. Default is now
+    empty, so the configured Published status is applied as intended.
+
 3.2.9 — Fix: create-page rejected content_html payloads
   - validate_payload() required "article", but do_handle_request() accepts
     "content_html" (the tool contract) as the body field. Every content_html
