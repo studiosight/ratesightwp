@@ -38,19 +38,9 @@ The settings page has four tabs:
   post link, and any error.
 - **Payload Reference** — the full JSON payload schema and response format.
 
-### Required secrets (OAuth features)
-
-The GSC / GBP OAuth features require two shared secrets that must match the
-values configured on the Cloudflare Worker (`oauth.ratesight.com`). **No secrets
-are bundled with the plugin** — define them in `wp-config.php`:
-
-```php
-define( 'RATESIGHT_STATE_SECRET', 'your-state-secret-here' );
-define( 'RATESIGHT_TOKEN_SECRET', 'your-token-secret-here' );
-```
-
-Generate strong random values (for example, `openssl rand -hex 20`). Until both
-are defined, the OAuth features stay disabled. See [`.env.example`](.env.example).
+> **Deploying the Search Console / Business Profile integration?** A couple of
+> environment secrets must be defined in `wp-config.php`. See
+> [`.env.example`](.env.example) for the required variables.
 
 ## Shortcodes
 
