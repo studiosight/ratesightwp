@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.2
+Stable tag: 3.2.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,12 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+3.2.3 — Correct the OAuth-credentials setup copy
+  - The setup checklist and Connections tab still told admins the secrets were
+    "bundled by default" / to edit REPLACE_WITH_ placeholders in the plugin
+    source. Since 3.x requires RATESIGHT_STATE_SECRET / RATESIGHT_TOKEN_SECRET
+    in wp-config.php, both messages now say so.
+
 3.2.2 — Fix GBP performance metrics request
   - fetchMultiDailyMetricsTimeSeries was missing the dailyMetrics= key on the
     first metric, so every request 400'd ("Cannot bind query parameter") and

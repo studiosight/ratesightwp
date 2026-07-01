@@ -31,7 +31,7 @@ $steps = array(
 		'id'      => 'credentials',
 		'label'   => 'OAuth credentials configured',
 		'done'    => Ratesight_OAuth_Client::credentials_configured(),
-		'action'  => 'Bundled by default. Optionally override <code>RATESIGHT_STATE_SECRET</code> / <code>RATESIGHT_TOKEN_SECRET</code> in <code>wp-config.php</code>.',
+		'action'  => 'Define <code>RATESIGHT_STATE_SECRET</code> and <code>RATESIGHT_TOKEN_SECRET</code> in <code>wp-config.php</code> (they must match the values on the Ratesight OAuth Worker). See <code>.env.example</code>.',
 		'url'     => null,
 	),
 	array(
