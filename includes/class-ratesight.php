@@ -187,28 +187,11 @@ class Ratesight {
 		$webhook = new Ratesight_Webhook_Handler();
 		$this->loader->add_action( 'rest_api_init', $webhook, 'register_route' );
 
-		// Repair non-UTF-8 bodies before WP rejects them (encoding tolerance).
-		add_filter( 'rest_pre_dispatch', array( 'Ratesight_Webhook_Handler', 'repair_body_encoding' ), 10, 3 );
-
-		// Allow custom headers on cross-origin (browser) requests. Without this, a
-		// browser's CORS preflight omits X-Ratesight-Signature from Access-Control-
-		// Allow-Headers and blocks the POST before it is sent — so a signed create-
-		// page call from a web app never reaches WordPress. We add the signature
-		// header AND reflect whatever the preflight requests, so no header can block
-		// it. (Allow-Headers only lets the browser SEND them; auth still applies.)
-		add_filter( 'rest_allowed_cors_headers', static function ( $headers ) {
-			$headers[] = 'X-Ratesight-Signature';
-			$requested = isset( $_SERVER['HTTP_ACCESS_CONTROL_REQUEST_HEADERS'] )  // phpcs:ignore
-				? (string) wp_unslash( $_SERVER['HTTP_ACCESS_CONTROL_REQUEST_HEADERS'] )  // phpcs:ignore
-				: '';
-			foreach ( explode( ',', $requested ) as $h ) {
-				$h = trim( $h );
-				if ( $h !== '' ) {
-					$headers[] = $h;
-				}
-			}
-			return array_values( array_unique( $headers ) );
-		} );
+		// NOTE: the rest_pre_dispatch (repair_body_encoding) and rest_allowed_cors_
+		// headers filters were removed — they ran on every REST request before the
+		// handler and are the only request-path hooks the long-working May build did
+		// not have. They were diagnostic/encoding additions, not features. Removing
+		// them restores May's REST request handling while keeping every endpoint.
 
 		// Related-services internal links — REST endpoints (static handlers).
 		add_action( 'rest_api_init', array( 'Ratesight_Related_Links', 'register_routes' ) );

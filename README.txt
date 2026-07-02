@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.16
+Stable tag: 3.2.17
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,12 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+3.2.16 — Make CORS allow-headers bulletproof
+  - Also reflect whatever headers the browser's preflight requests into
+    Access-Control-Allow-Headers, so no custom header the integration sends can
+    block the cross-origin POST. Auth still applies; this only lets the browser
+    send the headers.
+
 3.2.15 — Fix: browser (CORS) requests with the signature header were blocked
   - A web app posting create-page cross-origin with X-Ratesight-Signature was
     blocked by the browser's CORS preflight: WordPress's Access-Control-Allow-
