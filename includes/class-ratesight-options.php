@@ -48,6 +48,12 @@ class Ratesight_Options {
 			// error log (WP_DEBUG_LOG destination) for server-level visibility.
 			'log_errors_to_wp'     => array( 'name' => 'ratesight_log_errors_to_wp',      'default' => 0,            'type' => 'bool',   'group' => 'seo_pages'   ),
 
+			// Runtime 404 fuzzy-router mode (v3.2.18). 'legacy' = unconstrained slug
+			// similarity (pre-3.2.18 behavior, the DEFAULT so upgrading changes
+			// nothing); 'same-city-or-hub' = cross-city fuzzy matches are blocked,
+			// with a same-service base-hub fallback; 'off' = no fuzzy redirects.
+			'fuzzy_mode'           => array( 'name' => 'ratesight_fuzzy_mode',            'default' => 'legacy',     'type' => 'fuzzy_mode', 'group' => 'seo_pages' ),
+
 			// ── GBP CTA / posting settings ────────────────────────────────────
 			'gbp_cta_type'     => array( 'name' => 'ratesight_gbp_cta_type',     'default' => 'LEARN_MORE', 'type' => 'text', 'group' => 'connections' ),
 			'gbp_post_enabled' => array( 'name' => 'ratesight_gbp_post_enabled', 'default' => 1,            'type' => 'bool', 'group' => 'connections' ),
@@ -94,6 +100,13 @@ class Ratesight_Options {
 			case 'color':  return sanitize_hex_color( $value ) ?? '';
 			case 'status':
 				return in_array( $value, array( 'publish', 'draft', 'pending', 'private' ), true ) ? $value : 'publish';
+			case 'fuzzy_mode':
+				if ( in_array( $value, array( 'legacy', 'same-city-or-hub', 'off' ), true ) ) return $value;
+				// Absent/invalid input (e.g. ANOTHER form in the same settings group
+				// saving — WP passes null for fields it didn't post) must PRESERVE the
+				// stored mode, never silently reset a flipped site back to 'legacy'.
+				$current = get_option( 'ratesight_fuzzy_mode', 'legacy' );
+				return in_array( $current, array( 'legacy', 'same-city-or-hub', 'off' ), true ) ? $current : 'legacy';
 			case 'text':
 			default:
 				return sanitize_text_field( $value );

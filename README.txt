@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.17
+Stable tag: 3.2.18
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,20 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+
+3.2.18 — Constrain the runtime 404 fuzzy router (no cross-city redirects)
+  - New per-site "404 Fuzzy Router Mode" setting (Settings > SEO Pages):
+    legacy (default, unchanged pre-3.2.18 behavior), same-city-or-hub, off.
+  - same-city-or-hub blocks cross-city fuzzy matches (a San Bruno URL can no
+    longer land on a San Ramon page), falls back to the base service hub
+    (/commercial-movers/ or /office-movers/) for commercial/office city slugs
+    when it exists, and serves the plain 404 when nothing safe matches (no
+    catch-all). Blocked cross-city matches are logged as type fuzzy-refused.
+  - Serve-log rows gain an optional context object (mode, source_city,
+    target_city, fallback_reason) so every fuzzy decision is auditable.
+  - Capabilities endpoint now reports runtime_404_mode.
+  - Pure decision core with a standalone test suite (tests/, php tests/...).
+
 3.2.16 — Make CORS allow-headers bulletproof
   - Also reflect whatever headers the browser's preflight requests into
     Access-Control-Allow-Headers, so no custom header the integration sends can
