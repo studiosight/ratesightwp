@@ -273,6 +273,17 @@ $webhook_secret = get_option( 'ratesight_webhook_secret', '' );
 		</td>
 	</tr>
 	<tr>
+		<th scope="row">404 Fuzzy Router Mode</th>
+		<td>
+			<select name="ratesight_fuzzy_mode">
+				<option value="legacy" <?php selected( 'legacy', $o['fuzzy_mode'] ); ?>>Legacy — unconstrained slug similarity (default)</option>
+				<option value="same-city-or-hub" <?php selected( 'same-city-or-hub', $o['fuzzy_mode'] ); ?>>Same-city or hub — never redirect one city's URL to another city's page</option>
+				<option value="off" <?php selected( 'off', $o['fuzzy_mode'] ); ?>>Off — no fuzzy 404 redirects</option>
+			</select>
+			<p class="description">Constrains the runtime 404 smart-router. "Same-city or hub" blocks cross-city fuzzy matches (e.g. a San Bruno URL landing on a San Ramon page) and falls back to the base service hub for commercial/office city pages. Explicit redirects are never affected.</p>
+		</td>
+	</tr>
+	<tr>
 		<th scope="row">Error Logging</th>
 		<td>
 			<label>

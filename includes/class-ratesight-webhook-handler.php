@@ -1262,6 +1262,7 @@ class Ratesight_Webhook_Handler {
 			'related_links'        => true,
 			'runtime_404_routing'  => true,
 			'runtime_404_threshold'=> Ratesight_Runtime_404_Router::THRESHOLD,
+			'runtime_404_mode'     => Ratesight_Runtime_404_Router::current_mode(),
 			'post_types'           => array(
 				'rs_page' => 'Ratesight page (city/service landing pages) — send post_type: "rs_page" explicitly',
 				'post'    => 'Standard WordPress blog post — default when post_type is omitted',
