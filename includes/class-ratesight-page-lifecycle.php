@@ -23,9 +23,8 @@
  *   - Every response reports status_before / status_after so the caller can
  *     verify the outcome without a second read.
  *
- * AUTH. Signed only (check_auth_signed on the webhook handler): these verbs
- * remove content, so — like the redirect mutations — they require a configured
- * webhook secret AND a valid HMAC signature. A site with no secret refuses them.
+ * AUTH. These routes use the centralized request-auth mutation policy, including
+ * negotiated rs-hmac-v2 verification and replay protection.
  *
  * @package    Ratesight
  * @subpackage Ratesight/includes
@@ -39,18 +38,16 @@ class Ratesight_Page_Lifecycle {
 	const POST_TYPES = array( 'ratesight_page', 'page', 'post' );
 
 	public static function register_routes(): void {
-		$handler = new Ratesight_Webhook_Handler();
-
 		register_rest_route( 'ratesight/v1', '/trash-page', array(
 			'methods'             => \WP_REST_Server::CREATABLE,
 			'callback'            => array( __CLASS__, 'handle_trash' ),
-			'permission_callback' => array( $handler, 'check_auth_signed' ),
+			'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_mutation' ),
 		) );
 
 		register_rest_route( 'ratesight/v1', '/restore-page', array(
 			'methods'             => \WP_REST_Server::CREATABLE,
 			'callback'            => array( __CLASS__, 'handle_restore' ),
-			'permission_callback' => array( $handler, 'check_auth_signed' ),
+			'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_mutation' ),
 		) );
 	}
 

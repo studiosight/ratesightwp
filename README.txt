@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.19
+Stable tag: 3.3.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -58,13 +58,38 @@ SHORTCODES
 
 WEBHOOK ENDPOINT
 ----------------
-  POST /wp-json/ratesight/v1/create-page?secret=YOUR_SECRET_KEY
+  POST /wp-json/ratesight/v1/create-page
 
 Required payload fields: title, article
+Protected requests require the negotiated rs-hmac-v2 headers documented in the
+plugin settings. Secrets are never sent in URLs.
 See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+
+3.3.1 — SEO meta writes actually render on Squirrly sites
+  - Squirrly SEO support wrote a `_squirrly_seo` post-meta array that Squirrly
+    has never read. Every title/description we "stored" on a Squirrly site was
+    inert: the store read back clean and the served page never changed.
+    Observed on a live install (Squirrly 14.2.3): 6 rewritten posts, 0 of 6
+    served. Writes now go to the store Squirrly serves — its own `qss` table
+    row for the page's URL hash — plus its documented `_sq_title` /
+    `_sq_description` fallback, and the row is re-read to confirm.
+  - Where Squirrly runs alongside Yoast or Rank Math, `seo_plugin` now reports
+    squirrly. Squirrly output-buffers the finished page and replaces the title
+    the other plugin printed, so it is the plugin that decides what is served.
+    All active SEO plugins are still written, so nothing goes out of sync.
+  - `_squirrly_seo` is still READ (so an older build's value stays visible) but
+    is no longer written.
+
+3.3.0 — Secure the WordPress request boundary
+  - Add negotiated rs-hmac-v2 authentication with replay protection, secret
+    rotation grace, and an explicit route-policy inventory.
+  - Keep legacy mode as the upgrade default; enforcement requires a separately
+    verified fleet rollout.
+  - Redact inbound diagnostics and expose minimal auth/provider ownership
+    capability metadata.
 
 3.2.19 — Recoverable page removal + update-page no longer publishes drafts
   - New POST /wp-json/ratesight/v1/trash-page and /restore-page. These use the

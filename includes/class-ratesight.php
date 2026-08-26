@@ -98,6 +98,7 @@ class Ratesight {
 		$this->loader->add_action( 'wp_ajax_ratesight_review_velocity',     $admin, 'ajax_review_velocity'    );
 		$this->loader->add_action( 'wp_ajax_ratesight_sync_gbp_now',          $admin, 'ajax_sync_gbp_now'          );
 		$this->loader->add_action( 'wp_ajax_ratesight_save_bing_key',         $admin, 'ajax_save_bing_key'         );
+		$this->loader->add_action( 'wp_ajax_ratesight_update_secret_setting', $admin, 'ajax_update_secret_setting' );
 		$this->loader->add_action( 'wp_ajax_ratesight_load_bing_sites',       $admin, 'ajax_load_bing_sites'       );
 		$this->loader->add_action( 'wp_ajax_ratesight_lock_bing_site',        $admin, 'ajax_lock_bing_site'        );
 		$this->loader->add_action( 'wp_ajax_ratesight_sync_bing_now',         $admin, 'ajax_sync_bing_now'         );
@@ -116,6 +117,7 @@ class Ratesight {
 		$this->loader->add_action( 'wp_ajax_ratesight_link_refresh_suggestions', $admin, 'ajax_link_refresh_suggestions' );
 		$this->loader->add_action( 'wp_ajax_ratesight_test_ai_worker',           $admin, 'ajax_test_ai_worker'           );
 		$this->loader->add_action( 'wp_ajax_ratesight_regen_webhook_secret',  $admin, 'ajax_regen_webhook_secret'  );
+		$this->loader->add_action( 'wp_ajax_ratesight_set_auth_mode',         $admin, 'ajax_set_auth_mode'         );
 		$this->loader->add_action( 'wp_ajax_ratesight_link_get_manual',       $admin, 'ajax_link_get_manual'       );
 		$this->loader->add_action( 'wp_ajax_ratesight_link_remove_manual',    $admin, 'ajax_link_remove_manual'    );
 		$this->loader->add_action( 'wp_ajax_ratesight_redirect_update',       $admin, 'ajax_redirect_update'       );
@@ -195,6 +197,8 @@ class Ratesight {
 
 		// Related-services internal links — REST endpoints (static handlers).
 		add_action( 'rest_api_init', array( 'Ratesight_Related_Links', 'register_routes' ) );
+		$page_api = new Ratesight_Page_API();
+		add_action( 'rest_api_init', array( $page_api, 'register_routes' ) );
 
 		// Recoverable page lifecycle — trash-page / restore-page (signed only).
 		add_action( 'rest_api_init', array( 'Ratesight_Page_Lifecycle', 'register_routes' ) );
@@ -205,6 +209,7 @@ class Ratesight {
 		add_action( 'ratesight_sync_gsc',             array( 'Ratesight_GSC_Client',         'sync_performance'                ) );
 		add_action( 'ratesight_sync_gsc',             array( 'Ratesight_Recovery_Log',        'remeasure'                       ) );
 		add_action( 'ratesight_redirect_health',      array( 'Ratesight_Redirect_Health',     'run'                             ) );
+		add_action( 'ratesight_prune_auth_nonces',    array( 'Ratesight_Request_Auth',        'prune_nonces'                    ) );
 
 		// Runtime 404 smart-router — fires after explicit redirect handler (priority 1).
 		add_action( 'template_redirect',              array( 'Ratesight_Runtime_404_Router',  'maybe_route'                     ), 5 );

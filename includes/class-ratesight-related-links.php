@@ -21,8 +21,7 @@
  *   DELETE /related-links?url=…
  *                           Clear the list for url's post.
  *
- * Auth mirrors Ratesight_Webhook_Handler: an optional X-Ratesight-Signature
- * HMAC over the raw body, matched against the ratesight_webhook_secret option.
+ * Every read and mutation is protected by the shared Ratesight_Request_Auth policy.
  *
  * @package    Ratesight
  * @subpackage Ratesight/includes
@@ -48,7 +47,7 @@ class Ratesight_Related_Links {
 			array(
 				'methods'             => \WP_REST_Server::READABLE,
 				'callback'            => array( __CLASS__, 'handle_get' ),
-				'permission_callback' => array( __CLASS__, 'check_auth' ),
+				'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_read' ),
 				'args'                => array(
 					'url' => array( 'required' => true, 'type' => 'string', 'sanitize_callback' => 'esc_url_raw' ),
 				),
@@ -56,12 +55,12 @@ class Ratesight_Related_Links {
 			array(
 				'methods'             => \WP_REST_Server::CREATABLE,
 				'callback'            => array( __CLASS__, 'handle_post' ),
-				'permission_callback' => array( __CLASS__, 'check_auth' ),
+				'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_mutation' ),
 			),
 			array(
 				'methods'             => \WP_REST_Server::DELETABLE,
 				'callback'            => array( __CLASS__, 'handle_delete' ),
-				'permission_callback' => array( __CLASS__, 'check_auth' ),
+				'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_mutation' ),
 				'args'                => array(
 					'url' => array( 'required' => true, 'type' => 'string', 'sanitize_callback' => 'esc_url_raw' ),
 				),
@@ -70,20 +69,6 @@ class Ratesight_Related_Links {
 	}
 
 	// ── Auth (mirrors Ratesight_Webhook_Handler::check_auth signature check) ────
-
-	public static function check_auth( \WP_REST_Request $request ): bool|\WP_Error {
-		$secret     = get_option( 'ratesight_webhook_secret', '' );
-		$sig_header = $request->get_header( 'x_ratesight_signature' ) ?? '';
-
-		if ( $secret !== '' && $sig_header !== '' ) {
-			$expected = 'sha256=' . hash_hmac( 'sha256', $request->get_body(), $secret );
-			if ( ! hash_equals( $expected, $sig_header ) ) {
-				return new \WP_Error( 'rs_bad_signature', 'Forbidden: invalid X-Ratesight-Signature.', array( 'status' => 403 ) );
-			}
-		}
-
-		return true;
-	}
 
 	// ── GET ─────────────────────────────────────────────────────────────────--
 

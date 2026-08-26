@@ -13,8 +13,8 @@ $o   = Ratesight_Options::get_all();
 $url        = rest_url( 'ratesight/v1/create-page' );
 $update_url = rest_url( 'ratesight/v1/update-page' );
 
-// Generate a secret on first view so it's always ready.
 $webhook_secret = get_option( 'ratesight_webhook_secret', '' );
+$auth_mode      = Ratesight_Request_Auth::mode();
 ?>
 <form method="post" action="options.php">
 <?php settings_fields( 'ratesight_options_seo_pages' ); ?>
@@ -49,8 +49,7 @@ $webhook_secret = get_option( 'ratesight_webhook_secret', '' );
 			</div>
 			<button type="button" class="button button-small" id="rs-regen-secret" style="margin-top:6px;">Regenerate</button>
 			<p class="description">
-				Include header <code>X-Ratesight-Signature: sha256=&lt;hex&gt;</code> where the value is
-				<code>HMAC-SHA256(raw_body, secret)</code>. Requests without this header are still accepted.
+				Protected requests use negotiated <code>rs-hmac-v2</code> headers that bind the method, route, query, timestamp, nonce, and raw body digest. A regenerated secret keeps the previous key valid for seven days.
 			</p>
 			<?php else : ?>
 			<button type="button" class="button" id="rs-regen-secret">Generate Secret</button>
@@ -60,8 +59,21 @@ $webhook_secret = get_option( 'ratesight_webhook_secret', '' );
 					<button type="button" class="button rs-btn-copy" data-copy="">Copy</button>
 				</div>
 			</span>
-			<p class="description">Optional. Generate a secret to enable HMAC signature verification on incoming webhooks. Requests without the signature header are always accepted.</p>
+			<p class="description">Generate a secret before enabling signed request observation or enforcement. The secret must be stored in the server-side integration credential store.</p>
 			<?php endif; ?>
+		</td>
+	</tr>
+	<tr>
+		<th scope="row">Request Authentication</th>
+		<td>
+			<select id="rs-auth-mode">
+				<option value="legacy" <?php selected( $auth_mode, 'legacy' ); ?>>Legacy compatibility</option>
+				<option value="observe_v2" <?php selected( $auth_mode, 'observe_v2' ); ?>>Observe rs-hmac-v2</option>
+				<option value="enforce_v2" <?php selected( $auth_mode, 'enforce_v2' ); ?>>Enforce rs-hmac-v2</option>
+			</select>
+			<button type="button" class="button" id="rs-save-auth-mode">Save Mode</button>
+			<span id="rs-auth-mode-feedback" class="rs-feedback" style="display:none;"></span>
+			<p class="description">Use Observe while validating callers, then Enforce. After enforcement, rollback is limited to Observe; Legacy cannot be restored silently or through this control.</p>
 		</td>
 	</tr>
 	<tr>
@@ -69,7 +81,7 @@ $webhook_secret = get_option( 'ratesight_webhook_secret', '' );
 		<td>
 			<button type="button" id="rs-send-test" class="button button-secondary">Send Test Request</button>
 			<span id="rs-test-feedback" class="rs-feedback" style="display:none;"></span>
-			<p class="description">Creates a draft test post via loopback. Check Activity Log for the result.</p>
+			<p class="description">In Observe or Enforce mode, runs a signed, server-side rs-hmac-v2 no-op through the REST handler. A successful test establishes the current-key readiness proof required for enforcement without exposing the secret to the browser.</p>
 		</td>
 	</tr>
 </table>

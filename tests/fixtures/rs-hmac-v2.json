@@ -1,0 +1,20 @@
+{
+  "version": "rs-hmac-v2",
+  "secret": "fixture-secret-primary",
+  "previousSecret": "fixture-secret-previous",
+  "method": "POST",
+  "route": "/ratesight/v1/update-page",
+  "query": {
+    "tag": ["red", "blue"],
+    "space": "hello world",
+    "a": "first"
+  },
+  "timestamp": "1787745600",
+  "nonce": "AAECAwQFBgcICQoLDA0ODw",
+  "body": "{\"url\":\"https://example.com/services/\",\"meta_title\":\"Fixture Title\"}",
+  "keyId": "f1e30e7f1246e749",
+  "bodyDigest": "f8d179652c79c7acc2b4a5b16463ff83b5096025e1d20bc916aa5703ddfd04bb",
+  "canonicalQuery": "a=first&space=hello%20world&tag=blue&tag=red",
+  "canonical": "rs-hmac-v2\nPOST\n/ratesight/v1/update-page\na=first&space=hello%20world&tag=blue&tag=red\n1787745600\nAAECAwQFBgcICQoLDA0ODw\nf8d179652c79c7acc2b4a5b16463ff83b5096025e1d20bc916aa5703ddfd04bb",
+  "signature": "sha256=5b48f38dee7fdd07b92ebecd63fa4a86adc6e969c6522711a5d6d303f7225cd6"
+}

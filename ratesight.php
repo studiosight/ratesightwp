@@ -3,7 +3,7 @@
  * Plugin Name:       Ratesight
  * Plugin URI:        https://ratesight.com
  * Description:       Review widgets, shortcodes, and AI-powered SEO page creation via webhook.
- * Version:           3.2.19
+ * Version:           3.3.1
  * Requires at least: 5.9
  * Requires PHP:      8.0
  * Author:            Ratesight
@@ -18,7 +18,8 @@
 
 defined( 'WPINC' ) || die;
 
-define( 'RATESIGHT_VERSION', '3.2.19.' . filemtime( __FILE__ ) );
+define( 'RATESIGHT_RELEASE_VERSION', '3.3.1' );
+define( 'RATESIGHT_VERSION', RATESIGHT_RELEASE_VERSION . '.' . filemtime( __FILE__ ) );
 define( 'RATESIGHT_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'RATESIGHT_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'RATESIGHT_LOG_TABLE',  'ratesight_logs' );
@@ -52,6 +53,7 @@ foreach ( array(
 	'includes/class-ratesight-category-handler.php',
 	'includes/class-ratesight-rs-category-handler.php',
 	'includes/class-ratesight-cpt.php',
+	'includes/class-ratesight-squirrly.php',
 	'includes/class-ratesight-seo-writer.php',
 	'includes/class-ratesight-layout-writer.php',
 	'includes/class-ratesight-title-writer.php',
@@ -71,9 +73,11 @@ foreach ( array(
 	'includes/class-ratesight-notifier.php',
 	'includes/class-ratesight-bulk-operations.php',
 	'includes/class-ratesight-sitemap.php',
+	'includes/class-ratesight-request-auth.php',
 	'includes/class-ratesight-webhook-handler.php',
 	'includes/class-ratesight-page-lifecycle.php',
 	'includes/class-ratesight-related-links.php',
+	'includes/class-ratesight-page-api.php',
 	'includes/class-ratesight-recovery-log.php',
 	'includes/class-ratesight-redirect-health.php',
 	'includes/class-ratesight-redirect-serve-log.php',

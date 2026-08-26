@@ -73,8 +73,8 @@
 		$( '#rs-regen-secret' ).on( 'click', function () {
 			var isFirst = $( '#rs-webhook-secret' ).val() === '';
 			var msg = isFirst
-				? 'Generate a webhook secret? You can share it with integrations that support HMAC signing.'
-				: 'Regenerate the webhook secret? Any integrations sending the old secret will stop matching until updated.';
+				? 'Generate a webhook secret for server-side rs-hmac-v2 signing?'
+				: 'Regenerate the webhook secret? The previous key remains valid for a seven-day rotation grace period.';
 			if ( ! confirm( msg ) ) return;
 			var $btn = $( this ).prop( 'disabled', true ).text( isFirst ? 'Generating…' : 'Regenerating…' );
 			$.post( ajax, { action: 'ratesight_regen_webhook_secret', nonce: nonce } )
@@ -91,6 +91,22 @@
 					}
 				} )
 				.fail( function () { $btn.prop( 'disabled', false ); } );
+		} );
+
+		$( '#rs-save-auth-mode' ).on( 'click', function () {
+			var $btn = $( this ).prop( 'disabled', true );
+			var $feedback = $( '#rs-auth-mode-feedback' ).show().text( 'Saving…' );
+			$.post( ajax, { action: 'ratesight_set_auth_mode', nonce: nonce, mode: $( '#rs-auth-mode' ).val() } )
+				.done( function ( r ) {
+					$btn.prop( 'disabled', false );
+					$feedback.text( r.success ? 'Saved.' : ( r.data && r.data.message ? r.data.message : 'Could not save mode.' ) );
+					if ( r.success && r.data.auth ) $( '#rs-auth-mode' ).val( r.data.auth.mode );
+				} )
+				.fail( function ( xhr ) {
+					$btn.prop( 'disabled', false );
+					var data = xhr.responseJSON && xhr.responseJSON.data;
+					$feedback.text( data && data.message ? data.message : 'Could not save mode.' );
+				} );
 		} );
 
 		$( '#rs-send-test' ).on( 'click', function () {
@@ -300,8 +316,7 @@
 						var d        = r.data;
 						var yes      = '<span style="color:#00a32a;font-weight:600;">✅ Verified</span>';
 						var no       = '<span style="color:#d63638;font-weight:600;">❌ Not reachable</span>';
-						$( '#rs-indexnow-url' ).html( '<code>' + esc( d.key_url ) + '</code>' );
-						$( '#rs-indexnow-verified' ).html( d.verified ? yes : no + ' — visit the URL above to debug' );
+						$( '#rs-indexnow-verified' ).html( d.verified ? yes : no );
 						$( '#rs-indexnow-result' ).show();
 					}
 				} )
@@ -626,11 +641,6 @@
 				.fail( function () { $btn.prop( 'disabled', false ).text( 'Lock This Property' ); alert( 'Request failed.' ); } );
 		} );
 
-		$( '#rs-toggle-deepseek-key' ).on( 'click', function () {
-			var $input = $( '#ratesight_deepseek_api_key' );
-			$input.attr( 'type', $input.attr( 'type' ) === 'password' ? 'text' : 'password' );
-		} );
-
 		// Quick disconnect button next to email address (no typing required)
 		$( document ).on( 'click', '.rs-quick-disconnect', function () {
 			var service = $( this ).data( 'service' );
@@ -663,17 +673,31 @@
 
 		// ── Bing Webmaster Tools ─────────────────────────────────────────────────
 
-		$( '#rs-save-bing-key' ).on( 'click', function () {
-			var key = $( '#rs-bing-api-key' ).val().trim();
-			if ( ! key ) { alert( 'Please enter your Bing API key.' ); return; }
-			var $btn = $( this ).prop( 'disabled', true ).text( 'Saving…' );
-			var $fb  = $( '#rs-bing-key-feedback' ).show().text( '' );
-			$.post( ajax, { action: 'ratesight_save_bing_key', nonce: nonce, api_key: key } )
+		$( '.rs-save-secret' ).on( 'click', function () {
+			var $btn = $( this );
+			var value = $( $btn.data( 'input' ) ).val().trim();
+			var $fb = $btn.siblings( '.rs-secret-feedback' ).show().text( '' );
+			if ( ! value ) { $fb.text( 'Enter a new value to replace the saved secret.' ); return; }
+			$btn.prop( 'disabled', true ).text( 'Saving…' );
+			$.post( ajax, { action: 'ratesight_update_secret_setting', nonce: nonce, setting: $btn.data( 'setting' ), intent: 'replace', value: value } )
 				.done( function ( r ) {
 					if ( r.success ) { location.reload(); }
 					else { $fb.text( r.data && r.data.message ? r.data.message : 'Failed.' ); $btn.prop( 'disabled', false ).text( 'Save Key' ); }
 				} )
 				.fail( function () { $fb.text( 'Request failed.' ); $btn.prop( 'disabled', false ).text( 'Save Key' ); } );
+		} );
+
+		$( '.rs-remove-secret' ).on( 'click', function () {
+			var $btn = $( this );
+			var label = $btn.data( 'label' );
+			if ( ! confirm( 'Remove the saved ' + label + '? This cannot be undone.' ) ) return;
+			$btn.prop( 'disabled', true ).text( 'Removing…' );
+			$.post( ajax, { action: 'ratesight_update_secret_setting', nonce: nonce, setting: $btn.data( 'setting' ), intent: 'remove', confirm: 'REMOVE' } )
+				.done( function ( r ) {
+					if ( r.success ) { location.reload(); }
+					else { alert( r.data && r.data.message ? r.data.message : 'Failed.' ); $btn.prop( 'disabled', false ).text( 'Remove Saved Key' ); }
+				} )
+				.fail( function () { alert( 'Request failed.' ); $btn.prop( 'disabled', false ).text( 'Remove Saved Key' ); } );
 		} );
 
 		$( '#rs-load-bing-sites' ).on( 'click', function () {

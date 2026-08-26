@@ -223,6 +223,9 @@ class Ratesight_Activator {
 		if ( ! wp_next_scheduled( 'ratesight_redirect_health' ) ) {
 			wp_schedule_event( time() + 3600, 'daily', 'ratesight_redirect_health' );
 		}
+		if ( ! wp_next_scheduled( 'ratesight_prune_auth_nonces' ) ) {
+			wp_schedule_event( time() + 900, 'hourly', 'ratesight_prune_auth_nonces' );
+		}
 		Ratesight_Notifier::schedule();
 	}
 }

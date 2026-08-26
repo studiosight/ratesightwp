@@ -27,6 +27,12 @@ class Ratesight_Admin {
 				$def['name'],
 				array(
 					'sanitize_callback' => static function ( $value ) use ( $def, $key ) {
+						if ( $def['type'] === 'secret' ) {
+							$parsed = Ratesight_Options::secret_setting_intent( $value );
+							return $parsed['intent'] === 'unchanged'
+								? get_option( $def['name'], '' )
+								: $parsed['value'];
+						}
 						$sanitized = Ratesight_Options::sanitise( $value, $def['type'] );
 						// Bust the license cache whenever the Ratesight ID is saved.
 						if ( $key === 'code_id' ) {
@@ -1607,13 +1613,13 @@ class Ratesight_Admin {
 	}
 
 	// -------------------------------------------------------------------------
-	// AJAX: send a signed test request to the webhook endpoint
+	// AJAX: send a signed no-op request to the readiness endpoint
 	// -------------------------------------------------------------------------
 
 	/**
-	 * Fires a real POST to the webhook endpoint using the stored secret,
-	 * so the admin can verify the full stack (IP check, HMAC, post creation)
-	 * without leaving WordPress.
+	 * Sends a server-side signed GET through the no-op REST handler so the
+	 * admin can verify rs-hmac-v2 and establish current-key readiness without
+	 * exposing the secret to the browser or creating content.
 	 */
 	public function ajax_send_test() {
 		check_ajax_referer( 'ratesight_admin', 'nonce' );
@@ -1621,23 +1627,15 @@ class Ratesight_Admin {
 			wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
 		}
 
-		$endpoint = rest_url( 'ratesight/v1/create-page' );
-
-		$body = wp_json_encode( array(
-			'title'            => '[Ratesight Test] ' . wp_date( 'Y-m-d H:i:s' ),
-			'article'          => '<p>This is an automated test post created by the Ratesight plugin. You may delete it.</p>',
-			'slug'             => 'ratesight-test-' . time(),
-			'meta_title'       => 'Ratesight Test Post',
-			'meta_description' => 'Automated test from the Ratesight plugin settings page.',
-		) );
-
-		// The test fires from this server to itself. WordPress loopback
-		// requests originate from 127.0.0.1 — add that to the allowlist
-		// if the test returns a 403, or temporarily clear the allowlist.
-		$response = wp_remote_post( $endpoint, array(
+		$secret = (string) get_option( 'ratesight_webhook_secret', '' );
+		if ( $secret === '' ) {
+			wp_send_json_error( array( 'message' => 'Generate a webhook secret before testing rs-hmac-v2.' ), 409 );
+		}
+		$route    = '/ratesight/v1/auth-self-test';
+		$endpoint = rest_url( ltrim( $route, '/' ) );
+		$response = wp_remote_get( $endpoint, array(
 			'timeout'   => 30,
-			'headers'   => array( 'Content-Type' => 'application/json' ),
-			'body'      => $body,
+			'headers'   => Ratesight_Request_Auth::signed_headers( $secret, 'GET', $route ),
 			'sslverify' => apply_filters( 'https_local_ssl_verify', false ),  // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound
 		) );
 
@@ -1648,17 +1646,12 @@ class Ratesight_Admin {
 		$code         = wp_remote_retrieve_response_code( $response );
 		$body_decoded = json_decode( wp_remote_retrieve_body( $response ), true );
 
-		if ( $code === 200 && ! empty( $body_decoded['success'] ) ) {
+		if ( $code === 200 && ! empty( $body_decoded['success'] ) && ! empty( $body_decoded['readiness'] ) ) {
 			wp_send_json_success( array(
-				'message'  => 'Test post created. It will publish in ~15 seconds.',
-				'post_url' => $body_decoded['post_url'] ?? '',
-				'post_id'  => $body_decoded['post_id']  ?? null,
+				'message' => 'Signed rs-hmac-v2 self-test completed. This site is ready for enforcement.',
 			) );
 		} else {
 			$message = $body_decoded['message'] ?? "Endpoint returned HTTP {$code}.";
-			if ( $code === 403 ) {
-				$message .= ' Add 127.0.0.1 to the allowlist to allow loopback test requests.';
-			}
 			wp_send_json_error( array( 'message' => $message, 'code' => $code ) );
 		}
 	}
@@ -1676,9 +1669,21 @@ class Ratesight_Admin {
 		}
 
 		$cached = get_transient( 'ratesight_connections_status' );
-		if ( $cached ) {
-			wp_send_json_success( $cached );
+		if ( is_array( $cached ) && isset( $cached['indexnow'] ) && is_array( $cached['indexnow'] ) ) {
+			wp_send_json_success( array(
+				'sitemap_live' => ! empty( $cached['sitemap_live'] ),
+				'indexnow'     => array(
+					'configured' => ! empty( $cached['indexnow']['configured'] ),
+					'verified'   => ! empty( $cached['indexnow']['verified'] ),
+					'errorCode'  => in_array( $cached['indexnow']['errorCode'] ?? null, array( null, 'key_unreachable' ), true )
+						? ( $cached['indexnow']['errorCode'] ?? null )
+						: 'key_unreachable',
+				),
+				'widget_id_set' => ! empty( $cached['widget_id_set'] ),
+				'blog_public'   => ! empty( $cached['blog_public'] ),
+			) );
 		}
+		// Ignore legacy cached payloads because they contained a key-bearing URL.
 
 		$status = array();
 
@@ -1688,8 +1693,7 @@ class Ratesight_Admin {
 		$status['sitemap_live'] = ! is_wp_error( $check ) && wp_remote_retrieve_response_code( $check ) === 200;
 
 		// IndexNow key reachable?
-		$status['indexnow_ok']  = Ratesight_IndexNow::verify_key();
-		$status['indexnow_url'] = Ratesight_IndexNow::key_url();
+		$status['indexnow'] = Ratesight_IndexNow::status();
 
 		// Widget IDs configured?
 		$status['widget_id_set'] = ! empty( Ratesight_Options::get( 'code_id' ) );
@@ -1852,15 +1856,7 @@ class Ratesight_Admin {
 			wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
 		}
 
-		$key      = Ratesight_IndexNow::get_key();
-		$key_url  = Ratesight_IndexNow::key_url();
-		$verified = Ratesight_IndexNow::verify_key();
-
-		wp_send_json_success( array(
-			'key'      => $key,
-			'key_url'  => $key_url,
-			'verified' => $verified,
-		) );
+		wp_send_json_success( Ratesight_IndexNow::status() );
 	}
 
 	public function ajax_clear_indexnow_log(): void {
@@ -2056,12 +2052,67 @@ class Ratesight_Admin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
 		}
-		$key = sanitize_text_field( wp_unslash( $_POST['api_key'] ?? '' ) );
-		if ( $key === '' ) {
+		$key = isset( $_POST['api_key'] ) && is_string( $_POST['api_key'] )
+			? wp_unslash( $_POST['api_key'] )
+			: '';
+		$result = Ratesight_Options::update_secret_setting( 'bing_api_key', $key );
+		if ( $result['intent'] !== 'replace' ) {
 			wp_send_json_error( array( 'message' => 'API key cannot be empty.' ) );
 		}
-		update_option( Ratesight_Options::option_name( 'bing_api_key' ), $key );
-		wp_send_json_success( array( 'message' => 'API key saved.' ) );
+		if ( ! $result['applied'] ) {
+			wp_send_json_error( array( 'message' => 'API key replacement could not be verified.' ), 500 );
+		}
+		wp_send_json_success( array( 'message' => 'API key saved.', 'status' => $result['status'] ) );
+	}
+
+	public function ajax_update_secret_setting(): void {
+		check_ajax_referer( 'ratesight_admin', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
+		}
+
+		$setting = isset( $_POST['setting'] ) && is_string( $_POST['setting'] )
+			? sanitize_key( wp_unslash( $_POST['setting'] ) )
+			: '';
+		$intent = isset( $_POST['intent'] ) && is_string( $_POST['intent'] )
+			? sanitize_key( wp_unslash( $_POST['intent'] ) )
+			: '';
+		if ( ! in_array( $setting, array( 'bing_api_key', 'deepseek_api_key' ), true ) ) {
+			wp_send_json_error( array( 'message' => 'Unsupported secret setting.' ), 400 );
+		}
+		if ( ! in_array( $intent, array( 'replace', 'remove' ), true ) ) {
+			wp_send_json_error( array( 'message' => 'Unsupported secret update intent.' ), 400 );
+		}
+		$confirmation = isset( $_POST['confirm'] ) && is_string( $_POST['confirm'] )
+			? sanitize_text_field( wp_unslash( $_POST['confirm'] ) )
+			: '';
+		if ( $intent === 'remove' && $confirmation !== 'REMOVE' ) {
+			wp_send_json_error( array( 'message' => 'Secret removal was not confirmed.' ), 400 );
+		}
+		$value = isset( $_POST['value'] ) && is_string( $_POST['value'] )
+			? wp_unslash( $_POST['value'] )
+			: '';
+
+		$result = Ratesight_Options::update_secret_setting(
+			$setting,
+			$value,
+			$intent === 'remove'
+		);
+		if ( $intent === 'replace' && $result['intent'] !== 'replace' ) {
+			wp_send_json_error( array( 'message' => 'Enter a new value to replace the saved secret.' ), 400 );
+		}
+		if ( ! $result['applied'] ) {
+			wp_send_json_error( array(
+				'message' => 'The saved secret could not be ' . ( $intent === 'remove' ? 'removed' : 'replaced' ) . '.',
+				'status'  => $result['status'],
+			), 500 );
+		}
+
+		wp_send_json_success( array(
+			'intent'  => $result['intent'],
+			'status'  => $result['status'],
+			'message' => $result['intent'] === 'remove' ? 'Saved secret removed.' : 'Saved secret replaced.',
+		) );
 	}
 
 	public function ajax_load_bing_sites(): void {
@@ -2305,9 +2356,30 @@ class Ratesight_Admin {
 	public function ajax_regen_webhook_secret(): void {
 		check_ajax_referer( 'ratesight_admin', 'nonce' );
 		if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
-		$secret = bin2hex( random_bytes( 24 ) );
+		$previous = (string) get_option( 'ratesight_webhook_secret', '' );
+		$secret   = bin2hex( random_bytes( 24 ) );
+		$expires  = time() + ( 7 * DAY_IN_SECONDS );
+		if ( $previous !== '' ) {
+			update_option( 'ratesight_webhook_secret_previous', $previous, false );
+			update_option( 'ratesight_webhook_secret_previous_expires', $expires, false );
+		}
 		update_option( 'ratesight_webhook_secret', $secret, false );
-		wp_send_json_success( array( 'secret' => $secret ) );
+		wp_send_json_success( array(
+			'secret'                 => $secret,
+			'key_id'                 => Ratesight_Request_Auth::key_id( $secret ),
+			'previous_grace_expires' => $previous !== '' ? gmdate( 'c', $expires ) : null,
+		) );
+	}
+
+	public function ajax_set_auth_mode(): void {
+		check_ajax_referer( 'ratesight_admin', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
+		$mode = sanitize_key( wp_unslash( $_POST['mode'] ?? '' ) );
+		$result = Ratesight_Request_Auth::set_mode( $mode );
+		if ( is_wp_error( $result ) ) {
+			wp_send_json_error( array( 'message' => $result->get_error_message(), 'code' => $result->get_error_code() ), 409 );
+		}
+		wp_send_json_success( array( 'auth' => Ratesight_Request_Auth::capability_auth() ) );
 	}
 
 	public function ajax_link_get_manual(): void {
@@ -2760,4 +2832,3 @@ Return ONLY valid JSON: {\"title\": \"...\", \"meta_description\": \"...\"}";
 		wp_send_json_success( array( 'reply' => $result['reply'] ) );
 	}
 }
-
