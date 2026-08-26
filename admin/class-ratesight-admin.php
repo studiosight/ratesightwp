@@ -1607,13 +1607,13 @@ class Ratesight_Admin {
 	}
 
 	// -------------------------------------------------------------------------
-	// AJAX: send a signed test request to the webhook endpoint
+	// AJAX: send a signed no-op request to the readiness endpoint
 	// -------------------------------------------------------------------------
 
 	/**
-	 * Fires a real POST to the webhook endpoint using the stored secret,
-	 * so the admin can verify the full stack (IP check, HMAC, post creation)
-	 * without leaving WordPress.
+	 * Sends a server-side signed GET through the no-op REST handler so the
+	 * admin can verify rs-hmac-v2 and establish current-key readiness without
+	 * exposing the secret to the browser or creating content.
 	 */
 	public function ajax_send_test() {
 		check_ajax_referer( 'ratesight_admin', 'nonce' );
