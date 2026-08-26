@@ -76,6 +76,24 @@ See the Payload Reference tab in the plugin settings for full documentation.
   - Redact inbound diagnostics and expose minimal auth/provider ownership
     capability metadata.
 
+3.2.19 — Recoverable page removal + update-page no longer publishes drafts
+  - New POST /wp-json/ratesight/v1/trash-page and /restore-page. These use the
+    WordPress trash (wp_trash_post / wp_untrash_post), so a removal is always
+    reversible. Both require "confirm": true, both honour dry_run, and both
+    report status_before / status_after. Signed requests only (a configured
+    webhook secret plus a valid X-Ratesight-Signature).
+  - DELETE /create-page now honours dry_run instead of accepting the field and
+    deleting anyway. It remains a PERMANENT delete — prefer trash-page.
+  - POST /update-page NEVER changes post_status. It previously scheduled the
+    deferred publish job with no status, so the cron fell back to the site's
+    Final Post Status and published any draft it touched a minute or two later
+    (writing SEO meta to a draft silently published it). The deferred job is now
+    image-attach only on this path, and the response reports status_before /
+    status_after / status_preserved. A "status" field in an update-page body is
+    ignored and flagged as status_ignored.
+  - Capabilities endpoint reports trash_page, restore_page, delete_page_dry_run
+    and update_page_preserves_status so integrations can detect this build.
+
 3.2.18 — Constrain the runtime 404 fuzzy router (no cross-city redirects)
   - New per-site "404 Fuzzy Router Mode" setting (Settings > SEO Pages):
     legacy (default, unchanged pre-3.2.18 behavior), same-city-or-hub, off.

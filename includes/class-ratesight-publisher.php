@@ -21,6 +21,34 @@ defined( 'ABSPATH' ) || die;
 class Ratesight_Publisher {
 
 	/**
+	 * Sentinel request status meaning "attach the image, but NEVER touch
+	 * post_status". Used by the update-page path, which must not publish a
+	 * draft as a side effect of a metadata write. It is deliberately not a
+	 * valid WordPress status, so it can only come from plugin code — a caller
+	 * cannot smuggle it in through the payload's `status` field, which is
+	 * whitelist-validated against real statuses.
+	 */
+	const STATUS_PRESERVE = '__rs_preserve_status__';
+
+	/**
+	 * Resolve the status the deferred job should flip a post to.
+	 *
+	 * Pure — no WordPress calls, so the decision is unit-testable.
+	 *
+	 * @param string $request_status Per-request status ('' = not specified).
+	 * @param string $option_status  The site's configured final status.
+	 * @return string|null Status to write, or null when the current status must
+	 *                     be preserved (no status write at all).
+	 */
+	public static function resolve_final_status( string $request_status, string $option_status ): ?string {
+		if ( $request_status === self::STATUS_PRESERVE ) {
+			return null;
+		}
+		$final = $request_status !== '' ? $request_status : $option_status;
+		return in_array( $final, array( 'publish', 'draft', 'pending', 'private' ), true ) ? $final : 'publish';
+	}
+
+	/**
 	 * Entry point for the WP-Cron event.
 	 *
 	 * @param int    $post_id     Post to publish.
@@ -52,6 +80,20 @@ class Ratesight_Publisher {
 			}
 		}
 
+		// ── 1b. Status-preserving job — attach the image, never flip status ───
+		// The update-page path schedules this. Returning here is what stops a
+		// metadata write on a DRAFT from publishing it minutes later via cron.
+		if ( $request_status === self::STATUS_PRESERVE ) {
+			$status = empty( $warnings ) ? Ratesight_Logger::STATUS_SUCCESS : Ratesight_Logger::STATUS_SUCCESS_WARNINGS;
+			Ratesight_Logger::log_update(
+				$log_id,
+				$post_id,
+				$status,
+				trim( "Status preserved ({$post->post_status}) — update-page never changes post_status. " . implode( ' | ', $warnings ) )
+			);
+			return;
+		}
+
 		// ── 2. Flip to final status — skip if already published ───────────────
 		if ( $already_live ) {
 			$status = empty( $warnings ) ? Ratesight_Logger::STATUS_SUCCESS : Ratesight_Logger::STATUS_SUCCESS_WARNINGS;
@@ -63,9 +105,13 @@ class Ratesight_Publisher {
 		// Per-request status (from webhook payload) takes priority over the global setting.
 		$post_type    = get_post_type( $post_id );
 		$status_key   = ( $post_type === 'ratesight_page' ) ? 'page_status' : 'post_status';
-		$final_status = $request_status !== '' ? $request_status : Ratesight_Options::get( $status_key );
-		if ( ! in_array( $final_status, array( 'publish', 'draft', 'pending', 'private' ), true ) ) {
-			$final_status = 'publish';
+		$final_status = self::resolve_final_status( $request_status, (string) Ratesight_Options::get( $status_key ) );
+
+		if ( $final_status === null ) {
+			// Defensive: only reachable if the preserve short-circuit above is
+			// ever removed. Preserve means preserve — write nothing.
+			Ratesight_Logger::log_update( $log_id, $post_id, Ratesight_Logger::STATUS_SUCCESS, 'Status preserved.' );
+			return;
 		}
 
 		$updated = wp_update_post( array( 'ID' => $post_id, 'post_status' => $final_status ), true );

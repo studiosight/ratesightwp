@@ -13,9 +13,11 @@ require __DIR__ . '/../includes/class-ratesight-request-auth.php';
 require __DIR__ . '/../includes/class-ratesight-webhook-handler.php';
 require __DIR__ . '/../includes/class-ratesight-related-links.php';
 require __DIR__ . '/../includes/class-ratesight-page-api.php';
+require __DIR__ . '/../includes/class-ratesight-page-lifecycle.php';
 ( new Ratesight_Webhook_Handler() )->register_route();
 Ratesight_Related_Links::register_routes();
 ( new Ratesight_Page_API() )->register_routes();
+Ratesight_Page_Lifecycle::register_routes();
 
 $failures = 0;
 foreach ( Ratesight_Request_Auth::ROUTE_POLICIES as $route => $policy ) {

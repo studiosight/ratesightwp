@@ -198,6 +198,9 @@ class Ratesight {
 		add_action( 'rest_api_init', array( 'Ratesight_Related_Links', 'register_routes' ) );
 		$page_api = new Ratesight_Page_API();
 		add_action( 'rest_api_init', array( $page_api, 'register_routes' ) );
+
+		// Recoverable page lifecycle — trash-page / restore-page (signed only).
+		add_action( 'rest_api_init', array( 'Ratesight_Page_Lifecycle', 'register_routes' ) );
 	}
 
 	private function define_cron_hooks() {

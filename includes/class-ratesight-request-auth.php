@@ -31,6 +31,8 @@ class Ratesight_Request_Auth {
 		'DELETE /ratesight/v1/related-links' => 'signed_mutation',
 		'GET /ratesight/v1/page' => 'signed_read',
 		'POST /ratesight/v1/page' => 'signed_mutation',
+		'POST /ratesight/v1/trash-page' => 'signed_mutation',
+		'POST /ratesight/v1/restore-page' => 'signed_mutation',
 	);
 
 	public static function mode(): string {

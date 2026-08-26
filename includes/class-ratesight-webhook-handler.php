@@ -205,11 +205,17 @@ class Ratesight_Webhook_Handler {
 
 	/**
 	 * DELETE /wp-json/ratesight/v1/create-page
-	 * Body: { url } OR { slug }
-	 * Permanently deletes a single RS page (or any post type) by URL or slug.
+	 * Body: { url } OR { slug }, optional dry_run
+	 * PERMANENTLY deletes a single RS page (or any post type) by URL or slug —
+	 * this bypasses the trash and cannot be undone. Prefer POST /trash-page,
+	 * which is recoverable.
+	 *
+	 * dry_run:true resolves the post and reports what WOULD be deleted without
+	 * writing. Before 3.2.19 this endpoint accepted dry_run and deleted anyway.
 	 */
 	public function handle_delete_page( \WP_REST_Request $request ): \WP_REST_Response {
-		$data = $request->get_json_params() ?: $request->get_body_params();
+		$data    = $request->get_json_params() ?: $request->get_body_params();
+		$dry_run = filter_var( $data['dry_run'] ?? false, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE ) ?? false;
 
 		$post_id = 0;
 
@@ -225,12 +231,27 @@ class Ratesight_Webhook_Handler {
 		if ( ! $post_id ) {
 			return new \WP_REST_Response( array(
 				'ok'      => false,
+				'dry_run' => $dry_run,
 				'message' => 'No post found for the given url or slug.',
 			), 404 );
 		}
 
-		$title    = get_the_title( $post_id );
-		$deleted  = wp_delete_post( $post_id, true ); // true = skip trash
+		$title = get_the_title( $post_id );
+
+		if ( $dry_run ) {
+			return new \WP_REST_Response( array(
+				'ok'            => true,
+				'dry_run'       => true,
+				'deleted'       => false,
+				'id'            => $post_id,
+				'title'         => $title,
+				'status_before' => (string) get_post_status( $post_id ),
+				'status_after'  => (string) get_post_status( $post_id ),
+				'message'       => "Dry run: post #{$post_id} ({$title}) would be PERMANENTLY deleted. Use POST /trash-page for a recoverable removal.",
+			), 200 );
+		}
+
+		$deleted = wp_delete_post( $post_id, true ); // true = skip trash
 
 		if ( ! $deleted ) {
 			return new \WP_REST_Response( array(
@@ -248,6 +269,7 @@ class Ratesight_Webhook_Handler {
 
 		return new \WP_REST_Response( array(
 			'ok'      => true,
+			'dry_run' => false,
 			'deleted' => true,
 			'id'      => $post_id,
 			'title'   => $title,
@@ -826,11 +848,22 @@ class Ratesight_Webhook_Handler {
 		// ── Cache purge ───────────────────────────────────────────────────────
 		$this->purge_cache( $post_id );
 
-		// ── Deferred image + publish ──────────────────────────────────────────
+		// ── Deferred image attach — NEVER a publish ───────────────────────────
+		// update-page is an EDIT verb, not a publish verb. It used to schedule
+		// ratesight_deferred_publish with an empty request status, so the cron
+		// job fell back to the site's configured Final Post Status and flipped
+		// any DRAFT it touched to publish ~a minute or two later. Writing SEO
+		// meta to a draft therefore published it (reproduced twice on a live
+		// install, 2026-08-26: create-page{status:draft} + update-page{meta_*}
+		// -> status=publish at t+7min; the same draft with no update-page call
+		// stayed a draft). The sentinel makes the deferred job image-only.
+		//
+		// A `status` field in an update-page body is IGNORED — use create-page
+		// (upsert by slug) or the WP admin to change a post's status.
 		$featured_image_url  = ! empty( $data['featured_image_url'] )  ? esc_url_raw( $data['featured_image_url'] )          : '';
 		$featured_image_name = ! empty( $data['featured_image_name'] ) ? sanitize_file_name( $data['featured_image_name'] )  : '';
-		$valid_statuses      = array( 'publish', 'draft', 'pending', 'private' );
-		$request_status      = ! empty( $data['status'] ) && in_array( $data['status'], $valid_statuses, true ) ? $data['status'] : '';
+		$status_ignored      = ! empty( $data['status'] ) && (string) $data['status'] !== (string) $post->post_status;
+		$request_status      = Ratesight_Publisher::STATUS_PRESERVE;
 
 		$log_title = $post_data['post_title'] ?? $post->post_title;
 		$log_id    = Ratesight_Logger::log_pending( $log_title, $data['child_category'] ?? '', $raw_payload );
@@ -849,16 +882,28 @@ class Ratesight_Webhook_Handler {
 		[ $permalink_template, $postname ] = get_sample_permalink( $post_id );
 		$expected_url = str_replace( array( '%pagename%', '%postname%' ), $postname, $permalink_template );
 
-		return new \WP_REST_Response( array(
-			'success'      => true,
-			'updated'      => true,
-			'post_id'      => $post_id,
-			'post_url'     => $expected_url,
-			'page_builder' => $builder['name'],
-			'seo_plugin'   => Ratesight_SEO_Writer::active_plugin(),
-			'seo_stored'   => $seo_written, // [ meta_title, meta_description, source ] — verify without a second GET
-			'message'      => "Post #{$post_id} updated via URL.",
-		), 200 );
+		$response = array(
+			'success'         => true,
+			'updated'         => true,
+			'post_id'         => $post_id,
+			'post_url'        => $expected_url,
+			'page_builder'    => $builder['name'],
+			'seo_plugin'      => Ratesight_SEO_Writer::active_plugin(),
+			'seo_stored'      => $seo_written, // [ meta_title, meta_description, source ] — verify without a second GET
+			// Status is reported before AND after so a caller can prove this
+			// write did not publish anything. They are always equal.
+			'status_before'   => (string) $post->post_status,
+			'status_after'    => (string) get_post_status( $post_id ),
+			'status_preserved'=> true,
+			'message'         => "Post #{$post_id} updated via URL.",
+		);
+
+		if ( $status_ignored ) {
+			$response['status_ignored'] = true;
+			$response['message']       .= ' The "status" field was ignored: update-page never changes post_status — use create-page to publish.';
+		}
+
+		return new \WP_REST_Response( $response, 200 );
 	}
 
 	// -------------------------------------------------------------------------
@@ -1164,6 +1209,17 @@ class Ratesight_Webhook_Handler {
 			'list_redirects'       => true,
 			'can_recreate'         => $can_recreate,
 			'update_page'          => true,
+			// Since 3.2.19: update-page is an edit verb only — it never changes
+			// post_status, so writing SEO meta to a draft leaves it a draft.
+			'update_page_preserves_status' => true,
+			// Since 3.2.19: recoverable removal verbs (wp_trash_post /
+			// wp_untrash_post). Absent = the site only has the permanent
+			// DELETE /create-page and cannot be asked to trash anything.
+			'trash_page'           => true,
+			'restore_page'         => true,
+			// Since 3.2.19: DELETE /create-page honours dry_run instead of
+			// deleting regardless.
+			'delete_page_dry_run'  => true,
 			'related_links'        => true,
 			'runtime_404_routing'  => true,
 			'provider_ownership'   => array(
