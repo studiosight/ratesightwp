@@ -31,14 +31,14 @@ function source_php_files(): array {
 }
 
 $inventory = Ratesight_Connection_Ownership::inventory();
-$required_families = array( 'options', 'optionPrefixes', 'tables', 'postTypes', 'postMeta', 'userMeta', 'transientPrefixes', 'cronHooks', 'adminControls', 'ajaxActions', 'restRoutes', 'oauthCallbacks', 'providerClients', 'providerOperations', 'workerEndpoints', 'publicActions', 'capabilities', 'replacements', 'uninstallDeletes' );
+$required_families = array( 'options', 'optionPrefixes', 'tables', 'postTypes', 'postMeta', 'userMeta', 'transientPrefixes', 'cronHooks', 'adminControls', 'ajaxActions', 'restRoutes', 'oauthCallbacks', 'providerClients', 'providerOperations', 'workerEndpoints', 'publicActions', 'capabilities', 'operatorSurface', 'phase6Gates', 'replacements', 'uninstallDeletes' );
 check_ownership_case( 'inventory exposes every required family exactly once', array_keys( $inventory ) === $required_families );
 
 $duplicates = array();
 $unknown_owners = array();
 $allowed_owners = array( 'wordpress_plugin', 'dashboard', 'external_owner_unresolved' );
 $allowed_states = array( 'retained_wordpress', 'dashboard_replacement_unproven', 'retirement_candidate', 'blocked_external_consumer', 'blocked' );
-foreach ( $inventory as $family => $records ) {
+foreach ( array_diff_key( $inventory, array_flip( array( 'operatorSurface', 'phase6Gates' ) ) ) as $family => $records ) {
 	$keys = array_map( static fn( array $record ): string => $record['type'] . ':' . $record['id'], $records );
 	if ( count( $keys ) !== count( array_unique( $keys ) ) ) $duplicates[] = $family;
 	foreach ( $records as $record ) {
@@ -152,6 +152,16 @@ check_ownership_case( 'Worker sitemap/auto-submit is a blocked external capabili
 check_ownership_case( 'IndexNow remains a separately retained notification capability', ( $capabilities['indexnow_notification'] ?? '' ) === 'retained_wordpress' );
 check_ownership_case( 'stored DeepSeek and Worker AI are separate capabilities', ( $capabilities['deepseek_stored_option'] ?? '' ) === 'retirement_candidate' && ( $capabilities['worker_ai'] ?? '' ) === 'blocked_external_consumer' );
 check_ownership_case( 'outbound broken-link inventory remains WordPress-local', ( $capabilities['outbound_broken_link_inventory'] ?? '' ) === 'retained_wordpress' && in_array( 'ratesight_link_cache', inventory_ids( $inventory['tables'] ), true ) );
+
+$operator_surface = array_column( $inventory['operatorSurface'], null, 'id' );
+check_ownership_case( 'future narrow plugin operator surface is complete and retained', array_keys( $operator_surface ) === array( 'app_auth_health', 'active_installation_status', 'wordpress_local_behavior', 'signed_event_health', 'indexnow_status', 'emergency_diagnostics' ) && array_reduce( $operator_surface, static fn( bool $ok, array $record ): bool => $ok && $record['owner'] === 'wordpress_plugin' && $record['state'] === 'retained', true ) );
+
+$phase_6_gates = array_column( $inventory['phase6Gates'], null, 'id' );
+check_ownership_case( 'every Phase 6 mutation and operational gate requires separate authorization', array_keys( $phase_6_gates ) === array( 'credential_deletion', 'ui_code_removal', 'observe_mode', 'enforce_mode', 'external_worker_change', 'outbound_link_migration', 'live_site_binding' ) && array_reduce( $phase_6_gates, static fn( bool $ok, array $record ): bool => $ok && $record['state'] === 'blocked' && $record['authorization'] === 'separate' && $record['evidenceToUnblock'] !== '', true ) );
+
+$connections_ui = file_get_contents( __DIR__ . '/../admin/partials/tab-connections.php' );
+check_ownership_case( 'Connections ownership label is sanitized and preserves existing controls', str_contains( $connections_ui, 'data-ratesight-owner="wordpress-and-dashboard"' ) && str_contains( $connections_ui, 'Existing provider controls remain active here' ) && str_contains( $connections_ui, 'rs-load-gsc-properties' ) && str_contains( $connections_ui, 'rs-load-gbp-locations' ) && str_contains( $connections_ui, 'rs-load-bing-sites' ) );
+check_ownership_case( 'operator boundary adds no deletion endpoint provider call or secret rendering', ! preg_match( '/register_rest_route[\s\S]*delete.*(?:credential|setting)/i', substr( $connections_ui, 0, 2500 ) ) && ! preg_match( '/wp_(?:safe_)?remote_/', $connections_ui ) && ! preg_match( '/(?:access_token|refresh_token|ciphertext|wordpressSecret)/i', $connections_ui ) );
 
 $replacement_ids = inventory_ids( $inventory['replacements'] );
 check_ownership_case( 'GBP GSC Bing and Meta replacement matrix is complete', $replacement_ids === array( 'bing', 'gbp', 'gsc', 'meta' ) );

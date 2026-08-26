@@ -41,11 +41,57 @@ class Ratesight_Connection_Ownership {
 			'workerEndpoints'   => self::worker_endpoints(),
 			'publicActions'     => self::public_actions(),
 			'capabilities'      => self::capabilities(),
+			'operatorSurface'   => self::operator_surface(),
+			'phase6Gates'       => self::phase_6_gates(),
 			'replacements'      => self::replacement_matrix(),
 			'uninstallDeletes'  => self::uninstall_deletions( $state ),
 		);
 
 		return $inventory;
+	}
+
+	/**
+	 * Surfaces that remain intentionally local to WordPress after a future cutover.
+	 */
+	public static function operator_surface(): array {
+		return array(
+			self::surface( 'app_auth_health', 'App authentication and health' ),
+			self::surface( 'active_installation_status', 'Active installation status' ),
+			self::surface( 'wordpress_local_behavior', 'WordPress-local behavior' ),
+			self::surface( 'signed_event_health', 'Signed-event health' ),
+			self::surface( 'indexnow_status', 'IndexNow status' ),
+			self::surface( 'emergency_diagnostics', 'Emergency diagnostics' ),
+		);
+	}
+
+	/**
+	 * Destructive or operational Phase 6 actions remain independently gated.
+	 */
+	public static function phase_6_gates(): array {
+		$definitions = array(
+			'credential_deletion'       => 'Separate credential inventory, backup, rollback, and deletion authorization.',
+			'ui_code_removal'           => 'Verified replacement parity plus separate UI and code removal authorization.',
+			'observe_mode'              => 'Separate O1 operational authorization and acceptance evidence.',
+			'enforce_mode'              => 'Separate E1 operational authorization after Observe acceptance.',
+			'external_worker_change'    => 'Positive Worker ownership and consumer proof plus separate change authorization.',
+			'outbound_link_migration'   => 'Dashboard parity and migration rollback proof plus separate authorization.',
+			'live_site_binding'         => 'Operator-approved identity mapping and separately authorized live migration.',
+		);
+		$result = array();
+		foreach ( $definitions as $id => $evidence ) {
+			$result[] = array(
+				'id' => $id, 'state' => 'blocked', 'authorization' => 'separate',
+				'evidenceToUnblock' => $evidence,
+			);
+		}
+		return $result;
+	}
+
+	private static function surface( string $id, string $label ): array {
+		return array(
+			'id' => $id, 'label' => $label, 'owner' => 'wordpress_plugin',
+			'state' => 'retained', 'destination' => 'wordpress_connections',
+		);
 	}
 
 	private static function admin_controls(): array {
