@@ -434,12 +434,20 @@ jQuery( function( $ ) {
 			var yes = '<span style="color:#00a32a;font-weight:600;">✅</span>';
 			var no  = '<span style="color:#d63638;font-weight:600;">❌</span>';
 			var warn = '<span style="color:#7a5800;font-weight:600;">⚠️</span>';
+			var installation = d.installation || {};
+			var installationText = [ installation.directoryName || 'Unknown folder', installation.releaseVersion ? 'v' + installation.releaseVersion : 'unknown version' ].join( ' · ' );
+			var installationSafe = $( '<div>' ).text( installationText ).html();
+			var uninstallState = installation.destructiveUninstallAllowed
+				? warn + ' Explicit final-copy cleanup allowed'
+				: yes + ' Data retained (' + $( '<div>' ).text( installation.blockReason || 'retention_enabled' ).html() + ')';
 
 			// Site status panel
 			var rows = [
 				[ 'Sitemap accessible', d.sitemap_live ? yes + ' Yes' : no + ' Not found — make sure an SEO plugin is generating your sitemap.xml' ],
 				[ 'Visible to search engines', d.blog_public ? yes + ' Yes' : warn + ' No — <a href="<?php echo esc_url( admin_url( 'options-reading.php' ) ); ?>">update Reading settings</a>' ],
 				[ 'Ratesight ID', d.widget_id_set ? yes + ' Configured' : no + ' Missing — <a href="<?php echo esc_url( admin_url( 'admin.php?page=ratesight&tab=widgets' ) ); ?>">enter on Widgets tab</a>' ],
+				[ 'Active installation', ( installation.active ? yes : warn ) + ' ' + installationSafe + ' · ' + Number( installation.siblingCount || 0 ) + ' sibling(s)' ],
+				[ 'Uninstall retention', uninstallState ],
 			];
 
 			var table = '<table class="wp-list-table widefat fixed" style="max-width:560px;">' +

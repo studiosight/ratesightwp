@@ -1681,6 +1681,7 @@ class Ratesight_Admin {
 				),
 				'widget_id_set' => ! empty( $cached['widget_id_set'] ),
 				'blog_public'   => ! empty( $cached['blog_public'] ),
+				'installation'  => Ratesight_Installation::status( plugin_basename( RATESIGHT_PLUGIN_DIR . 'ratesight.php' ) ),
 			) );
 		}
 		// Ignore legacy cached payloads because they contained a key-bearing URL.
@@ -1700,6 +1701,9 @@ class Ratesight_Admin {
 
 		// blog_public check
 		$status['blog_public'] = (bool) get_option( 'blog_public' );
+
+		// Exact local copy/version status; never includes an absolute path.
+		$status['installation'] = Ratesight_Installation::status( plugin_basename( RATESIGHT_PLUGIN_DIR . 'ratesight.php' ) );
 
 		// Cache for 1 hour
 		set_transient( 'ratesight_connections_status', $status, HOUR_IN_SECONDS );
