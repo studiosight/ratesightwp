@@ -195,6 +195,9 @@ class Ratesight {
 
 		// Related-services internal links — REST endpoints (static handlers).
 		add_action( 'rest_api_init', array( 'Ratesight_Related_Links', 'register_routes' ) );
+
+		// Recoverable page lifecycle — trash-page / restore-page (signed only).
+		add_action( 'rest_api_init', array( 'Ratesight_Page_Lifecycle', 'register_routes' ) );
 	}
 
 	private function define_cron_hooks() {
