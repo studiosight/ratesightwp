@@ -65,7 +65,16 @@ Clears the list for that URL's post. Response: `{ ok, post_id, url, cleared: tru
 ## Storage / rendering
 
 - Post meta key: `_ratesight_related_links` — `array` of `{ url, anchor }`.
-- Rendered only on the front-end singular view of the post
-  (`is_singular() && in_the_loop() && is_main_query()`), once per request.
+- Rendered only on the front-end singular view of the post, once per request.
+  The guard reads the REQUEST, not loop state: `! is_admin() && ! is_feed() &&
+  is_singular()`, with the queried object as the subject. Loop state is
+  deliberately not consulted — a Divi/Elementor Theme Builder post template
+  renders the body from inside the layout, where `in_the_loop()` and
+  `is_main_query()` are false, and requiring them suppressed the block on every
+  theme-builder blog post (fixed in 3.3.2).
+- Content belonging to a *different* post that passes through `the_content` on
+  the same request (related-post modules, blog-feed modules) is skipped, so the
+  block can never land inside another post's card. A theme-builder layout post
+  standing in for the queried post is not treated as foreign.
 - Output is fully escaped (`esc_url`, `esc_html`). Style via the
   `.rs-related-services` / `__title` / `__list` / `__item` classes.

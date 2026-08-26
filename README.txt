@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.3.1
+Stable tag: 3.3.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,19 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+
+3.3.2 — Related-services links render on theme-builder blog posts
+  - The render-time related-links block required `in_the_loop()` and
+    `is_main_query()`. A Divi or Elementor Theme Builder POST TEMPLATE renders
+    the body from inside the layout, where both are false, so the block bailed
+    on every theme-builder blog post and the stored link lists never reached the
+    HTML. Measured on a live install (2026-08-26): a post with 6 stored links
+    served 0 blocks; 156 source pages holding 464 links were invisible.
+  - The guard now decides from the request (`is_singular()` plus the queried
+    object) instead of loop state, and still refuses admin, feeds and archives.
+    Content belonging to a different post (related-post modules, blog-feed
+    modules) is skipped, and the once-per-request flag keeps the block at one
+    even when `the_content` runs several times.
 
 3.3.1 — SEO meta writes actually render on Squirrly sites
   - Squirrly SEO support wrote a `_squirrly_seo` post-meta array that Squirrly
