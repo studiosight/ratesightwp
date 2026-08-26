@@ -31,6 +31,8 @@ if ( ! empty( $_GET['rs_oauth_error'] ) ) {  // phpcs:ignore WordPress.Security.
 
 $o = Ratesight_Options::get_all();
 
+$operator_surface_ids = array_column( Ratesight_Connection_Ownership::operator_surface(), 'id' );
+
 $gbp_connected = Ratesight_OAuth_Client::is_connected( 'gbp' );
 $gbp_locked    = Ratesight_GBP_Client::is_locked();
 $gbp_data      = Ratesight_OAuth_Client::get_stored_data( 'gbp' );
@@ -40,6 +42,13 @@ $gsc_connected = Ratesight_OAuth_Client::is_connected( 'gsc' );
 $gsc_locked    = Ratesight_GSC_Client::is_locked();
 $gsc_data      = Ratesight_OAuth_Client::get_stored_data( 'gsc' );
 $gsc_selection = Ratesight_GSC_Client::get_selection();
+
+?>
+<div class="notice notice-info inline" data-ratesight-owner="wordpress-and-dashboard" data-ratesight-surface-count="<?php echo esc_attr( (string) count( $operator_surface_ids ) ); ?>" style="margin:0 0 16px;">
+	<p><strong>Connection ownership:</strong> Existing provider controls remain active here until a separately verified cutover. Do not create a second provider connection in the app; future app destinations will identify the same WordPress site explicitly.</p>
+	<p class="description">This plugin will retain app health, active-installation status, WordPress-local behavior, signed-event health, IndexNow status, and emergency diagnostics.</p>
+</div>
+<?php
 
 if ( ! Ratesight_OAuth_Client::credentials_configured() ) :
 ?>
