@@ -102,11 +102,26 @@ check_auth_case( 'explicit rollback to observe remains available', Ratesight_Req
 check_auth_case( 'explicit legacy downgrade remains blocked', error_code( Ratesight_Request_Auth::set_mode( 'legacy' ) ) === 'rs_auth_mode_downgrade_blocked' );
 unset( $options['ratesight_auth_ever_enforced'] );
 check_auth_case( 'new install can enter observe mode', Ratesight_Request_Auth::set_mode( 'observe_v2' ) === true );
-check_auth_case( 'observe mode can enter enforce and latches', Ratesight_Request_Auth::set_mode( 'enforce_v2' ) === true && ! empty( $options['ratesight_auth_ever_enforced'] ) );
-check_auth_case( 'unknown transition is rejected', error_code( Ratesight_Request_Auth::set_mode( 'corrupt' ) ) === 'rs_auth_mode_invalid' );
-
-$options['ratesight_auth_mode'] = 'enforce_v2';
+unset( $options['ratesight_webhook_secret'], $options['ratesight_auth_v2_readiness'] );
+check_auth_case( 'enforcement refuses without a primary secret', error_code( Ratesight_Request_Auth::set_mode( 'enforce_v2' ) ) === 'rs_auth_enforce_secret_required' );
 $options['ratesight_webhook_secret'] = $fixture['secret'];
+$options['ratesight_auth_v2_readiness'] = array();
+check_auth_case( 'enforcement refuses missing readiness proof', error_code( Ratesight_Request_Auth::set_mode( 'enforce_v2' ) ) === 'rs_auth_enforce_readiness_required' );
+$options['ratesight_auth_v2_readiness'] = array( 'key_id' => Ratesight_Request_Auth::key_id( 'wrong-secret' ), 'accepted_at' => time() );
+check_auth_case( 'enforcement refuses readiness for the wrong key', error_code( Ratesight_Request_Auth::set_mode( 'enforce_v2' ) ) === 'rs_auth_enforce_readiness_required' );
+$options['ratesight_auth_v2_readiness'] = array( 'key_id' => $fixture['keyId'], 'accepted_at' => time() - Ratesight_Request_Auth::READINESS_TTL - 1 );
+check_auth_case( 'enforcement refuses stale readiness proof', error_code( Ratesight_Request_Auth::set_mode( 'enforce_v2' ) ) === 'rs_auth_enforce_readiness_required' );
+unset( $options['ratesight_auth_v2_readiness'] );
+$readiness_request = signed_request( $fixture['secret'] );
+check_auth_case( 'verified current-key v2 request records readiness', Ratesight_Request_Auth::authorize_read( $readiness_request ) === true && ( $options['ratesight_auth_v2_readiness']['key_id'] ?? '' ) === $fixture['keyId'] );
+check_auth_case( 'capabilities expose sanitized current readiness', Ratesight_Request_Auth::capability_auth()['readiness_current'] === true && Ratesight_Request_Auth::capability_auth()['readiness_expires'] !== null );
+check_auth_case( 'current readiness permits enforce and latches', Ratesight_Request_Auth::set_mode( 'enforce_v2' ) === true && ! empty( $options['ratesight_auth_ever_enforced'] ) );
+check_auth_case( 'enforced mode can roll back only to observe', Ratesight_Request_Auth::set_mode( 'observe_v2' ) === true && error_code( Ratesight_Request_Auth::set_mode( 'legacy' ) ) === 'rs_auth_mode_downgrade_blocked' );
+check_auth_case( 'fresh proof permits re-enforcement after observe rollback', Ratesight_Request_Auth::set_mode( 'enforce_v2' ) === true );
+check_auth_case( 'unknown transition is rejected', error_code( Ratesight_Request_Auth::set_mode( 'corrupt' ) ) === 'rs_auth_mode_invalid' );
+$admin_source = file_get_contents( __DIR__ . '/../admin/class-ratesight-admin.php' );
+check_auth_case( 'admin transition input cannot submit readiness proof', strpos( $admin_source, "_POST['readiness" ) === false && strpos( $admin_source, 'ratesight_auth_v2_readiness' ) === false );
+
 $valid = signed_request( $fixture['secret'] );
 check_auth_case( 'valid v2 accepted', Ratesight_Request_Auth::authorize_mutation( $valid ) === true );
 check_auth_case( 'replayed nonce rejected', error_code( Ratesight_Request_Auth::authorize_mutation( $valid ) ) === 'rs_nonce_replayed' );

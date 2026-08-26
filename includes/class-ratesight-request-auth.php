@@ -11,6 +11,7 @@ class Ratesight_Request_Auth {
 	public const VERSION        = 'rs-hmac-v2';
 	public const MAX_CLOCK_SKEW = 300;
 	public const MAX_BODY_BYTES = 1048576;
+	public const READINESS_TTL  = 86400;
 	public const MODES          = array( 'legacy', 'observe_v2', 'enforce_v2' );
 	public const ROUTE_POLICIES = array(
 		'GET /ratesight/v1/capabilities' => 'public_bootstrap',
@@ -57,6 +58,19 @@ class Ratesight_Request_Auth {
 			return new WP_Error( 'rs_auth_mode_downgrade_blocked', 'An enforced installation cannot return to legacy mode.', array( 'status' => 409 ) );
 		}
 		if ( $mode === 'enforce_v2' ) {
+			if ( self::mode() !== 'enforce_v2' && self::mode() !== 'observe_v2' ) {
+				return new WP_Error( 'rs_auth_enforce_observe_required', 'Observe mode is required before enforcement.', array( 'status' => 409 ) );
+			}
+			$secret = (string) get_option( 'ratesight_webhook_secret', '' );
+			if ( $secret === '' ) {
+				return new WP_Error( 'rs_auth_enforce_secret_required', 'A primary webhook secret is required before enforcement.', array( 'status' => 409 ) );
+			}
+			$proof = get_option( 'ratesight_auth_v2_readiness', array() );
+			$accepted_at = is_array( $proof ) ? (int) ( $proof['accepted_at'] ?? 0 ) : 0;
+			$proof_key   = is_array( $proof ) ? (string) ( $proof['key_id'] ?? '' ) : '';
+			if ( ! hash_equals( self::key_id( $secret ), $proof_key ) || $accepted_at < time() - self::READINESS_TTL || $accepted_at > time() + self::MAX_CLOCK_SKEW ) {
+				return new WP_Error( 'rs_auth_enforce_readiness_required', 'A recent successful rs-hmac-v2 request using the current key is required before enforcement.', array( 'status' => 409 ) );
+			}
 			update_option( 'ratesight_auth_ever_enforced', true, false );
 		}
 		update_option( 'ratesight_auth_mode', $mode, false );
@@ -214,6 +228,10 @@ class Ratesight_Request_Auth {
 		if ( ! self::claim_nonce( $key_id, $nonce, (int) $timestamp ) ) {
 			return self::failure( 'rs_nonce_replayed', 409, $request, $policy, $key_id );
 		}
+		$primary = (string) get_option( 'ratesight_webhook_secret', '' );
+		if ( $primary !== '' && hash_equals( self::key_id( $primary ), $key_id ) ) {
+			update_option( 'ratesight_auth_v2_readiness', array( 'key_id' => $key_id, 'accepted_at' => time() ), false );
+		}
 		self::record_audit( $request, $policy, 'v2_accepted', $key_id );
 		return true;
 	}
@@ -254,6 +272,10 @@ class Ratesight_Request_Auth {
 		$primary  = (string) get_option( 'ratesight_webhook_secret', '' );
 		$previous = (string) get_option( 'ratesight_webhook_secret_previous', '' );
 		$expires  = (int) get_option( 'ratesight_webhook_secret_previous_expires', 0 );
+		$proof    = get_option( 'ratesight_auth_v2_readiness', array() );
+		$accepted_at = is_array( $proof ) ? (int) ( $proof['accepted_at'] ?? 0 ) : 0;
+		$proof_key   = is_array( $proof ) ? (string) ( $proof['key_id'] ?? '' ) : '';
+		$readiness_current = $primary !== '' && hash_equals( self::key_id( $primary ), $proof_key ) && $accepted_at >= time() - self::READINESS_TTL && $accepted_at <= time() + self::MAX_CLOCK_SKEW;
 		return array(
 			'supported'              => array( self::VERSION, 'legacy-body-hmac' ),
 			'mode'                   => self::mode(),
@@ -261,6 +283,8 @@ class Ratesight_Request_Auth {
 			'current_key_id'         => $primary !== '' ? self::key_id( $primary ) : null,
 			'previous_key_id'        => $previous !== '' && $expires >= time() ? self::key_id( $previous ) : null,
 			'previous_grace_expires' => $previous !== '' && $expires >= time() ? gmdate( 'c', $expires ) : null,
+			'readiness_current'       => $readiness_current,
+			'readiness_expires'       => $readiness_current ? gmdate( 'c', $accepted_at + self::READINESS_TTL ) : null,
 		);
 	}
 
