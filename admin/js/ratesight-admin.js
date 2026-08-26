@@ -73,8 +73,8 @@
 		$( '#rs-regen-secret' ).on( 'click', function () {
 			var isFirst = $( '#rs-webhook-secret' ).val() === '';
 			var msg = isFirst
-				? 'Generate a webhook secret? You can share it with integrations that support HMAC signing.'
-				: 'Regenerate the webhook secret? Any integrations sending the old secret will stop matching until updated.';
+				? 'Generate a webhook secret for server-side rs-hmac-v2 signing?'
+				: 'Regenerate the webhook secret? The previous key remains valid for a seven-day rotation grace period.';
 			if ( ! confirm( msg ) ) return;
 			var $btn = $( this ).prop( 'disabled', true ).text( isFirst ? 'Generating…' : 'Regenerating…' );
 			$.post( ajax, { action: 'ratesight_regen_webhook_secret', nonce: nonce } )
@@ -91,6 +91,22 @@
 					}
 				} )
 				.fail( function () { $btn.prop( 'disabled', false ); } );
+		} );
+
+		$( '#rs-save-auth-mode' ).on( 'click', function () {
+			var $btn = $( this ).prop( 'disabled', true );
+			var $feedback = $( '#rs-auth-mode-feedback' ).show().text( 'Saving…' );
+			$.post( ajax, { action: 'ratesight_set_auth_mode', nonce: nonce, mode: $( '#rs-auth-mode' ).val() } )
+				.done( function ( r ) {
+					$btn.prop( 'disabled', false );
+					$feedback.text( r.success ? 'Saved.' : ( r.data && r.data.message ? r.data.message : 'Could not save mode.' ) );
+					if ( r.success && r.data.auth ) $( '#rs-auth-mode' ).val( r.data.auth.mode );
+				} )
+				.fail( function ( xhr ) {
+					$btn.prop( 'disabled', false );
+					var data = xhr.responseJSON && xhr.responseJSON.data;
+					$feedback.text( data && data.message ? data.message : 'Could not save mode.' );
+				} );
 		} );
 
 		$( '#rs-send-test' ).on( 'click', function () {

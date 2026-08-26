@@ -31,8 +31,36 @@ class Ratesight_Request_Auth {
 	);
 
 	public static function mode(): string {
-		$mode = (string) get_option( 'ratesight_auth_mode', 'legacy' );
-		return in_array( $mode, self::MODES, true ) ? $mode : 'legacy';
+		$stored = get_option( 'ratesight_auth_mode', null );
+		$ever_enforced = (bool) get_option( 'ratesight_auth_ever_enforced', false );
+		if ( $stored === null || $stored === false ) {
+			return $ever_enforced ? 'enforce_v2' : 'legacy';
+		}
+		$mode = (string) $stored;
+		if ( ! in_array( $mode, self::MODES, true ) ) {
+			return 'enforce_v2';
+		}
+		if ( $ever_enforced && $mode === 'legacy' ) {
+			return 'enforce_v2';
+		}
+		if ( $mode === 'enforce_v2' && ! $ever_enforced ) {
+			update_option( 'ratesight_auth_ever_enforced', true, false );
+		}
+		return $mode;
+	}
+
+	public static function set_mode( string $mode ) {
+		if ( ! in_array( $mode, self::MODES, true ) ) {
+			return new WP_Error( 'rs_auth_mode_invalid', 'Unknown request authentication mode.', array( 'status' => 400 ) );
+		}
+		if ( $mode === 'legacy' && (bool) get_option( 'ratesight_auth_ever_enforced', false ) ) {
+			return new WP_Error( 'rs_auth_mode_downgrade_blocked', 'An enforced installation cannot return to legacy mode.', array( 'status' => 409 ) );
+		}
+		if ( $mode === 'enforce_v2' ) {
+			update_option( 'ratesight_auth_ever_enforced', true, false );
+		}
+		update_option( 'ratesight_auth_mode', $mode, false );
+		return true;
 	}
 
 	public static function key_id( string $secret ): string {
@@ -52,6 +80,28 @@ class Ratesight_Request_Auth {
 			foreach ( $values as $item ) {
 				$pairs[] = array( (string) $key, (string) $item );
 			}
+		}
+		usort( $pairs, static function ( array $a, array $b ): int {
+			return $a[0] === $b[0] ? strcmp( $a[1], $b[1] ) : strcmp( $a[0], $b[0] );
+		} );
+		return implode( '&', array_map( static function ( array $pair ): string {
+			return rawurlencode( $pair[0] ) . '=' . rawurlencode( $pair[1] );
+		}, $pairs ) );
+	}
+
+	public static function canonical_query_from_raw( string $raw_query ) {
+		$pairs = array();
+		foreach ( explode( '&', $raw_query ) as $part ) {
+			if ( $part === '' ) {
+				continue;
+			}
+			$pieces = explode( '=', $part, 2 );
+			$key    = urldecode( $pieces[0] );
+			$value  = urldecode( $pieces[1] ?? '' );
+			if ( strpos( $key, '[' ) !== false || strpos( $key, ']' ) !== false ) {
+				return new WP_Error( 'rs_query_grammar_unsupported', 'Bracketed query keys are unsupported.', array( 'status' => 403 ) );
+			}
+			$pairs[] = array( $key, $value );
 		}
 		usort( $pairs, static function ( array $a, array $b ): int {
 			return $a[0] === $b[0] ? strcmp( $a[1], $b[1] ) : strcmp( $a[0], $b[0] );
@@ -152,7 +202,12 @@ class Ratesight_Request_Auth {
 		if ( $secret === null ) {
 			return self::failure( 'rs_key_unknown', 403, $request, $policy, $key_id );
 		}
-		$canonical = self::canonical_request( $request->get_method(), $request->get_route(), $request->get_query_params(), $timestamp, $nonce, $digest );
+		$raw_query = method_exists( $request, 'get_query_string' ) ? (string) $request->get_query_string() : (string) ( $_SERVER['QUERY_STRING'] ?? '' );
+		$query = $raw_query !== '' ? self::canonical_query_from_raw( $raw_query ) : self::canonical_query( $request->get_query_params() );
+		if ( is_wp_error( $query ) ) {
+			return self::failure( $query->get_error_code(), 403, $request, $policy, $key_id );
+		}
+		$canonical = implode( "\n", array( self::VERSION, strtoupper( $request->get_method() ), self::normalize_route( $request->get_route() ), $query, $timestamp, $nonce, $digest ) );
 		if ( ! hash_equals( self::signature( $secret, $canonical ), $signature ) ) {
 			return self::failure( 'rs_bad_signature', 403, $request, $policy, $key_id );
 		}

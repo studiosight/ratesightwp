@@ -116,6 +116,7 @@ class Ratesight {
 		$this->loader->add_action( 'wp_ajax_ratesight_link_refresh_suggestions', $admin, 'ajax_link_refresh_suggestions' );
 		$this->loader->add_action( 'wp_ajax_ratesight_test_ai_worker',           $admin, 'ajax_test_ai_worker'           );
 		$this->loader->add_action( 'wp_ajax_ratesight_regen_webhook_secret',  $admin, 'ajax_regen_webhook_secret'  );
+		$this->loader->add_action( 'wp_ajax_ratesight_set_auth_mode',         $admin, 'ajax_set_auth_mode'         );
 		$this->loader->add_action( 'wp_ajax_ratesight_link_get_manual',       $admin, 'ajax_link_get_manual'       );
 		$this->loader->add_action( 'wp_ajax_ratesight_link_remove_manual',    $admin, 'ajax_link_remove_manual'    );
 		$this->loader->add_action( 'wp_ajax_ratesight_redirect_update',       $admin, 'ajax_redirect_update'       );

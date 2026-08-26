@@ -58,9 +58,11 @@ SHORTCODES
 
 WEBHOOK ENDPOINT
 ----------------
-  POST /wp-json/ratesight/v1/create-page?secret=YOUR_SECRET_KEY
+  POST /wp-json/ratesight/v1/create-page
 
 Required payload fields: title, article
+Protected requests require the negotiated rs-hmac-v2 headers documented in the
+plugin settings. Secrets are never sent in URLs.
 See the Payload Reference tab in the plugin settings for full documentation.
 
 

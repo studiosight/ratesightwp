@@ -25,10 +25,16 @@ function add_option( $name, $value ) {
 }
 
 class Auth_Request {
-	public function __construct( public string $method, public string $route, public array $query, public string $body, public array $headers ) {}
+	public function __construct( public string $method, public string $route, public array $query, public string $body, public array $headers, public ?string $raw_query = null ) {}
 	public function get_method() { return $this->method; }
 	public function get_route() { return $this->route; }
 	public function get_query_params() { return $this->query; }
+	public function get_query_string() {
+		if ( $this->raw_query !== null ) return $this->raw_query;
+		$pairs = array();
+		foreach ( $this->query as $key => $value ) foreach ( is_array( $value ) ? $value : array( $value ) as $item ) $pairs[] = rawurlencode( (string) $key ) . '=' . rawurlencode( (string) $item );
+		return implode( '&', $pairs );
+	}
 	public function get_body() { return $this->body; }
 	public function get_header( $name ) { return $this->headers[ strtolower( str_replace( '_', '-', $name ) ) ] ?? ''; }
 }
@@ -78,6 +84,26 @@ check_auth_case( 'golden body digest', hash( 'sha256', $fixture['body'] ) === $f
 check_auth_case( 'golden key id', Ratesight_Request_Auth::key_id( $fixture['secret'] ) === $fixture['keyId'] );
 check_auth_case( 'golden canonical bytes', $canonical === $fixture['canonical'] );
 check_auth_case( 'golden signature', Ratesight_Request_Auth::signature( $fixture['secret'], $canonical ) === $fixture['signature'] );
+check_auth_case( 'raw repeated query keys preserve every value', Ratesight_Request_Auth::canonical_query_from_raw( 'tag=red&tag=blue&a=first' ) === 'a=first&tag=blue&tag=red' );
+parse_str( 'tag=red&tag=blue&a=first', $collapsed_query );
+check_auth_case( 'raw canonicalization avoids PHP parser value collapse', $collapsed_query['tag'] === 'blue' && Ratesight_Request_Auth::canonical_query_from_raw( 'tag=red&tag=blue&a=first' ) !== Ratesight_Request_Auth::canonical_query( $collapsed_query ) );
+check_auth_case( 'bracket query grammar rejected', error_code( Ratesight_Request_Auth::canonical_query_from_raw( 'tag%5B%5D=red' ) ) === 'rs_query_grammar_unsupported' );
+
+unset( $options['ratesight_auth_mode'], $options['ratesight_auth_ever_enforced'] );
+check_auth_case( 'upgrade with no mode remains legacy compatible', Ratesight_Request_Auth::mode() === 'legacy' );
+$options['ratesight_auth_mode'] = 'typo_v2';
+check_auth_case( 'invalid mode fails safe to enforce', Ratesight_Request_Auth::mode() === 'enforce_v2' );
+unset( $options['ratesight_auth_mode'] );
+$options['ratesight_auth_ever_enforced'] = true;
+check_auth_case( 'missing mode after enforcement cannot silently downgrade', Ratesight_Request_Auth::mode() === 'enforce_v2' );
+$options['ratesight_auth_mode'] = 'legacy';
+check_auth_case( 'stored legacy after enforcement cannot silently downgrade', Ratesight_Request_Auth::mode() === 'enforce_v2' );
+check_auth_case( 'explicit rollback to observe remains available', Ratesight_Request_Auth::set_mode( 'observe_v2' ) === true && Ratesight_Request_Auth::mode() === 'observe_v2' );
+check_auth_case( 'explicit legacy downgrade remains blocked', error_code( Ratesight_Request_Auth::set_mode( 'legacy' ) ) === 'rs_auth_mode_downgrade_blocked' );
+unset( $options['ratesight_auth_ever_enforced'] );
+check_auth_case( 'new install can enter observe mode', Ratesight_Request_Auth::set_mode( 'observe_v2' ) === true );
+check_auth_case( 'observe mode can enter enforce and latches', Ratesight_Request_Auth::set_mode( 'enforce_v2' ) === true && ! empty( $options['ratesight_auth_ever_enforced'] ) );
+check_auth_case( 'unknown transition is rejected', error_code( Ratesight_Request_Auth::set_mode( 'corrupt' ) ) === 'rs_auth_mode_invalid' );
 
 $options['ratesight_auth_mode'] = 'enforce_v2';
 $options['ratesight_webhook_secret'] = $fixture['secret'];
@@ -104,6 +130,7 @@ $options['ratesight_auth_mode'] = 'observe_v2';
 check_auth_case( 'observe mode accepts valid legacy signature', Ratesight_Request_Auth::authorize_mutation( legacy_request( $fixture['secret'] ) ) === true );
 check_auth_case( 'observe mode rejects unsigned mutation', error_code( Ratesight_Request_Auth::authorize_mutation( legacy_request( $fixture['secret'], '{}', false ) ) ) === 'rs_signature_required' );
 $options['ratesight_auth_mode'] = 'legacy';
+unset( $options['ratesight_auth_ever_enforced'] );
 check_auth_case( 'legacy mode remains compatible with unsigned mutation', Ratesight_Request_Auth::authorize_mutation( legacy_request( $fixture['secret'], '{}', false ) ) === true );
 $options['ratesight_auth_mode'] = 'enforce_v2';
 

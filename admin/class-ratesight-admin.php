@@ -2320,6 +2320,17 @@ class Ratesight_Admin {
 		) );
 	}
 
+	public function ajax_set_auth_mode(): void {
+		check_ajax_referer( 'ratesight_admin', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
+		$mode = sanitize_key( wp_unslash( $_POST['mode'] ?? '' ) );
+		$result = Ratesight_Request_Auth::set_mode( $mode );
+		if ( is_wp_error( $result ) ) {
+			wp_send_json_error( array( 'message' => $result->get_error_message(), 'code' => $result->get_error_code() ), 409 );
+		}
+		wp_send_json_success( array( 'auth' => Ratesight_Request_Auth::capability_auth() ) );
+	}
+
 	public function ajax_link_get_manual(): void {
 		check_ajax_referer( 'ratesight_admin', 'nonce' );
 		if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );

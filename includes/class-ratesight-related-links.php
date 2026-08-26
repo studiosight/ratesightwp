@@ -21,8 +21,7 @@
  *   DELETE /related-links?url=…
  *                           Clear the list for url's post.
  *
- * Auth mirrors Ratesight_Webhook_Handler: an optional X-Ratesight-Signature
- * HMAC over the raw body, matched against the ratesight_webhook_secret option.
+ * Every read and mutation is protected by the shared Ratesight_Request_Auth policy.
  *
  * @package    Ratesight
  * @subpackage Ratesight/includes
