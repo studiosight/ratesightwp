@@ -105,8 +105,10 @@ class Ratesight_Request_Auth {
 		}, $pairs ) );
 	}
 
-	public static function canonical_query_from_raw( string $raw_query ) {
-		$pairs = array();
+	public static function canonical_query_from_raw( string $raw_query, string $matched_route = '' ) {
+		$pairs              = array();
+		$transport_excluded = false;
+		$normalized_route   = $matched_route !== '' ? self::normalize_route( $matched_route ) : '';
 		foreach ( explode( '&', $raw_query ) as $part ) {
 			if ( $part === '' ) {
 				continue;
@@ -116,6 +118,10 @@ class Ratesight_Request_Auth {
 			$value  = urldecode( $pieces[1] ?? '' );
 			if ( strpos( $key, '[' ) !== false || strpos( $key, ']' ) !== false ) {
 				return new WP_Error( 'rs_query_grammar_unsupported', 'Bracketed query keys are unsupported.', array( 'status' => 403 ) );
+			}
+			if ( ! $transport_excluded && $key === 'rest_route' && $normalized_route !== '' && self::normalize_route( $value ) === $normalized_route ) {
+				$transport_excluded = true;
+				continue;
 			}
 			$pairs[] = array( $key, $value );
 		}
@@ -234,7 +240,7 @@ class Ratesight_Request_Auth {
 			return self::failure( 'rs_key_unknown', 403, $request, $policy, $key_id );
 		}
 		$raw_query = method_exists( $request, 'get_query_string' ) ? (string) $request->get_query_string() : (string) ( $_SERVER['QUERY_STRING'] ?? '' );
-		$query = $raw_query !== '' ? self::canonical_query_from_raw( $raw_query ) : self::canonical_query( $request->get_query_params() );
+		$query = $raw_query !== '' ? self::canonical_query_from_raw( $raw_query, (string) $request->get_route() ) : self::canonical_query( $request->get_query_params() );
 		if ( is_wp_error( $query ) ) {
 			return self::failure( $query->get_error_code(), 403, $request, $policy, $key_id );
 		}

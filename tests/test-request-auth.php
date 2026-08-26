@@ -68,7 +68,7 @@ function signed_request( string $secret, array $overrides = array() ): Auth_Requ
 		'x-ratesight-nonce' => $nonce,
 		'x-ratesight-content-sha256' => $overrides['digest'] ?? $digest,
 		'x-ratesight-signature' => $signature,
-	) );
+	), $overrides['raw_query'] ?? null );
 }
 function legacy_request( string $secret, string $body = '{}', bool $signed = true ): Auth_Request {
 	return new Auth_Request( 'POST', '/ratesight/v1/update-page', array(), $body, $signed
@@ -88,6 +88,9 @@ check_auth_case( 'raw repeated query keys preserve every value', Ratesight_Reque
 parse_str( 'tag=red&tag=blue&a=first', $collapsed_query );
 check_auth_case( 'raw canonicalization avoids PHP parser value collapse', $collapsed_query['tag'] === 'blue' && Ratesight_Request_Auth::canonical_query_from_raw( 'tag=red&tag=blue&a=first' ) !== Ratesight_Request_Auth::canonical_query( $collapsed_query ) );
 check_auth_case( 'bracket query grammar rejected', error_code( Ratesight_Request_Auth::canonical_query_from_raw( 'tag%5B%5D=red' ) ) === 'rs_query_grammar_unsupported' );
+check_auth_case( 'plain-permalink transport route is excluded after matched route binding', Ratesight_Request_Auth::canonical_query_from_raw( 'rest_route=%2Fratesight%2Fv1%2Fauth-self-test', '/ratesight/v1/auth-self-test' ) === '' );
+check_auth_case( 'arbitrary and repeated query values remain bound beside plain-permalink transport', Ratesight_Request_Auth::canonical_query_from_raw( 'rest_route=%2Fratesight%2Fv1%2Fupdate-page&tag=red&tag=blue', '/ratesight/v1/update-page' ) === 'tag=blue&tag=red' );
+check_auth_case( 'only one matching transport pair is excluded and mismatched rest_route remains bound', Ratesight_Request_Auth::canonical_query_from_raw( 'rest_route=%2Fratesight%2Fv1%2Fupdate-page&rest_route=%2Fother', '/ratesight/v1/update-page' ) === 'rest_route=%2Fother' );
 
 unset( $options['ratesight_auth_mode'], $options['ratesight_auth_ever_enforced'] );
 check_auth_case( 'upgrade with no mode remains legacy compatible', Ratesight_Request_Auth::mode() === 'legacy' );
@@ -126,8 +129,8 @@ check_auth_case( 'ordinary verifier acceptance does not record operational readi
 $forged_self_test = signed_request( $fixture['secret'], array( 'method' => 'GET', 'route' => '/ratesight/v1/auth-self-test', 'query' => array(), 'body' => '' ) );
 check_auth_case( 'self-test handler cannot be called without prior verifier acceptance', error_code( Ratesight_Request_Auth::handle_self_test( $forged_self_test ) ) === 'rs_auth_readiness_not_verified' );
 $readiness_headers = array_change_key_case( Ratesight_Request_Auth::signed_headers( $fixture['secret'], 'GET', '/ratesight/v1/auth-self-test' ), CASE_LOWER );
-$readiness_request = new Auth_Request( 'GET', '/ratesight/v1/auth-self-test', array(), '', $readiness_headers );
-check_auth_case( 'admin-style signed self-test passes verifier without recording readiness', Ratesight_Request_Auth::authorize_read( $readiness_request ) === true && empty( $options['ratesight_auth_v2_readiness'] ) );
+$readiness_request = new Auth_Request( 'GET', '/ratesight/v1/auth-self-test', array(), '', $readiness_headers, 'rest_route=%2Fratesight%2Fv1%2Fauth-self-test' );
+check_auth_case( 'plain-permalink admin self-test passes verifier without recording readiness', Ratesight_Request_Auth::authorize_read( $readiness_request ) === true && empty( $options['ratesight_auth_v2_readiness'] ) );
 check_auth_case( 'successful signed self-test handler records readiness', Ratesight_Request_Auth::handle_self_test( $readiness_request )['readiness'] === true && ( $options['ratesight_auth_v2_readiness']['key_id'] ?? '' ) === $fixture['keyId'] );
 check_auth_case( 'self-test candidate is single use', error_code( Ratesight_Request_Auth::handle_self_test( $readiness_request ) ) === 'rs_auth_readiness_not_verified' );
 check_auth_case( 'capabilities expose sanitized current readiness', Ratesight_Request_Auth::capability_auth()['readiness_current'] === true && Ratesight_Request_Auth::capability_auth()['readiness_expires'] !== null );
@@ -157,6 +160,8 @@ check_auth_case( 'expired timestamp rejected', error_code( Ratesight_Request_Aut
 check_auth_case( 'malformed nonce rejected', error_code( Ratesight_Request_Auth::authorize_mutation( signed_request( $fixture['secret'], array( 'nonce' => 'short' ) ) ) ) === 'rs_auth_headers_invalid' );
 check_auth_case( 'unknown key rejected', error_code( Ratesight_Request_Auth::authorize_mutation( signed_request( 'wrong-secret' ) ) ) === 'rs_key_unknown' );
 check_auth_case( 'bad signature rejected', error_code( Ratesight_Request_Auth::authorize_mutation( signed_request( $fixture['secret'], array( 'signature' => 'sha256=' . str_repeat( '0', 64 ) ) ) ) ) === 'rs_bad_signature' );
+$plain_query_tamper = signed_request( $fixture['secret'], array( 'method' => 'GET', 'route' => '/ratesight/v1/update-page', 'query' => array( 'url' => 'https://example.com/' ), 'body' => '', 'raw_query' => 'rest_route=%2Fratesight%2Fv1%2Fupdate-page&url=https%3A%2F%2Fattacker.example%2F' ) );
+check_auth_case( 'plain-permalink arbitrary query tampering remains signature-bound', error_code( Ratesight_Request_Auth::authorize_read( $plain_query_tamper ) ) === 'rs_bad_signature' );
 check_auth_case( 'enforce mode rejects valid legacy signature', error_code( Ratesight_Request_Auth::authorize_mutation( legacy_request( $fixture['secret'] ) ) ) === 'rs_auth_version_required' );
 check_auth_case( 'enforce mode rejects unsigned mutation', error_code( Ratesight_Request_Auth::authorize_mutation( legacy_request( $fixture['secret'], '{}', false ) ) ) === 'rs_auth_version_required' );
 $options['ratesight_auth_mode'] = 'observe_v2';
