@@ -1621,23 +1621,15 @@ class Ratesight_Admin {
 			wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
 		}
 
-		$endpoint = rest_url( 'ratesight/v1/create-page' );
-
-		$body = wp_json_encode( array(
-			'title'            => '[Ratesight Test] ' . wp_date( 'Y-m-d H:i:s' ),
-			'article'          => '<p>This is an automated test post created by the Ratesight plugin. You may delete it.</p>',
-			'slug'             => 'ratesight-test-' . time(),
-			'meta_title'       => 'Ratesight Test Post',
-			'meta_description' => 'Automated test from the Ratesight plugin settings page.',
-		) );
-
-		// The test fires from this server to itself. WordPress loopback
-		// requests originate from 127.0.0.1 — add that to the allowlist
-		// if the test returns a 403, or temporarily clear the allowlist.
-		$response = wp_remote_post( $endpoint, array(
+		$secret = (string) get_option( 'ratesight_webhook_secret', '' );
+		if ( $secret === '' ) {
+			wp_send_json_error( array( 'message' => 'Generate a webhook secret before testing rs-hmac-v2.' ), 409 );
+		}
+		$route    = '/ratesight/v1/auth-self-test';
+		$endpoint = rest_url( ltrim( $route, '/' ) );
+		$response = wp_remote_get( $endpoint, array(
 			'timeout'   => 30,
-			'headers'   => array( 'Content-Type' => 'application/json' ),
-			'body'      => $body,
+			'headers'   => Ratesight_Request_Auth::signed_headers( $secret, 'GET', $route ),
 			'sslverify' => apply_filters( 'https_local_ssl_verify', false ),  // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound
 		) );
 
@@ -1648,17 +1640,12 @@ class Ratesight_Admin {
 		$code         = wp_remote_retrieve_response_code( $response );
 		$body_decoded = json_decode( wp_remote_retrieve_body( $response ), true );
 
-		if ( $code === 200 && ! empty( $body_decoded['success'] ) ) {
+		if ( $code === 200 && ! empty( $body_decoded['success'] ) && ! empty( $body_decoded['readiness'] ) ) {
 			wp_send_json_success( array(
-				'message'  => 'Test post created. It will publish in ~15 seconds.',
-				'post_url' => $body_decoded['post_url'] ?? '',
-				'post_id'  => $body_decoded['post_id']  ?? null,
+				'message' => 'Signed rs-hmac-v2 self-test completed. This site is ready for enforcement.',
 			) );
 		} else {
 			$message = $body_decoded['message'] ?? "Endpoint returned HTTP {$code}.";
-			if ( $code === 403 ) {
-				$message .= ' Add 127.0.0.1 to the allowlist to allow loopback test requests.';
-			}
 			wp_send_json_error( array( 'message' => $message, 'code' => $code ) );
 		}
 	}

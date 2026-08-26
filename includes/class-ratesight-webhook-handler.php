@@ -15,6 +15,12 @@ defined( 'ABSPATH' ) || die;
 class Ratesight_Webhook_Handler {
 
 	public function register_route() {
+		register_rest_route( 'ratesight/v1', '/auth-self-test', array(
+			'methods'             => \WP_REST_Server::READABLE,
+			'callback'            => array( 'Ratesight_Request_Auth', 'handle_self_test' ),
+			'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_read' ),
+		) );
+
 		// Original: create or update by slug match.
 		register_rest_route( 'ratesight/v1', '/create-page', array(
 			array(

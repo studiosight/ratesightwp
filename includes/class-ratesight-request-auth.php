@@ -13,8 +13,10 @@ class Ratesight_Request_Auth {
 	public const MAX_BODY_BYTES = 1048576;
 	public const READINESS_TTL  = 86400;
 	public const MODES          = array( 'legacy', 'observe_v2', 'enforce_v2' );
+	private static $operational_candidates = array();
 	public const ROUTE_POLICIES = array(
 		'GET /ratesight/v1/capabilities' => 'public_bootstrap',
+		'GET /ratesight/v1/auth-self-test' => 'signed_read',
 		'POST /ratesight/v1/create-page' => 'signed_mutation',
 		'DELETE /ratesight/v1/create-page' => 'signed_mutation',
 		'GET /ratesight/v1/update-page' => 'signed_read',
@@ -66,10 +68,10 @@ class Ratesight_Request_Auth {
 				return new WP_Error( 'rs_auth_enforce_secret_required', 'A primary webhook secret is required before enforcement.', array( 'status' => 409 ) );
 			}
 			$proof = get_option( 'ratesight_auth_v2_readiness', array() );
-			$accepted_at = is_array( $proof ) ? (int) ( $proof['accepted_at'] ?? 0 ) : 0;
+			$completed_at = is_array( $proof ) ? (int) ( $proof['completed_at'] ?? 0 ) : 0;
 			$proof_key   = is_array( $proof ) ? (string) ( $proof['key_id'] ?? '' ) : '';
-			if ( ! hash_equals( self::key_id( $secret ), $proof_key ) || $accepted_at < time() - self::READINESS_TTL || $accepted_at > time() + self::MAX_CLOCK_SKEW ) {
-				return new WP_Error( 'rs_auth_enforce_readiness_required', 'A recent successful rs-hmac-v2 request using the current key is required before enforcement.', array( 'status' => 409 ) );
+			if ( ! hash_equals( self::key_id( $secret ), $proof_key ) || $completed_at < time() - self::READINESS_TTL || $completed_at > time() + self::MAX_CLOCK_SKEW ) {
+				return new WP_Error( 'rs_auth_enforce_readiness_required', 'A recent successful current-key rs-hmac-v2 self-test is required before enforcement.', array( 'status' => 409 ) );
 			}
 			update_option( 'ratesight_auth_ever_enforced', true, false );
 		}
@@ -139,6 +141,21 @@ class Ratesight_Request_Auth {
 
 	public static function signature( string $secret, string $canonical ): string {
 		return 'sha256=' . hash_hmac( 'sha256', $canonical, $secret );
+	}
+
+	public static function signed_headers( string $secret, string $method, string $route, array $query = array(), string $body = '' ): array {
+		$timestamp = (string) time();
+		$nonce     = rtrim( strtr( base64_encode( random_bytes( 16 ) ), '+/', '-_' ), '=' );
+		$digest    = hash( 'sha256', $body );
+		$canonical = self::canonical_request( $method, $route, $query, $timestamp, $nonce, $digest );
+		return array(
+			'X-Ratesight-Auth-Version'   => self::VERSION,
+			'X-Ratesight-Key-Id'         => self::key_id( $secret ),
+			'X-Ratesight-Timestamp'      => $timestamp,
+			'X-Ratesight-Nonce'          => $nonce,
+			'X-Ratesight-Content-SHA256' => $digest,
+			'X-Ratesight-Signature'      => self::signature( $secret, $canonical ),
+		);
 	}
 
 	public static function authorize_public( $request ): bool {
@@ -228,12 +245,35 @@ class Ratesight_Request_Auth {
 		if ( ! self::claim_nonce( $key_id, $nonce, (int) $timestamp ) ) {
 			return self::failure( 'rs_nonce_replayed', 409, $request, $policy, $key_id );
 		}
-		$primary = (string) get_option( 'ratesight_webhook_secret', '' );
-		if ( $primary !== '' && hash_equals( self::key_id( $primary ), $key_id ) ) {
-			update_option( 'ratesight_auth_v2_readiness', array( 'key_id' => $key_id, 'accepted_at' => time() ), false );
+		if ( self::normalize_route( (string) $request->get_route() ) === '/ratesight/v1/auth-self-test' ) {
+			self::$operational_candidates[ spl_object_id( $request ) ] = $key_id;
 		}
 		self::record_audit( $request, $policy, 'v2_accepted', $key_id );
 		return true;
+	}
+
+	public static function complete_operational_readiness( $request ) {
+		$request_id = spl_object_id( $request );
+		$key_id     = (string) ( self::$operational_candidates[ $request_id ] ?? '' );
+		unset( self::$operational_candidates[ $request_id ] );
+		if ( ! in_array( self::mode(), array( 'observe_v2', 'enforce_v2' ), true ) ) {
+			return new WP_Error( 'rs_auth_readiness_mode_required', 'Operational readiness must be established in Observe or Enforce mode.', array( 'status' => 409 ) );
+		}
+		$primary = (string) get_option( 'ratesight_webhook_secret', '' );
+		if ( $key_id === '' || $primary === '' || ! hash_equals( self::key_id( $primary ), $key_id ) ) {
+			return new WP_Error( 'rs_auth_readiness_not_verified', 'Operational readiness requires a verified current-key self-test.', array( 'status' => 403 ) );
+		}
+		update_option( 'ratesight_auth_v2_readiness', array( 'key_id' => $key_id, 'completed_at' => time() ), false );
+		self::record_audit( $request, 'signed_read', 'v2_operational_readiness', $key_id );
+		return true;
+	}
+
+	public static function handle_self_test( $request ) {
+		$result = self::complete_operational_readiness( $request );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		return array( 'success' => true, 'readiness' => true );
 	}
 
 	private static function secret_for_key_id( string $key_id ): ?string {
@@ -273,9 +313,9 @@ class Ratesight_Request_Auth {
 		$previous = (string) get_option( 'ratesight_webhook_secret_previous', '' );
 		$expires  = (int) get_option( 'ratesight_webhook_secret_previous_expires', 0 );
 		$proof    = get_option( 'ratesight_auth_v2_readiness', array() );
-		$accepted_at = is_array( $proof ) ? (int) ( $proof['accepted_at'] ?? 0 ) : 0;
+		$completed_at = is_array( $proof ) ? (int) ( $proof['completed_at'] ?? 0 ) : 0;
 		$proof_key   = is_array( $proof ) ? (string) ( $proof['key_id'] ?? '' ) : '';
-		$readiness_current = $primary !== '' && hash_equals( self::key_id( $primary ), $proof_key ) && $accepted_at >= time() - self::READINESS_TTL && $accepted_at <= time() + self::MAX_CLOCK_SKEW;
+		$readiness_current = $primary !== '' && hash_equals( self::key_id( $primary ), $proof_key ) && $completed_at >= time() - self::READINESS_TTL && $completed_at <= time() + self::MAX_CLOCK_SKEW;
 		return array(
 			'supported'              => array( self::VERSION, 'legacy-body-hmac' ),
 			'mode'                   => self::mode(),
@@ -284,7 +324,7 @@ class Ratesight_Request_Auth {
 			'previous_key_id'        => $previous !== '' && $expires >= time() ? self::key_id( $previous ) : null,
 			'previous_grace_expires' => $previous !== '' && $expires >= time() ? gmdate( 'c', $expires ) : null,
 			'readiness_current'       => $readiness_current,
-			'readiness_expires'       => $readiness_current ? gmdate( 'c', $accepted_at + self::READINESS_TTL ) : null,
+			'readiness_expires'       => $readiness_current ? gmdate( 'c', $completed_at + self::READINESS_TTL ) : null,
 		);
 	}
 

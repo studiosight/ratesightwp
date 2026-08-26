@@ -81,7 +81,7 @@ $auth_mode      = Ratesight_Request_Auth::mode();
 		<td>
 			<button type="button" id="rs-send-test" class="button button-secondary">Send Test Request</button>
 			<span id="rs-test-feedback" class="rs-feedback" style="display:none;"></span>
-			<p class="description">Creates a draft test post via loopback. Check Activity Log for the result.</p>
+			<p class="description">In Observe or Enforce mode, runs a signed, server-side rs-hmac-v2 no-op through the REST handler. A successful test establishes the current-key readiness proof required for enforcement without exposing the secret to the browser.</p>
 		</td>
 	</tr>
 </table>
