@@ -151,6 +151,7 @@ check_ownership_case( 'Bing performance is separate and not removal-authorized',
 check_ownership_case( 'Worker sitemap/auto-submit is a blocked external capability', ( $capabilities['worker_sitemap_auto_submit'] ?? '' ) === 'blocked_external_consumer' );
 check_ownership_case( 'IndexNow remains a separately retained notification capability', ( $capabilities['indexnow_notification'] ?? '' ) === 'retained_wordpress' );
 check_ownership_case( 'stored DeepSeek and Worker AI are separate capabilities', ( $capabilities['deepseek_stored_option'] ?? '' ) === 'retirement_candidate' && ( $capabilities['worker_ai'] ?? '' ) === 'blocked_external_consumer' );
+check_ownership_case( 'outbound broken-link inventory remains WordPress-local', ( $capabilities['outbound_broken_link_inventory'] ?? '' ) === 'retained_wordpress' && in_array( 'ratesight_link_cache', inventory_ids( $inventory['tables'] ), true ) );
 
 $replacement_ids = inventory_ids( $inventory['replacements'] );
 check_ownership_case( 'GBP GSC Bing and Meta replacement matrix is complete', $replacement_ids === array( 'bing', 'gbp', 'gsc', 'meta' ) );
