@@ -46,6 +46,7 @@ register_deactivation_hook( __FILE__, static function (): void {
 
 foreach ( array(
 	'includes/class-ratesight-options.php',
+	'includes/class-ratesight-installation.php',
 	'includes/class-ratesight-loader.php',
 	'includes/class-ratesight-i18n.php',
 	'includes/class-ratesight-logger.php',
