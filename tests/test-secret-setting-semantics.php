@@ -121,9 +121,9 @@ foreach ( $iterator as $file ) {
 	$reader_matches[] = $relative;
 }
 sort( $reader_matches );
-$non_runtime_surfaces = array( 'admin/class-ratesight-admin.php', 'admin/partials/tab-connections.php', 'includes/class-ratesight-installation.php', 'includes/class-ratesight-options.php' );
+$non_runtime_surfaces = array( 'admin/class-ratesight-admin.php', 'admin/partials/tab-connections.php', 'includes/class-ratesight-connection-ownership.php', 'includes/class-ratesight-installation.php', 'includes/class-ratesight-options.php' );
 $production_readers = array_values( array_diff( $reader_matches, $non_runtime_surfaces ) );
-check_secret_case( 'DeepSeek option occurrences are limited to registration/status/uninstall', $reader_matches === $non_runtime_surfaces );
+check_secret_case( 'DeepSeek option occurrences are limited to registration/status/inventory/uninstall', $reader_matches === $non_runtime_surfaces );
 check_secret_case( 'DeepSeek zero-reader classification is retirement_candidate', $production_readers === array() );
 
 if ( $failures ) {
