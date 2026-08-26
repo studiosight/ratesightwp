@@ -10,7 +10,7 @@
  *   Writes only the fields supplied. Returns before/after per field.
  *   Logs every write to the activity log.
  *
- * Auth: X-Ratesight-Key header matched against ratesight_api_key option.
+ * Auth: shared Ratesight_Request_Auth policy (rs-hmac-v2 after enforcement).
  *
  * @package Ratesight
  */
@@ -38,7 +38,7 @@ class Ratesight_Page_API {
 			array(
 				'methods'             => WP_REST_Server::READABLE,
 				'callback'            => array( $this, 'handle_get' ),
-				'permission_callback' => array( $this, 'check_auth' ),
+				'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_read' ),
 				'args'                => array(
 					'url' => array(
 						'required'          => true,
@@ -51,7 +51,7 @@ class Ratesight_Page_API {
 			array(
 				'methods'             => WP_REST_Server::CREATABLE,
 				'callback'            => array( $this, 'handle_post' ),
-				'permission_callback' => array( $this, 'check_auth' ),
+				'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_mutation' ),
 				'args'                => array(
 					'url'     => array( 'required' => true, 'type' => 'string' ),
 					'fields'  => array( 'required' => true, 'type' => 'object' ),
@@ -63,25 +63,6 @@ class Ratesight_Page_API {
 	}
 
 	// ── Auth ──────────────────────────────────────────────────────────────────
-
-	public function check_auth( WP_REST_Request $request ): bool|WP_Error {
-		// HTTPS-only in production.
-		if ( ! is_ssl() && ! ( defined( 'WP_DEBUG' ) && WP_DEBUG ) ) {
-			return new WP_Error( 'rs_https_required', 'HTTPS required.', array( 'status' => 403 ) );
-		}
-
-		$stored_key = trim( (string) get_option( 'ratesight_api_key', '' ) );
-		if ( $stored_key === '' ) {
-			return new WP_Error( 'rs_no_key', 'API key not configured.', array( 'status' => 403 ) );
-		}
-
-		$provided = trim( (string) $request->get_header( 'x_ratesight_key' ) );
-		if ( ! hash_equals( $stored_key, $provided ) ) {
-			return new WP_Error( 'rs_bad_key', 'Invalid X-Ratesight-Key.', array( 'status' => 403 ) );
-		}
-
-		return true;
-	}
 
 	// ── GET handler ───────────────────────────────────────────────────────────
 

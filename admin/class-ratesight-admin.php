@@ -2305,9 +2305,19 @@ class Ratesight_Admin {
 	public function ajax_regen_webhook_secret(): void {
 		check_ajax_referer( 'ratesight_admin', 'nonce' );
 		if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
-		$secret = bin2hex( random_bytes( 24 ) );
+		$previous = (string) get_option( 'ratesight_webhook_secret', '' );
+		$secret   = bin2hex( random_bytes( 24 ) );
+		$expires  = time() + ( 7 * DAY_IN_SECONDS );
+		if ( $previous !== '' ) {
+			update_option( 'ratesight_webhook_secret_previous', $previous, false );
+			update_option( 'ratesight_webhook_secret_previous_expires', $expires, false );
+		}
 		update_option( 'ratesight_webhook_secret', $secret, false );
-		wp_send_json_success( array( 'secret' => $secret ) );
+		wp_send_json_success( array(
+			'secret'                 => $secret,
+			'key_id'                 => Ratesight_Request_Auth::key_id( $secret ),
+			'previous_grace_expires' => $previous !== '' ? gmdate( 'c', $expires ) : null,
+		) );
 	}
 
 	public function ajax_link_get_manual(): void {
@@ -2760,4 +2770,3 @@ Return ONLY valid JSON: {\"title\": \"...\", \"meta_description\": \"...\"}";
 		wp_send_json_success( array( 'reply' => $result['reply'] ) );
 	}
 }
-

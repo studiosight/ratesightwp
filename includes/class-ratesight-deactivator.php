@@ -11,7 +11,7 @@ defined( 'ABSPATH' ) || die;
 class Ratesight_Deactivator {
 
 	public static function deactivate() {
-		foreach ( array( 'ratesight_prune_logs', 'ratesight_sync_gsc' ) as $event ) {
+		foreach ( array( 'ratesight_prune_logs', 'ratesight_sync_gsc', 'ratesight_prune_auth_nonces' ) as $event ) {
 			$ts = wp_next_scheduled( $event );
 			if ( $ts ) {
 				wp_unschedule_event( $ts, $event );

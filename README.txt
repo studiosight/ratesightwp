@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.2.18
+Stable tag: 3.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,14 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+
+3.3.0 — Secure the WordPress request boundary
+  - Add negotiated rs-hmac-v2 authentication with replay protection, secret
+    rotation grace, and an explicit route-policy inventory.
+  - Keep legacy mode as the upgrade default; enforcement requires a separately
+    verified fleet rollout.
+  - Redact inbound diagnostics and expose minimal auth/provider ownership
+    capability metadata.
 
 3.2.18 — Constrain the runtime 404 fuzzy router (no cross-city redirects)
   - New per-site "404 Fuzzy Router Mode" setting (Settings > SEO Pages):

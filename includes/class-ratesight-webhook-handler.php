@@ -20,12 +20,12 @@ class Ratesight_Webhook_Handler {
 			array(
 				'methods'             => \WP_REST_Server::CREATABLE,
 				'callback'            => array( $this, 'handle_request' ),
-				'permission_callback' => array( $this, 'check_auth' ),
+				'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_mutation' ),
 			),
 			array(
 				'methods'             => \WP_REST_Server::DELETABLE,
 				'callback'            => array( $this, 'handle_delete_page' ),
-				'permission_callback' => array( $this, 'check_auth' ),
+				'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_mutation' ),
 			),
 		) );
 
@@ -34,7 +34,7 @@ class Ratesight_Webhook_Handler {
 			array(
 				'methods'             => \WP_REST_Server::READABLE,
 				'callback'            => array( $this, 'handle_read_by_url' ),
-				'permission_callback' => array( $this, 'check_auth' ),
+				'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_read' ),
 				'args'                => array(
 					'url' => array( 'required' => true, 'type' => 'string', 'sanitize_callback' => 'esc_url_raw' ),
 				),
@@ -42,24 +42,23 @@ class Ratesight_Webhook_Handler {
 			array(
 				'methods'             => \WP_REST_Server::CREATABLE,
 				'callback'            => array( $this, 'handle_update_by_url' ),
-				'permission_callback' => array( $this, 'check_auth' ),
+				'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_mutation' ),
 			),
 		) );
 
-		// 404-recovery: set or remove a redirect. These mutate routing and must
-		// never be callable unsigned — they require a configured secret and a
-		// valid HMAC signature (check_auth_signed), unlike the create flow which
-		// is IP-allowlisted via the Worker.
+		// 404-recovery: set or remove a redirect. The shared request-auth policy
+		// protects these mutations; Worker identity and source IP are not trusted
+		// as authentication boundaries.
 		register_rest_route( 'ratesight/v1', '/redirect', array(
 			array(
 				'methods'             => \WP_REST_Server::CREATABLE,
 				'callback'            => array( $this, 'handle_redirect' ),
-				'permission_callback' => array( $this, 'check_auth_signed' ),
+				'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_mutation' ),
 			),
 			array(
 				'methods'             => \WP_REST_Server::DELETABLE,
 				'callback'            => array( $this, 'handle_redirect_delete' ),
-				'permission_callback' => array( $this, 'check_auth_signed' ),
+				'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_mutation' ),
 			),
 		) );
 
@@ -67,7 +66,7 @@ class Ratesight_Webhook_Handler {
 		register_rest_route( 'ratesight/v1', '/capabilities', array(
 			'methods'             => \WP_REST_Server::READABLE,
 			'callback'            => array( $this, 'handle_capabilities' ),
-			'permission_callback' => array( $this, 'check_auth' ),
+			'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_public' ),
 		) );
 
 		// Live redirect set — the current explicit redirect map, so an external
@@ -75,7 +74,7 @@ class Ratesight_Webhook_Handler {
 		register_rest_route( 'ratesight/v1', '/redirects', array(
 			'methods'             => \WP_REST_Server::READABLE,
 			'callback'            => array( $this, 'handle_redirects_list' ),
-			'permission_callback' => array( $this, 'check_auth' ),
+			'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_read' ),
 		) );
 
 		// Inbound request debug — the last ~25 requests that reached WP on these
@@ -83,14 +82,14 @@ class Ratesight_Webhook_Handler {
 		register_rest_route( 'ratesight/v1', '/inbound-log', array(
 			'methods'             => \WP_REST_Server::READABLE,
 			'callback'            => array( $this, 'handle_inbound_log' ),
-			'permission_callback' => array( $this, 'check_auth' ),
+			'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_read' ),
 		) );
 
 		// Redirect serve log — all served redirects (explicit + fuzzy) since a timestamp.
 		register_rest_route( 'ratesight/v1', '/redirects-log', array(
 			'methods'             => \WP_REST_Server::READABLE,
 			'callback'            => array( $this, 'handle_redirects_log' ),
-			'permission_callback' => array( $this, 'check_auth' ),
+			'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_read' ),
 			'args'                => array(
 				'since' => array(
 					'required' => false,
@@ -138,14 +137,14 @@ class Ratesight_Webhook_Handler {
 		// being blocked before WordPress (nginx / WAF / wrong URL), not here.
 		if ( in_array( $method, array( 'POST', 'PUT', 'PATCH', 'DELETE' ), true ) ) {
 			$utf8_ok = function_exists( 'mb_check_encoding' ) && mb_check_encoding( (string) $body, 'UTF-8' );
-			error_log( sprintf(  // phpcs:ignore
-				'[Ratesight] inbound %s %s ip=%s ct=%s bytes=%d utf8=%s',
-				$method,
-				$route,
-				(string) ( $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? '?' ),  // phpcs:ignore
-				(string) ( $request->get_header( 'content_type' ) ?: '?' ),
-				strlen( (string) $body ),
-				$utf8_ok ? 'ok' : 'bad'
+				error_log( sprintf(  // phpcs:ignore
+					'[Ratesight] inbound %s %s ct=%s bytes=%d body_sha256=%s utf8=%s',
+					$method,
+					$route,
+					(string) ( $request->get_header( 'content_type' ) ?: '?' ),
+					strlen( (string) $body ),
+					hash( 'sha256', (string) $body ),
+					$utf8_ok ? 'ok' : 'bad'
 			) );
 		}
 
@@ -157,23 +156,15 @@ class Ratesight_Webhook_Handler {
 			if ( ! is_array( $log ) ) {
 				$log = array();
 			}
-			$snippet = (string) $body;
-			if ( function_exists( 'mb_substr' ) ) {
-				$snippet = mb_substr( $snippet, 0, 400, 'UTF-8' );
-			} else {
-				$snippet = substr( $snippet, 0, 400 );
-			}
-			$log[] = array(
-				'time'         => current_time( 'mysql' ),
-				'method'       => $method,
-				'route'        => $route,
-				'ip'           => (string) ( $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? '?' ),  // phpcs:ignore
-				'user_agent'   => substr( (string) ( $_SERVER['HTTP_USER_AGENT'] ?? '' ), 0, 160 ),  // phpcs:ignore
-				'content_type' => (string) ( $request->get_header( 'content_type' ) ?: '' ),
-				'bytes'        => strlen( (string) $body ),
-				'utf8'         => ( function_exists( 'mb_check_encoding' ) && mb_check_encoding( (string) $body, 'UTF-8' ) ) ? 'ok' : 'bad',
-				'body_snippet' => $snippet,
-			);
+				$log[] = array(
+					'time'         => current_time( 'mysql' ),
+					'method'       => $method,
+					'route'        => $route,
+					'content_type' => (string) ( $request->get_header( 'content_type' ) ?: '' ),
+					'bytes'        => strlen( (string) $body ),
+					'body_sha256'  => hash( 'sha256', (string) $body ),
+					'utf8'         => ( function_exists( 'mb_check_encoding' ) && mb_check_encoding( (string) $body, 'UTF-8' ) ) ? 'ok' : 'bad',
+				);
 			update_option( 'ratesight_inbound_log', array_slice( $log, -25 ), false );
 		}
 
@@ -187,108 +178,19 @@ class Ratesight_Webhook_Handler {
 	/**
 	 * GET /wp-json/ratesight/v1/inbound-log
 	 * Returns the last ~25 inbound requests that reached WordPress on the
-	 * ratesight/v1 routes (method, route, IP, user-agent, size, encoding, body
-	 * snippet). Lets an integrator confirm whether their request actually arrives
+	 * ratesight/v1 routes (method, route, size, encoding, and body digest) plus
+	 * sanitized request-auth outcomes. Lets an integrator confirm whether a request arrives
 	 * — if a send doesn't show up here but does in nginx's access log, it's being
 	 * blocked between nginx and PHP.
 	 */
 	public function handle_inbound_log( \WP_REST_Request $request ): \WP_REST_Response {
-		$log = get_option( 'ratesight_inbound_log', array() );
+		$log      = get_option( 'ratesight_inbound_log', array() );
+		$auth_log = get_option( 'ratesight_auth_audit', array() );
 		return new \WP_REST_Response( array(
-			'count'   => is_array( $log ) ? count( $log ) : 0,
-			'entries' => is_array( $log ) ? array_values( $log ) : array(),
+			'count'        => is_array( $log ) ? count( $log ) : 0,
+			'entries'      => is_array( $log ) ? array_values( $log ) : array(),
+			'auth_entries' => is_array( $auth_log ) ? array_values( $auth_log ) : array(),
 		), 200 );
-	}
-
-	// -------------------------------------------------------------------------
-	// =========================================================================
-	// ✅ TO ENABLE LICENSE ENFORCEMENT (when Cloudflare Worker /webhook is live)
-	//
-	// 1. Set LICENSE_ENFORCEMENT = true below
-	// 2. That's it — the Worker already handles the license check before
-	//    forwarding here. The IP allowlist ensures only the Worker can call in.
-	//
-	// The Worker (cloudflare-worker-webhook-proxy.js) must be deployed to
-	// oauth.ratesight.com/webhook with the LICENSES KV namespace bound.
-	// =========================================================================
-
-	private const LICENSE_ENFORCEMENT = false; // ← flip to true when Worker is live
-
-	// Cloudflare Worker egress IPs + localhost for the admin test button.
-	// Only used when LICENSE_ENFORCEMENT = true.
-	private const ALLOWED_IPS = array(
-		'67.199.171.42',
-		'67.199.171.43',
-		'67.199.171.44',
-		'67.199.171.45',
-		'67.199.171.46',
-		'209.90.88.39',
-		'209.90.88.40',
-		'127.0.0.1',
-		'::1',
-	);
-
-	public function check_auth( \WP_REST_Request $request ): bool|WP_Error {
-		// Content + read endpoints (create/update page, capabilities, redirect
-		// listing). In production these are gated by the Worker's license + IP
-		// allowlist (LICENSE_ENFORCEMENT); when it's off they accept the request —
-		// the long-standing behaviour. A mismatched *optional* X-Ratesight-
-		// Signature must NOT hard-block create-page: that silently dropped posts
-		// (rejected before any activity-log entry). Redirect *mutations* still
-		// require a valid signature via the stricter check_auth_signed().
-		if ( ! self::LICENSE_ENFORCEMENT ) {
-			return true;
-		}
-
-		$caller_ip = $this->get_caller_ip();
-		if ( ! in_array( $caller_ip, self::ALLOWED_IPS, true ) ) {
-			return new \WP_Error(
-				'rs_ip_blocked',
-				'Forbidden: your IP address is not permitted.',
-				array( 'status' => 403 )
-			);
-		}
-
-		return true;
-	}
-
-	/**
-	 * Strict permission callback for routing-mutation endpoints (set/delete
-	 * redirect). Unlike check_auth — which stays lenient for backwards
-	 * compatibility and IP-allowlisted Worker traffic — this fails closed:
-	 * it REQUIRES a configured secret AND a valid HMAC signature. A site with
-	 * no secret set rejects these writes outright rather than allowing anyone
-	 * who knows the route to alter or delete redirects.
-	 */
-	public function check_auth_signed( \WP_REST_Request $request ): bool|WP_Error {
-		$secret = get_option( 'ratesight_webhook_secret', '' );
-		if ( $secret === '' ) {
-			return new \WP_Error(
-				'rs_secret_required',
-				'Forbidden: this operation requires a configured webhook secret (Settings → Webhook). Unsigned redirect changes are not permitted.',
-				array( 'status' => 403 )
-			);
-		}
-
-		$sig_header = $request->get_header( 'x_ratesight_signature' ) ?? '';
-		if ( $sig_header === '' ) {
-			return new \WP_Error(
-				'rs_signature_required',
-				'Forbidden: X-Ratesight-Signature header is required for this operation.',
-				array( 'status' => 403 )
-			);
-		}
-
-		$expected = 'sha256=' . hash_hmac( 'sha256', $request->get_body(), $secret );
-		if ( ! hash_equals( $expected, $sig_header ) ) {
-			return new \WP_Error(
-				'rs_bad_signature',
-				'Forbidden: invalid X-Ratesight-Signature.',
-				array( 'status' => 403 )
-			);
-		}
-
-		return true;
 	}
 
 	// -------------------------------------------------------------------------
@@ -1206,11 +1108,9 @@ class Ratesight_Webhook_Handler {
 	/**
 	 * GET /wp-json/ratesight/v1/capabilities
 	 * Returns what this site supports so the tool knows before trying anything.
-	 * Response: { create_page, set_redirect, redirect_method, page_builder, can_recreate }
+	 * Returns only negotiation metadata and feature/provider ownership booleans.
 	 */
 	public function handle_capabilities( \WP_REST_Request $request ): \WP_REST_Response {
-		$redirect_method = $this->detect_redirect_method();
-
 		// Detect dominant page builder from plugin activation, not page content.
 		// (Content-level detection requires a specific page — this is site-level.)
 		$page_builder = 'classic';
@@ -1250,19 +1150,21 @@ class Ratesight_Webhook_Handler {
 		}
 
 		return new \WP_REST_Response( array(
+			'plugin_version'       => defined( 'RATESIGHT_RELEASE_VERSION' ) ? RATESIGHT_RELEASE_VERSION : null,
+			'auth'                 => Ratesight_Request_Auth::capability_auth(),
 			'create_page'          => true,
 			'set_redirect'         => true,
 			'delete_redirect'      => true,
 			'list_redirects'       => true,
-			'redirect_method'      => $redirect_method,
-			'page_builder'         => $page_builder,
 			'can_recreate'         => $can_recreate,
-			'seo_plugin'           => Ratesight_SEO_Writer::active_plugin(),
 			'update_page'          => true,
 			'related_links'        => true,
 			'runtime_404_routing'  => true,
-			'runtime_404_threshold'=> Ratesight_Runtime_404_Router::THRESHOLD,
-			'runtime_404_mode'     => Ratesight_Runtime_404_Router::current_mode(),
+			'provider_ownership'   => array(
+				'gbp_auto_post'   => (bool) Ratesight_Options::get( 'gbp_post_enabled' ),
+				'bing_submission' => (string) Ratesight_Options::get( 'bing_api_key' ) !== '',
+				'indexnow'        => true,
+			),
 			'post_types'           => array(
 				'rs_page' => 'Ratesight page (city/service landing pages) — send post_type: "rs_page" explicitly',
 				'post'    => 'Standard WordPress blog post — default when post_type is omitted',

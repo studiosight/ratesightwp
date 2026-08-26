@@ -195,6 +195,8 @@ class Ratesight {
 
 		// Related-services internal links — REST endpoints (static handlers).
 		add_action( 'rest_api_init', array( 'Ratesight_Related_Links', 'register_routes' ) );
+		$page_api = new Ratesight_Page_API();
+		add_action( 'rest_api_init', array( $page_api, 'register_routes' ) );
 	}
 
 	private function define_cron_hooks() {
@@ -202,6 +204,7 @@ class Ratesight {
 		add_action( 'ratesight_sync_gsc',             array( 'Ratesight_GSC_Client',         'sync_performance'                ) );
 		add_action( 'ratesight_sync_gsc',             array( 'Ratesight_Recovery_Log',        'remeasure'                       ) );
 		add_action( 'ratesight_redirect_health',      array( 'Ratesight_Redirect_Health',     'run'                             ) );
+		add_action( 'ratesight_prune_auth_nonces',    array( 'Ratesight_Request_Auth',        'prune_nonces'                    ) );
 
 		// Runtime 404 smart-router — fires after explicit redirect handler (priority 1).
 		add_action( 'template_redirect',              array( 'Ratesight_Runtime_404_Router',  'maybe_route'                     ), 5 );
