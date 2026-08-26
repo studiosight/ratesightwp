@@ -59,9 +59,9 @@ class Ratesight_Options {
 			'gbp_post_enabled' => array( 'name' => 'ratesight_gbp_post_enabled', 'default' => 1,            'type' => 'bool', 'group' => 'connections' ),
 
 			// ── Bing Webmaster Tools ──────────────────────────────────────────────
-			'bing_api_key'     => array( 'name' => 'ratesight_bing_api_key',      'default' => '', 'type' => 'text', 'group' => 'connections' ),
+			'bing_api_key'     => array( 'name' => 'ratesight_bing_api_key',      'default' => '', 'type' => 'secret', 'group' => 'connections' ),
 			'bing_site_url'    => array( 'name' => 'ratesight_bing_site_url',     'default' => '', 'type' => 'text', 'group' => 'connections' ),
-			'deepseek_api_key' => array( 'name' => 'ratesight_deepseek_api_key',  'default' => '', 'type' => 'text', 'group' => 'connections' ),
+			'deepseek_api_key' => array( 'name' => 'ratesight_deepseek_api_key',  'default' => '', 'type' => 'secret', 'group' => 'connections' ),
 
 			// ── Reference page (ratesight_page CPT) status ──────────────────
 			'page_status'      => array( 'name' => 'ratesight_page_status', 'default' => 'publish', 'type' => 'status', 'group' => 'seo_pages' ),
@@ -89,6 +89,66 @@ class Ratesight_Options {
 		return self::schema()[ $key ]['name'] ?? '';
 	}
 
+	/**
+	 * Return the value-free public status for a stored secret setting.
+	 */
+	public static function secret_setting_status( string $key ): array {
+		$definition = self::schema()[ $key ] ?? null;
+		$supported  = $definition && $definition['type'] === 'secret';
+		$configured = $supported
+			? trim( (string) get_option( $definition['name'], '' ) ) !== ''
+			: false;
+
+		return array(
+			'configured'    => $configured,
+			'replaceAllowed' => (bool) $supported,
+			'removeAllowed'  => $configured,
+		);
+	}
+
+	/**
+	 * Parse the only supported secret update intents without exposing storage.
+	 */
+	public static function secret_setting_intent( $value, bool $remove = false ): array {
+		if ( $remove ) {
+			return array( 'intent' => 'remove', 'value' => '' );
+		}
+		if ( ! is_string( $value ) && ! is_numeric( $value ) ) {
+			return array( 'intent' => 'unchanged', 'value' => '' );
+		}
+
+		$value = trim( sanitize_text_field( (string) $value ) );
+		if ( $value === '' || preg_match( '/^[*x\x{2022}\x{25CF}\x{00B7}]{4,}$/iu', $value ) ) {
+			return array( 'intent' => 'unchanged', 'value' => '' );
+		}
+
+		return array( 'intent' => 'replace', 'value' => $value );
+	}
+
+	/**
+	 * Apply an allowlisted secret update and return only its intent and status.
+	 */
+	public static function update_secret_setting( string $key, $value, bool $remove = false ): array {
+		$definition = self::schema()[ $key ] ?? null;
+		if ( ! $definition || $definition['type'] !== 'secret' ) {
+			return array( 'intent' => 'invalid_setting', 'status' => self::secret_setting_status( $key ) );
+		}
+
+		$parsed = self::secret_setting_intent( $value, $remove );
+		$applied = true;
+		if ( $parsed['intent'] === 'replace' ) {
+			update_option( $definition['name'], $parsed['value'] );
+			$stored = (string) get_option( $definition['name'], '' );
+			$applied = hash_equals( $parsed['value'], $stored );
+		} elseif ( $parsed['intent'] === 'remove' ) {
+			delete_option( $definition['name'] );
+			$missing = new stdClass();
+			$applied = get_option( $definition['name'], $missing ) === $missing;
+		}
+
+		return array( 'intent' => $parsed['intent'], 'applied' => $applied, 'status' => self::secret_setting_status( $key ) );
+	}
+
 	// -------------------------------------------------------------------------
 	// Sanitisation
 	// -------------------------------------------------------------------------
@@ -107,6 +167,8 @@ class Ratesight_Options {
 				// stored mode, never silently reset a flipped site back to 'legacy'.
 				$current = get_option( 'ratesight_fuzzy_mode', 'legacy' );
 				return in_array( $current, array( 'legacy', 'same-city-or-hub', 'off' ), true ) ? $current : 'legacy';
+			case 'secret':
+				return self::secret_setting_intent( $value )['value'];
 			case 'text':
 			default:
 				return sanitize_text_field( $value );
