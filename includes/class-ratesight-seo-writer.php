@@ -8,6 +8,20 @@
  *
  * GET and POST use the same read() method — single source of truth.
  *
+ * SQUIRRLY WINS THE SERVED SNIPPET (3.3.1). Squirrly does not just add meta
+ * tags: it output-buffers the whole page, strips every existing <title> and
+ * description, and injects its own. So on a site running Squirrly ALONGSIDE
+ * Yoast/Rank Math, the value a visitor and Google see is Squirrly's, not the
+ * one the "primary" plugin stored. active_plugin() and read() therefore put
+ * Squirrly FIRST — the plugin that renders is the plugin that counts. Probed
+ * live 2026-08-26: trekmovers.ca and 4mrticket.com both report yoast/rankmath
+ * yet serve a Squirrly-generated snippet. write() is unaffected: it has always
+ * written to EVERY active SEO plugin, so those sites keep their Yoast/Rank
+ * Math values in sync too.
+ *
+ * Squirrly's own storage is handled by Ratesight_Squirrly — see that file for
+ * why `_squirrly_seo` (what we wrote before 3.3.1) was never served.
+ *
  * @package    Ratesight
  * @subpackage Ratesight/includes
  */
@@ -28,21 +42,22 @@ class Ratesight_SEO_Writer {
 		return defined( 'AIOSEO_VERSION' ) || class_exists( 'AIOSEO\\Plugin\\AIOSEO' ) || function_exists( 'aioseo' );
 	}
 	public static function is_squirrly_active(): bool {
-		return defined( 'SQ_VERSION' ) || class_exists( 'SQ_Classes_ObjController' ) || function_exists( 'sq_get_seo_metas' );
+		return Ratesight_Squirrly::is_active();
 	}
 	public static function is_seopress_active(): bool {
 		return defined( 'SEOPRESS_VERSION' ) || function_exists( 'seopress_init' ) || class_exists( 'SeoPress\\SeoPress' );
 	}
 
 	/**
-	 * Returns the first active SEO plugin slug, or 'none'.
-	 * Priority matches detection order in write().
+	 * Returns the SEO plugin that OWNS THE SERVED SNIPPET, or 'none'.
+	 * Squirrly first: it rewrites the finished HTML, so wherever it is active
+	 * it overrides whatever another SEO plugin printed (see the file header).
 	 */
 	public static function active_plugin(): string {
+		if ( self::is_squirrly_active() )  return 'squirrly';
 		if ( self::is_yoast_active() )     return 'yoast';
 		if ( self::is_rank_math_active() ) return 'rankmath';
 		if ( self::is_aioseo_active() )    return 'aioseo';
-		if ( self::is_squirrly_active() )  return 'squirrly';
 		if ( self::is_seopress_active() )  return 'seopress';
 		return 'none';
 	}
@@ -73,9 +88,15 @@ class Ratesight_SEO_Writer {
 		$title = '';
 		$desc  = '';
 
+		// Squirrly first — it serves the snippet wherever it is active.
+		if ( self::is_squirrly_active() ) {
+			$sq    = Ratesight_Squirrly::read( $post_id );
+			$title = $sq['meta_title'];
+			$desc  = $sq['meta_description'];
+		}
 		if ( self::is_yoast_active() ) {
-			$title = (string) get_post_meta( $post_id, '_yoast_wpseo_title',    true );
-			$desc  = (string) get_post_meta( $post_id, '_yoast_wpseo_metadesc', true );
+			$title = $title ?: (string) get_post_meta( $post_id, '_yoast_wpseo_title',    true );
+			$desc  = $desc  ?: (string) get_post_meta( $post_id, '_yoast_wpseo_metadesc', true );
 		}
 		if ( self::is_rank_math_active() ) {
 			$title = $title ?: (string) get_post_meta( $post_id, 'rank_math_title',       true );
@@ -85,11 +106,15 @@ class Ratesight_SEO_Writer {
 			$title = $title ?: (string) get_post_meta( $post_id, '_aioseo_title',       true );
 			$desc  = $desc  ?: (string) get_post_meta( $post_id, '_aioseo_description', true );
 		}
-		if ( self::is_squirrly_active() ) {
-			$sq = get_post_meta( $post_id, '_squirrly_seo', true );
-			if ( is_array( $sq ) || ( is_string( $sq ) && ( $sq = maybe_unserialize( $sq ) ) && is_array( $sq ) ) ) {
-				$title = $title ?: (string) ( $sq['seo_title'] ?? $sq['title'] ?? '' );
-				$desc  = $desc  ?: (string) ( $sq['seo_desc']  ?? $sq['description'] ?? '' );
+		// LEGACY READ ONLY. `_squirrly_seo` is a key we invented and Squirrly
+		// never reads. It stays in the read path so a value written by an older
+		// build is still visible (and so re-applying overwrites it in the real
+		// store); nothing writes it any more.
+		if ( self::is_squirrly_active() && ( $title === '' || $desc === '' ) ) {
+			$legacy = get_post_meta( $post_id, '_squirrly_seo', true );
+			if ( is_array( $legacy ) || ( is_string( $legacy ) && ( $legacy = maybe_unserialize( $legacy ) ) && is_array( $legacy ) ) ) {
+				$title = $title ?: (string) ( $legacy['seo_title'] ?? $legacy['title'] ?? '' );
+				$desc  = $desc  ?: (string) ( $legacy['seo_desc']  ?? $legacy['description'] ?? '' );
 			}
 		}
 		if ( self::is_seopress_active() ) {
@@ -120,6 +145,7 @@ class Ratesight_SEO_Writer {
 		$meta_title       = sanitize_text_field( $meta_title );
 		$meta_description = sanitize_textarea_field( $meta_description );
 		$wrote            = false;
+		$squirrly         = null; // per-layer detail, echoed back so a caller never has to assume
 
 		if ( self::is_yoast_active() ) {
 			update_post_meta( $post_id, '_yoast_wpseo_title',    $meta_title );
@@ -136,19 +162,13 @@ class Ratesight_SEO_Writer {
 			update_post_meta( $post_id, '_aioseo_description', $meta_description );
 			$wrote = true;
 		}
+		// Squirrly: write the store Squirrly SERVES (its qss row), plus its
+		// documented `_sq_title`/`_sq_description` fallback. The old
+		// `_squirrly_seo` array is gone — Squirrly never read it, so every
+		// write to it was inert. See Ratesight_Squirrly.
 		if ( self::is_squirrly_active() ) {
-			$existing_raw = get_post_meta( $post_id, '_squirrly_seo', true );
-			$existing     = array();
-			if ( ! empty( $existing_raw ) ) {
-				$decoded  = is_array( $existing_raw ) ? $existing_raw : maybe_unserialize( $existing_raw );
-				$existing = is_array( $decoded ) ? $decoded : array();
-			}
-			$existing['seo_title']   = $meta_title;
-			$existing['seo_desc']    = $meta_description;
-			$existing['title']       = $meta_title;
-			$existing['description'] = $meta_description;
-			update_post_meta( $post_id, '_squirrly_seo', $existing );
-			$wrote = true;
+			$squirrly = Ratesight_Squirrly::write( $post_id, $meta_title, $meta_description );
+			$wrote    = true;
 		}
 		if ( self::is_seopress_active() ) {
 			update_post_meta( $post_id, '_seopress_titles_title', $meta_title );
@@ -164,6 +184,12 @@ class Ratesight_SEO_Writer {
 		}
 
 		// Read back what was just stored — caller uses this to verify without a second GET.
-		return self::read( $post_id );
+		// NOTE FOR CALLERS: this is a STORE read-back, not proof the page serves
+		// the value. Only fetching the live URL proves that.
+		$stored = self::read( $post_id );
+		if ( $squirrly !== null ) {
+			$stored['squirrly'] = $squirrly;
+		}
+		return $stored;
 	}
 }
