@@ -98,6 +98,7 @@ class Ratesight {
 		$this->loader->add_action( 'wp_ajax_ratesight_review_velocity',     $admin, 'ajax_review_velocity'    );
 		$this->loader->add_action( 'wp_ajax_ratesight_sync_gbp_now',          $admin, 'ajax_sync_gbp_now'          );
 		$this->loader->add_action( 'wp_ajax_ratesight_save_bing_key',         $admin, 'ajax_save_bing_key'         );
+		$this->loader->add_action( 'wp_ajax_ratesight_update_secret_setting', $admin, 'ajax_update_secret_setting' );
 		$this->loader->add_action( 'wp_ajax_ratesight_load_bing_sites',       $admin, 'ajax_load_bing_sites'       );
 		$this->loader->add_action( 'wp_ajax_ratesight_lock_bing_site',        $admin, 'ajax_lock_bing_site'        );
 		$this->loader->add_action( 'wp_ajax_ratesight_sync_bing_now',         $admin, 'ajax_sync_bing_now'         );

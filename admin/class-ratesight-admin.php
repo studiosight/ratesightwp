@@ -27,6 +27,12 @@ class Ratesight_Admin {
 				$def['name'],
 				array(
 					'sanitize_callback' => static function ( $value ) use ( $def, $key ) {
+						if ( $def['type'] === 'secret' ) {
+							$parsed = Ratesight_Options::secret_setting_intent( $value );
+							return $parsed['intent'] === 'unchanged'
+								? get_option( $def['name'], '' )
+								: $parsed['value'];
+						}
 						$sanitized = Ratesight_Options::sanitise( $value, $def['type'] );
 						// Bust the license cache whenever the Ratesight ID is saved.
 						if ( $key === 'code_id' ) {
@@ -1663,9 +1669,21 @@ class Ratesight_Admin {
 		}
 
 		$cached = get_transient( 'ratesight_connections_status' );
-		if ( $cached ) {
-			wp_send_json_success( $cached );
+		if ( is_array( $cached ) && isset( $cached['indexnow'] ) && is_array( $cached['indexnow'] ) ) {
+			wp_send_json_success( array(
+				'sitemap_live' => ! empty( $cached['sitemap_live'] ),
+				'indexnow'     => array(
+					'configured' => ! empty( $cached['indexnow']['configured'] ),
+					'verified'   => ! empty( $cached['indexnow']['verified'] ),
+					'errorCode'  => in_array( $cached['indexnow']['errorCode'] ?? null, array( null, 'key_unreachable' ), true )
+						? ( $cached['indexnow']['errorCode'] ?? null )
+						: 'key_unreachable',
+				),
+				'widget_id_set' => ! empty( $cached['widget_id_set'] ),
+				'blog_public'   => ! empty( $cached['blog_public'] ),
+			) );
 		}
+		// Ignore legacy cached payloads because they contained a key-bearing URL.
 
 		$status = array();
 
@@ -1675,8 +1693,7 @@ class Ratesight_Admin {
 		$status['sitemap_live'] = ! is_wp_error( $check ) && wp_remote_retrieve_response_code( $check ) === 200;
 
 		// IndexNow key reachable?
-		$status['indexnow_ok']  = Ratesight_IndexNow::verify_key();
-		$status['indexnow_url'] = Ratesight_IndexNow::key_url();
+		$status['indexnow'] = Ratesight_IndexNow::status();
 
 		// Widget IDs configured?
 		$status['widget_id_set'] = ! empty( Ratesight_Options::get( 'code_id' ) );
@@ -1839,15 +1856,7 @@ class Ratesight_Admin {
 			wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
 		}
 
-		$key      = Ratesight_IndexNow::get_key();
-		$key_url  = Ratesight_IndexNow::key_url();
-		$verified = Ratesight_IndexNow::verify_key();
-
-		wp_send_json_success( array(
-			'key'      => $key,
-			'key_url'  => $key_url,
-			'verified' => $verified,
-		) );
+		wp_send_json_success( Ratesight_IndexNow::status() );
 	}
 
 	public function ajax_clear_indexnow_log(): void {
@@ -2043,12 +2052,67 @@ class Ratesight_Admin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
 		}
-		$key = sanitize_text_field( wp_unslash( $_POST['api_key'] ?? '' ) );
-		if ( $key === '' ) {
+		$key = isset( $_POST['api_key'] ) && is_string( $_POST['api_key'] )
+			? wp_unslash( $_POST['api_key'] )
+			: '';
+		$result = Ratesight_Options::update_secret_setting( 'bing_api_key', $key );
+		if ( $result['intent'] !== 'replace' ) {
 			wp_send_json_error( array( 'message' => 'API key cannot be empty.' ) );
 		}
-		update_option( Ratesight_Options::option_name( 'bing_api_key' ), $key );
-		wp_send_json_success( array( 'message' => 'API key saved.' ) );
+		if ( ! $result['applied'] ) {
+			wp_send_json_error( array( 'message' => 'API key replacement could not be verified.' ), 500 );
+		}
+		wp_send_json_success( array( 'message' => 'API key saved.', 'status' => $result['status'] ) );
+	}
+
+	public function ajax_update_secret_setting(): void {
+		check_ajax_referer( 'ratesight_admin', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
+		}
+
+		$setting = isset( $_POST['setting'] ) && is_string( $_POST['setting'] )
+			? sanitize_key( wp_unslash( $_POST['setting'] ) )
+			: '';
+		$intent = isset( $_POST['intent'] ) && is_string( $_POST['intent'] )
+			? sanitize_key( wp_unslash( $_POST['intent'] ) )
+			: '';
+		if ( ! in_array( $setting, array( 'bing_api_key', 'deepseek_api_key' ), true ) ) {
+			wp_send_json_error( array( 'message' => 'Unsupported secret setting.' ), 400 );
+		}
+		if ( ! in_array( $intent, array( 'replace', 'remove' ), true ) ) {
+			wp_send_json_error( array( 'message' => 'Unsupported secret update intent.' ), 400 );
+		}
+		$confirmation = isset( $_POST['confirm'] ) && is_string( $_POST['confirm'] )
+			? sanitize_text_field( wp_unslash( $_POST['confirm'] ) )
+			: '';
+		if ( $intent === 'remove' && $confirmation !== 'REMOVE' ) {
+			wp_send_json_error( array( 'message' => 'Secret removal was not confirmed.' ), 400 );
+		}
+		$value = isset( $_POST['value'] ) && is_string( $_POST['value'] )
+			? wp_unslash( $_POST['value'] )
+			: '';
+
+		$result = Ratesight_Options::update_secret_setting(
+			$setting,
+			$value,
+			$intent === 'remove'
+		);
+		if ( $intent === 'replace' && $result['intent'] !== 'replace' ) {
+			wp_send_json_error( array( 'message' => 'Enter a new value to replace the saved secret.' ), 400 );
+		}
+		if ( ! $result['applied'] ) {
+			wp_send_json_error( array(
+				'message' => 'The saved secret could not be ' . ( $intent === 'remove' ? 'removed' : 'replaced' ) . '.',
+				'status'  => $result['status'],
+			), 500 );
+		}
+
+		wp_send_json_success( array(
+			'intent'  => $result['intent'],
+			'status'  => $result['status'],
+			'message' => $result['intent'] === 'remove' ? 'Saved secret removed.' : 'Saved secret replaced.',
+		) );
 	}
 
 	public function ajax_load_bing_sites(): void {

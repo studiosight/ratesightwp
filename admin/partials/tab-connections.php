@@ -272,7 +272,7 @@ if ( empty( Ratesight_Options::get( 'code_id' ) ) ) : ?>
 <div class="rs-card">
 <div class="rs-card-body">
 <?php
-$bing_key      = Ratesight_Bing_Client::get_api_key();
+$bing_status   = Ratesight_Options::secret_setting_status( 'bing_api_key' );
 $bing_site     = Ratesight_Bing_Client::get_site_url();
 $bing_last_sync = get_option( 'ratesight_bing_last_sync', '' );
 ?>
@@ -286,16 +286,16 @@ $bing_last_sync = get_option( 'ratesight_bing_last_sync', '' );
 	<tr>
 		<th>API Key</th>
 		<td>
-			<input type="password" id="rs-bing-api-key" class="regular-text"
-				placeholder="Paste your Bing Webmaster API key"
-				value="<?php echo esc_attr( $bing_key ); ?>">
-			<button type="button" class="button" id="rs-save-bing-key" style="margin-left:6px;">
-				<?php echo $bing_key ? 'Update Key' : 'Save Key'; ?>
-			</button>
-			<span id="rs-bing-key-feedback" style="margin-left:8px;font-size:13px;color:#646970;display:none;"></span>
+			<?php
+			$secret_setting_key         = 'bing_api_key';
+			$secret_setting_input_id    = 'rs-bing-api-key';
+			$secret_setting_label       = 'Bing API key';
+			$secret_setting_placeholder = 'Paste a replacement Bing Webmaster API key';
+			require __DIR__ . '/inc-secret-setting.php';
+			?>
 		</td>
 	</tr>
-	<?php if ( $bing_key ) : ?>
+	<?php if ( $bing_status['configured'] ) : ?>
 	<tr>
 		<th>Site</th>
 		<td>
@@ -335,31 +335,20 @@ $bing_last_sync = get_option( 'ratesight_bing_last_sync', '' );
 <h2 class="rs-section">DeepSeek AI</h2>
 <div class="rs-card">
 <div class="rs-card-body">
-<form method="post" action="options.php">
-<?php settings_fields( 'ratesight_options_connections' ); ?>
 <table class="form-table" role="presentation">
 	<tr>
 		<th scope="row"><label for="ratesight_deepseek_api_key">API Key</label></th>
 		<td>
-			<div class="rs-url-box">
-				<input type="password" id="ratesight_deepseek_api_key" name="ratesight_deepseek_api_key"
-					class="regular-text" autocomplete="new-password"
-					value="<?php echo esc_attr( get_option( 'ratesight_deepseek_api_key', '' ) ); ?>"
-					placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx">
-				<button type="button" class="button" id="rs-toggle-deepseek-key" title="Show/hide">👁</button>
-			</div>
 			<?php
-			$has_key = trim( (string) get_option( 'ratesight_deepseek_api_key', '' ) ) !== '';
-			if ( $has_key ) : ?>
-				<p class="description" style="color:#00a32a;">&#10003; DeepSeek API key saved — AI features will call DeepSeek directly from the plugin.</p>
-			<?php else : ?>
-				<p class="description">AI calls route through the Ratesight Cloudflare Worker using the <code>DEEPSEEK_API</code> secret you added there. Leave this blank unless you want the plugin to call DeepSeek directly instead.</p>
-			<?php endif; ?>
+			$secret_setting_key         = 'deepseek_api_key';
+			$secret_setting_input_id    = 'ratesight_deepseek_api_key';
+			$secret_setting_label       = 'DeepSeek API key';
+			$secret_setting_placeholder = 'Paste a replacement DeepSeek API key';
+			require __DIR__ . '/inc-secret-setting.php';
+			?>
 		</td>
 	</tr>
 </table>
-<div class="rs-submit" style="padding-top:0;"><?php submit_button( 'Save', 'primary', 'submit', false ); ?></div>
-</form>
 </div>
 </div>
 
@@ -463,9 +452,10 @@ jQuery( function( $ ) {
 			$( '#rs-site-status-wrap' ).html( table );
 
 			// IndexNow status
-			var inStatus = d.indexnow_ok
-				? yes + ' Key verified — <code style="font-size:11px;">' + $( '<div>' ).text( d.indexnow_url || '' ).html() + '</code>'
-				: no + ' Key not reachable — the plugin serves it automatically, try reloading this page.';
+			var indexnow = d.indexnow || {};
+			var inStatus = indexnow.verified
+				? yes + ' Key configured and verified'
+				: no + ( indexnow.configured ? ' Key configured but not reachable.' : ' Key not configured.' );
 
 			$( '#rs-indexnow-status-wrap' ).html( inStatus );
 		} );

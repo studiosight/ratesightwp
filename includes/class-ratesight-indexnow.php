@@ -169,4 +169,17 @@ class Ratesight_IndexNow {
 		$body = trim( wp_remote_retrieve_body( $response ) );
 		return hash_equals( $key, $body );
 	}
+
+	/**
+	 * Return the allowlisted, value-free admin status contract.
+	 */
+	public static function status(): array {
+		$verified = self::verify_key();
+
+		return array(
+			'configured' => trim( (string) get_option( 'ratesight_indexnow_key', '' ) ) !== '',
+			'verified'   => $verified,
+			'errorCode'  => $verified ? null : 'key_unreachable',
+		);
+	}
 }
