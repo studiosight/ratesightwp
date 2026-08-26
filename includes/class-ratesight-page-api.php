@@ -28,6 +28,10 @@ class Ratesight_Page_API {
 		'yoast'    => array( '_yoast_wpseo_title',    '_yoast_wpseo_metadesc'    ),
 		'rankmath' => array( 'rank_math_title',        'rank_math_description'    ),
 		'aioseo'   => array( '_aioseo_title',          '_aioseo_description'      ),
+		// Squirrly is NOT a simple two-key adapter — the value it serves lives in
+		// its own `qss` table, keyed by URL hash. It is handled by
+		// Ratesight_Squirrly and never looked up in this map. (These are its
+		// post-meta fallback keys, kept here only so the map stays complete.)
 		'squirrly' => array( '_sq_title',              '_sq_description'          ),
 	);
 
@@ -205,16 +209,19 @@ class Ratesight_Page_API {
 			$active  = array_merge( $active, array_keys( $network ) );
 		}
 
+		// Squirrly first: it output-buffers the finished page and replaces the
+		// <title>/description another SEO plugin printed, so where it is active
+		// it is the plugin that decides what a visitor sees.
+		if ( in_array( 'squirrly-seo/squirrly.php',                  $active, true ) ) return 'squirrly';
 		if ( in_array( 'wordpress-seo/wp-seo.php',                  $active, true ) ) return 'yoast';
 		if ( in_array( 'rank-math/rank-math.php',                    $active, true ) ) return 'rankmath';
 		if ( in_array( 'all-in-one-seo-pack/all_in_one_seo_pack.php', $active, true ) ) return 'aioseo';
-		if ( in_array( 'squirrly-seo/squirrly.php',                  $active, true ) ) return 'squirrly';
 
 		// Class-based fallback in case the plugin file path differs.
+		if ( defined( 'SQ_VERSION' ) )                                              return 'squirrly';
 		if ( class_exists( 'WPSEO_Options' ) || defined( 'WPSEO_VERSION' ) )      return 'yoast';
 		if ( class_exists( 'RankMath' )       || defined( 'RANK_MATH_VERSION' ) )  return 'rankmath';
 		if ( defined( 'AIOSEO_VERSION' ) )                                          return 'aioseo';
-		if ( defined( 'SQ_VERSION' ) )                                              return 'squirrly';
 
 		return 'none';
 	}
@@ -237,15 +244,13 @@ class Ratesight_Page_API {
 	}
 
 	private function read_squirrly( int $post_id ): array {
-		// Squirrly stores SEO in _sq_post_meta as a serialised array.
-		$sq = get_post_meta( $post_id, '_sq_post_meta', true );
-		if ( is_array( $sq ) ) {
-			return array(
-				'seo_title'        => (string) ( $sq['seo_title'] ?? $sq['title'] ?? '' ),
-				'meta_description' => (string) ( $sq['seo_description'] ?? $sq['description'] ?? '' ),
-			);
-		}
-		return array( 'seo_title' => '', 'meta_description' => '' );
+		// `_sq_post_meta` was a guess and Squirrly never used it. Read the store
+		// Squirrly actually serves — see Ratesight_Squirrly.
+		$sq = Ratesight_Squirrly::read( $post_id );
+		return array(
+			'seo_title'        => $sq['meta_title'],
+			'meta_description' => $sq['meta_description'],
+		);
 	}
 
 	// ── Write SEO meta ────────────────────────────────────────────────────────
@@ -265,17 +270,18 @@ class Ratesight_Page_API {
 	}
 
 	private function write_squirrly( int $post_id, string $field, string $value ): bool {
-		$sq = get_post_meta( $post_id, '_sq_post_meta', true );
-		$sq = is_array( $sq ) ? $sq : array();
+		// Squirrly's store is per-URL and holds title AND description together,
+		// so a single-field write has to carry the other field through
+		// unchanged. Read current, replace one, write both.
+		$current = Ratesight_Squirrly::read( $post_id );
+		$title   = $field === 'seo_title' ? $value : $current['meta_title'];
+		$desc    = $field === 'seo_title' ? $current['meta_description'] : $value;
 
-		if ( $field === 'seo_title' ) {
-			$sq['seo_title'] = $value;
-			$sq['title']     = $value; // keep both keys in sync
-		} else {
-			$sq['seo_description'] = $value;
-			$sq['description']     = $value;
-		}
+		$written = Ratesight_Squirrly::write( $post_id, $title, $desc );
 
-		return update_post_meta( $post_id, '_sq_post_meta', $sq ) !== false;
+		// True only when the value reached the store Squirrly serves. The
+		// post-meta fallback alone is not a success: a post-type pattern
+		// overrides it, which is how meta writes on Squirrly sites were inert.
+		return (bool) $written['qss'];
 	}
 }
