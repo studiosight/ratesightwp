@@ -37,6 +37,13 @@ class Ratesight_Related_Links {
 	const BLOCK_NAME      = 'related-services';
 	const MAX_LINKS       = 50;
 
+	/**
+	 * Post types whose content is real public content (as opposed to a theme-builder
+	 * layout standing in for a post). Used by is_foreign_content(); mirrors the types
+	 * url_to_post_id() will resolve.
+	 */
+	const PUBLIC_POST_TYPES = array( 'post', 'page', 'ratesight_page' );
+
 	/** Guards against appending the block twice if the_content runs again for the same post. */
 	private static array $rendered = array();
 
@@ -160,14 +167,43 @@ class Ratesight_Related_Links {
 	/**
 	 * Append the related-services block after the builder content, on the
 	 * front-end singular view of the post only. Never mutates post_content.
+	 *
+	 * WHY THIS IS NOT `in_the_loop() && is_main_query()` (fixed 3.3.2). A Divi /
+	 * Elementor Theme Builder POST TEMPLATE renders the post body from inside the
+	 * layout, not from the main WordPress loop: `the_content` fires while
+	 * `in_the_loop()` is false and the running query is the layout's, not the main
+	 * one. The old guard therefore returned early on every theme-builder blog post
+	 * and the stored link lists never reached the HTML — measured live on
+	 * drmelindasilva.com (2026-08-26): a post with 6 stored links served 0
+	 * `data-rs-block` sections, on a page whose markup is Divi Theme Builder
+	 * (`et-boc`). 156 source pages / 464 links were stored and invisible.
+	 *
+	 * The replacement decides from the REQUEST (`is_singular()` + the queried
+	 * object) instead of from loop state, which a theme builder cannot distort:
+	 *
+	 *   - is_admin() / is_feed() / !is_singular()  -> never render (archives, feeds,
+	 *     search, 404s, the editor). This is the only place "where" is decided.
+	 *   - the queried post is the subject; its stored list is the one we append.
+	 *   - a DIFFERENT real post's content passing through the filter (related-post
+	 *     modules, blog-feed modules inside a layout, excerpt loops) is skipped, so
+	 *     the block can never land inside another post's card.
+	 *   - the static once-flag, keyed on the queried post, caps the block at one per
+	 *     request even when `the_content` runs several times for the same post
+	 *     (builders commonly do).
 	 */
 	public static function render_block( string $content ): string {
-		if ( is_admin() || ! is_singular() || ! in_the_loop() || ! is_main_query() ) {
+		if ( is_admin() || is_feed() || ! is_singular() ) {
 			return $content;
 		}
 
-		$post_id = get_the_ID();
+		$post_id = (int) get_queried_object_id();
 		if ( ! $post_id || isset( self::$rendered[ $post_id ] ) ) {
+			return $content;
+		}
+
+		// Content belonging to some other post (not the theme-builder layout that is
+		// standing in for this one) is left alone — see the note above.
+		if ( self::is_foreign_content( $post_id ) ) {
 			return $content;
 		}
 
@@ -179,6 +215,26 @@ class Ratesight_Related_Links {
 		self::$rendered[ $post_id ] = true;
 
 		return $content . self::block_html( $links );
+	}
+
+	/**
+	 * Is the post currently being rendered a DIFFERENT public post than the one the
+	 * visitor asked for?
+	 *
+	 * Theme-builder layouts (`et_template`, `et_body_layout`, `elementor_library`, …)
+	 * are not public content: when one of those is "the current post" we are inside
+	 * the template that stands in for the queried post, which is exactly the case the
+	 * old `in_the_loop()` guard mishandled, so it does NOT count as foreign.
+	 *
+	 * @param int $queried_id The queried (singular) post ID.
+	 */
+	private static function is_foreign_content( int $queried_id ): bool {
+		$current_id = (int) get_the_ID();
+		if ( ! $current_id || $current_id === $queried_id ) {
+			return false;
+		}
+
+		return in_array( get_post_type( $current_id ), self::PUBLIC_POST_TYPES, true );
 	}
 
 	// ── Helpers ─────────────────────────────────────────────────────────────---
