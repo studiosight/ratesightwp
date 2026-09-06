@@ -125,13 +125,20 @@ class Ratesight_Related_Links {
 			update_post_meta( $post_id, self::META_KEY, $links ); // upsert
 		}
 
+		// Since 3.4.0: this called Ratesight_Logger::log(), which has never existed on that class
+		// (it exposes log_pending/log_update/log_error/get_recent_logs/prune_logs). Calling an
+		// undefined static method is a PHP fatal, so EVERY successful related-links write died here
+		// after the post meta had already been written -- the caller saw a 500 for work that had in
+		// fact been done. Uses the log_pending + log_update pair every other write path in this
+		// plugin uses.
 		if ( class_exists( 'Ratesight_Logger' ) ) {
-			Ratesight_Logger::log( array(
-				'post_id' => $post_id,
-				'title'   => get_the_title( $post_id ),
-				'status'  => 'success',
-				'notes'   => sprintf( 'Related links set: %d link%s.', count( $links ), count( $links ) === 1 ? '' : 's' ),
-			) );
+			$title = get_the_title( $post_id );
+			Ratesight_Logger::log_update(
+				Ratesight_Logger::log_pending( "Related links: {$title}", '', wp_json_encode( $links ) ),
+				$post_id,
+				Ratesight_Logger::STATUS_MODIFIED,
+				sprintf( 'Related links set: %d link%s.', count( $links ), count( $links ) === 1 ? '' : 's' )
+			);
 		}
 
 		return rest_ensure_response( array(

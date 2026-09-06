@@ -781,6 +781,52 @@ class Ratesight_Webhook_Handler {
 			), 422 );
 		}
 
+		// ── dry_run: predict, write nothing ───────────────────────────────────
+		// Since 3.4.0. Before this, update-page ACCEPTED a dry_run field and updated the post anyway
+		// -- the same class of defect DELETE /create-page carried until 3.2.19. A caller could not
+		// preview an update, and one that believed it was previewing was in fact writing. Probed
+		// live 2026-07-29 and recorded in the dashboard's lib/wordpress-connector.ts.
+		//
+		// This branch sits ABOVE the pre-update snapshot deliberately: the snapshot is itself a
+		// write (update_post_meta of _rs_pre_update_snapshot), so returning any later would still
+		// have mutated the post. The capability and conflict checks above it are pure reads and run
+		// first on purpose, so a dry run reports the SAME 409/422 refusals a real write would hit.
+		$dry_run = filter_var( $data['dry_run'] ?? false, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE ) ?? false;
+		if ( $dry_run ) {
+			$would_write = array();
+			foreach ( array( 'title' => 'post_title', 'article' => 'post_content', 'summary' => 'post_excerpt' ) as $field => $column ) {
+				if ( array_key_exists( $field, $data ) ) {
+					$would_write[] = $column;
+				}
+			}
+			foreach ( array( 'meta_title', 'meta_description', 'layout', 'show_title', 'custom_css_url', 'child_category' ) as $field ) {
+				if ( array_key_exists( $field, $data ) ) {
+					$would_write[] = $field;
+				}
+			}
+			return new \WP_REST_Response( array(
+				'success'          => true,
+				'dry_run'          => true,
+				'updated'          => false,
+				'post_id'          => $post_id,
+				'post_url'         => get_permalink( $post_id ),
+				'page_builder'     => $builder['name'],
+				'seo_plugin'       => Ratesight_SEO_Writer::active_plugin(),
+				'capabilities'     => array(
+					'update_content' => $builder['update_content'],
+					'update_seo'     => $builder['update_seo'],
+					'update_layout'  => $builder['update_layout'],
+				),
+				'would_write'      => $would_write,
+				// Unchanged by definition on a dry run, and stated so a caller can assert it.
+				'content_hash'     => md5( $content . $post->post_title . $post->post_excerpt ),
+				'status_before'    => (string) $post->post_status,
+				'status_after'     => (string) $post->post_status,
+				'status_preserved' => true,
+				'message'          => 'Dry run. Nothing was written.',
+			), 200 );
+		}
+
 		// ── Snapshot before write (rollback reference) ────────────────────────
 		$seo_title_before = get_post_meta( $post_id, '_yoast_wpseo_title', true )
 			?: get_post_meta( $post_id, 'rank_math_title', true ) ?: '';
@@ -1222,6 +1268,15 @@ class Ratesight_Webhook_Handler {
 			'delete_page_dry_run'  => true,
 			'related_links'        => true,
 			'runtime_404_routing'  => true,
+			// Since 3.4.0: POST /update-page honours dry_run instead of writing regardless.
+			'update_page_dry_run'  => true,
+			// Since 3.4.0: POST /media-alt can correct alt text on an existing attachment. Before
+			// this, alt text was only ever set implicitly at upload time and could not be repaired.
+			'media_alt'            => true,
+			// Since 3.4.0: TOP-LEVEL, mirroring provider_ownership.indexnow below. The submitter has
+			// existed for a long time but had no REST route; callers gate on a top-level flag, so the
+			// nested one alone kept the capability permanently switched off for them.
+			'indexnow'             => true,
 			'provider_ownership'   => array(
 				'gbp_auto_post'   => (bool) Ratesight_Options::get( 'gbp_post_enabled' ),
 				'bing_submission' => (string) Ratesight_Options::get( 'bing_api_key' ) !== '',

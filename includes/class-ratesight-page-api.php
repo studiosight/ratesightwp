@@ -156,12 +156,17 @@ class Ratesight_Page_API {
 				. ( $reason ? "Reason: {$reason}. " : '' )
 				. implode( '; ', $summary );
 
-			Ratesight_Logger::log( array(
-				'post_id' => $post_id,
-				'title'   => get_the_title( $post_id ),
-				'status'  => $dry_run ? 'dry_run' : ( $saved_count > 0 ? 'success' : 'no_change' ),
-				'notes'   => $notes,
-			) );
+			// Since 3.4.0: was Ratesight_Logger::log(), an undefined static method and therefore a
+			// PHP fatal on every SEO-field write AND on every dry run -- see the matching note in
+			// class-ratesight-related-links.php. A dry run stays MODIFIED-free: it changed nothing,
+			// so recording it as a modification would make the log lie.
+			$title = get_the_title( $post_id );
+			Ratesight_Logger::log_update(
+				Ratesight_Logger::log_pending( ( $dry_run ? 'Dry run: ' : 'SEO fields: ' ) . $title, '', wp_json_encode( $changes ) ),
+				$post_id,
+				( $dry_run || $saved_count === 0 ) ? Ratesight_Logger::STATUS_PENDING : Ratesight_Logger::STATUS_MODIFIED,
+				$notes
+			);
 		}
 
 		return rest_ensure_response( array(
