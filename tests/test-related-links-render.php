@@ -1,6 +1,6 @@
 <?php
 /**
- * Standalone tests for Ratesight_Related_Links::render_block() (v3.3.2).
+ * Standalone tests for Ratesight_Related_Links::render_block() (v3.4.0).
  *
  * No WordPress required: the WP functions render_block() touches are stubbed here
  * from a small mutable $WP fixture, so this runs with plain

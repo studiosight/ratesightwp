@@ -175,7 +175,7 @@ class Ratesight_Related_Links {
 	 * Append the related-services block after the builder content, on the
 	 * front-end singular view of the post only. Never mutates post_content.
 	 *
-	 * WHY THIS IS NOT `in_the_loop() && is_main_query()` (fixed 3.3.2). A Divi /
+	 * WHY THIS IS NOT `in_the_loop() && is_main_query()` (fixed 3.4.0). A Divi /
 	 * Elementor Theme Builder POST TEMPLATE renders the post body from inside the
 	 * layout, not from the main WordPress loop: `the_content` fires while
 	 * `in_the_loop()` is false and the running query is the layout's, not the main

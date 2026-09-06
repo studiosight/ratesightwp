@@ -102,7 +102,7 @@ See the Payload Reference tab in the plugin settings for full documentation.
     added in 3.2.19 after drafts self-published on a live install). create-page
     honours a requested status and remains the way to publish.
 
-3.3.2 — Related-services links render on theme-builder blog posts
+3.4.0 — Related-services links render on theme-builder blog posts
   - The render-time related-links block required `in_the_loop()` and
     `is_main_query()`. A Divi or Elementor Theme Builder POST TEMPLATE renders
     the body from inside the layout, where both are false, so the block bailed
