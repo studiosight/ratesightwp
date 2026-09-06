@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.3.2
+Stable tag: 3.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,40 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+
+3.4.0 - Two fatal log calls fixed; update-page honours dry_run; media-alt and
+        IndexNow REST routes
+
+  - FATAL: `Ratesight_Logger::log()` does not exist and never has (the class
+    exposes log_pending / log_update / log_error / get_recent_logs / prune_logs).
+    Two call sites invoked it, so calling an undefined static method killed the
+    request AFTER the work had already been done: every successful related-links
+    write (class-ratesight-related-links.php) and every SEO-field write and DRY
+    RUN on POST /page (class-ratesight-page-api.php) returned a 500 for changes
+    that had in fact been saved. Both now use the log_pending + log_update pair
+    every other write path in this plugin uses.
+  - POST /update-page accepted a `dry_run` field and updated the post anyway --
+    the same defect DELETE /create-page carried until 3.2.19. A caller that
+    believed it was previewing an edit was writing one. It now returns the
+    predicted `would_write` field list, the unchanged `content_hash` and the
+    builder capabilities without touching the post. The branch sits above the
+    pre-update snapshot, which is itself a write. Reported by `update_page_dry_run`
+    in /capabilities.
+  - NEW POST /wp-json/ratesight/v1/media-alt (signed) sets or clears the alt text
+    on one attachment and returns alt_before / alt_after. Alt text was previously
+    settable only implicitly, at image-upload time, so existing library images
+    could never be corrected. Reported by `media_alt` in /capabilities.
+  - NEW POST /wp-json/ratesight/v1/indexnow (signed) submits up to 10 of this
+    site's own URLs through the existing Ratesight_IndexNow::submit(), with a
+    per-URL result. The submitter has worked for a long time but was reachable
+    only from the admin bulk-action UI, with no REST route.
+  - /capabilities now reports `indexnow` at the TOP LEVEL as well as under
+    provider_ownership. Callers gate on the top-level flag, so the nested-only
+    field kept the capability permanently switched off for them.
+  - update-page's post_status behaviour is UNCHANGED and is not a defect: it
+    never changes post_status by design (Ratesight_Publisher::STATUS_PRESERVE,
+    added in 3.2.19 after drafts self-published on a live install). create-page
+    honours a requested status and remains the way to publish.
 
 3.3.2 — Related-services links render on theme-builder blog posts
   - The render-time related-links block required `in_the_loop()` and

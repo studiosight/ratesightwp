@@ -24,6 +24,90 @@ class Ratesight_IndexNow {
 	private const API_URL = 'https://api.indexnow.org/IndexNow';
 
 	// -------------------------------------------------------------------------
+	// REST route
+	// -------------------------------------------------------------------------
+
+	const ROUTE_NAMESPACE = 'ratesight/v1';
+	const ROUTE_PATH      = '/indexnow';
+
+	/** Bounded so one call cannot be turned into a bulk submission run against IndexNow. */
+	const MAX_URLS_PER_REQUEST = 10;
+
+	/**
+	 * Since 3.4.0. submit() has worked for a long time but was reachable ONLY from the admin
+	 * bulk-action UI (class-ratesight-bulk-operations.php) — there was no REST route, so nothing
+	 * off-site could ask this site to notify search engines about a URL it had just changed. The
+	 * dashboard's caller has been sitting behind a capability gate waiting for this.
+	 */
+	public static function register_routes() {
+		register_rest_route( self::ROUTE_NAMESPACE, self::ROUTE_PATH, array(
+			'methods'             => \WP_REST_Server::CREATABLE,
+			'callback'            => array( __CLASS__, 'handle_submit' ),
+			'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_mutation' ),
+		) );
+	}
+
+	/**
+	 * POST /wp-json/ratesight/v1/indexnow  { urls: string[], dry_run? }
+	 *
+	 * Submits each URL individually (submit() takes one URL) and reports a PER-URL result, so a
+	 * partial failure is visible instead of collapsing into one boolean.
+	 *
+	 * @param  \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function handle_submit( \WP_REST_Request $request ): \WP_REST_Response {
+		$data = $request->get_json_params() ?: $request->get_body_params();
+		$urls = ( is_array( $data ) && isset( $data['urls'] ) && is_array( $data['urls'] ) ) ? $data['urls'] : null;
+
+		if ( $urls === null ) {
+			return new \WP_REST_Response( array(
+				'success' => false,
+				'message' => 'Required field "urls" is missing or is not an array.',
+			), 422 );
+		}
+		if ( count( $urls ) > self::MAX_URLS_PER_REQUEST ) {
+			return new \WP_REST_Response( array(
+				'success' => false,
+				'message' => 'Too many urls: ' . count( $urls ) . ' sent, maximum is ' . self::MAX_URLS_PER_REQUEST . '.',
+			), 422 );
+		}
+
+		// Only this site's own URLs. IndexNow rejects a host mismatch anyway, but submitting someone
+		// else's URL under this site's key is not a request this plugin should relay.
+		$host    = wp_parse_url( home_url(), PHP_URL_HOST );
+		$dry_run = filter_var( $data['dry_run'] ?? false, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE ) ?? false;
+		$results = array();
+
+		foreach ( $urls as $raw ) {
+			$url = esc_url_raw( (string) $raw );
+			if ( $url === '' ) {
+				$results[] = array( 'url' => (string) $raw, 'submitted' => false, 'reason' => 'not a valid url' );
+				continue;
+			}
+			if ( wp_parse_url( $url, PHP_URL_HOST ) !== $host ) {
+				$results[] = array( 'url' => $url, 'submitted' => false, 'reason' => 'host does not match this site' );
+				continue;
+			}
+			if ( $dry_run ) {
+				$results[] = array( 'url' => $url, 'submitted' => false, 'reason' => 'dry run' );
+				continue;
+			}
+			$outcome = self::submit( $url );
+			$results[] = is_wp_error( $outcome )
+				? array( 'url' => $url, 'submitted' => false, 'reason' => $outcome->get_error_message() )
+				: array( 'url' => $url, 'submitted' => true );
+		}
+
+		return new \WP_REST_Response( array(
+			'success'   => true,
+			'dry_run'   => $dry_run,
+			'submitted' => count( array_filter( $results, static fn( $r ) => ! empty( $r['submitted'] ) ) ),
+			'results'   => $results,
+		), 200 );
+	}
+
+	// -------------------------------------------------------------------------
 	// Key management
 	// -------------------------------------------------------------------------
 

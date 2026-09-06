@@ -161,6 +161,8 @@ class Ratesight_Connection_Ownership {
 			'/inbound-log' => array( 'GET' ), '/redirects-log' => array( 'GET' ),
 			'/related-links' => array( 'GET', 'POST', 'DELETE' ), '/page' => array( 'GET', 'POST' ),
 			'/trash-page' => array( 'POST' ), '/restore-page' => array( 'POST' ),
+			// Since 3.4.0.
+			'/media-alt' => array( 'POST' ), '/indexnow' => array( 'POST' ),
 		);
 		$result = array();
 		foreach ( $definitions as $path => $methods ) {

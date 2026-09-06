@@ -202,6 +202,11 @@ class Ratesight {
 
 		// Recoverable page lifecycle — trash-page / restore-page (signed only).
 		add_action( 'rest_api_init', array( 'Ratesight_Page_Lifecycle', 'register_routes' ) );
+
+		// Since 3.4.0: alt text was only ever settable at upload time, and IndexNow submission was
+		// reachable only from the admin bulk-action UI. Both are signed mutations.
+		add_action( 'rest_api_init', array( 'Ratesight_Media_Alt', 'register_routes' ) );
+		add_action( 'rest_api_init', array( 'Ratesight_IndexNow', 'register_routes' ) );
 	}
 
 	private function define_cron_hooks() {
