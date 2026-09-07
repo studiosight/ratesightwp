@@ -21,6 +21,12 @@ class Ratesight_Webhook_Handler {
 			'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_read' ),
 		) );
 
+		register_rest_route( 'ratesight/v1', '/connection-status', array(
+			'methods'             => \WP_REST_Server::READABLE,
+			'callback'            => array( $this, 'handle_connection_status' ),
+			'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_read' ),
+		) );
+
 		// Original: create or update by slug match.
 		register_rest_route( 'ratesight/v1', '/create-page', array(
 			array(
@@ -1163,6 +1169,49 @@ class Ratesight_Webhook_Handler {
 	// -------------------------------------------------------------------------
 	// GET /capabilities
 	// -------------------------------------------------------------------------
+
+	/**
+	 * Return value-free local connection state for the dashboard fleet inventory.
+	 */
+	public function handle_connection_status( \WP_REST_Request $request ): \WP_REST_Response {
+		$auth = Ratesight_Request_Auth::capability_auth();
+
+		return new \WP_REST_Response( array(
+			'contract' => 'ratesight-connection-status-v1',
+			'plugin'   => array(
+				'version' => defined( 'RATESIGHT_RELEASE_VERSION' ) ? RATESIGHT_RELEASE_VERSION : null,
+			),
+			'site'     => array(
+				'ratesightIdConfigured' => trim( (string) Ratesight_Options::get( 'code_id' ) ) !== '',
+			),
+			'requestAuth' => array(
+				'mode'             => $auth['mode'],
+				'configured'       => (bool) $auth['configured'],
+				'readinessCurrent' => (bool) $auth['readiness_current'],
+				'readinessExpires' => $auth['readiness_expires'],
+			),
+			'legacyProviderResidue' => array(
+				'gsc' => array(
+					'credentialConfigured' => Ratesight_OAuth_Client::is_connected( 'gsc' ),
+					'selectionConfigured'  => Ratesight_GSC_Client::is_locked(),
+				),
+				'gbp' => array(
+					'credentialConfigured' => Ratesight_OAuth_Client::is_connected( 'gbp' ),
+					'selectionConfigured'  => Ratesight_GBP_Client::is_locked(),
+				),
+				'bing' => array(
+					'credentialConfigured' => Ratesight_Bing_Client::is_connected(),
+					'selectionConfigured'  => Ratesight_Bing_Client::is_locked(),
+				),
+				'deepseek' => array(
+					'credentialConfigured' => (bool) Ratesight_Options::secret_setting_status( 'deepseek_api_key' )['configured'],
+				),
+			),
+			'retainedLocal' => array(
+				'indexNowConfigured' => trim( (string) get_option( 'ratesight_indexnow_key', '' ) ) !== '',
+			),
+		), 200 );
+	}
 
 	/**
 	 * GET /wp-json/ratesight/v1/redirects-log?since=&limit=
