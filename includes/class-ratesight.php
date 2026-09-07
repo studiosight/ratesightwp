@@ -207,6 +207,7 @@ class Ratesight {
 		// reachable only from the admin bulk-action UI. Both are signed mutations.
 		add_action( 'rest_api_init', array( 'Ratesight_Media_Alt', 'register_routes' ) );
 		add_action( 'rest_api_init', array( 'Ratesight_IndexNow', 'register_routes' ) );
+		add_action( 'rest_api_init', array( 'Ratesight_Performance_Snapshot', 'register_routes' ) );
 	}
 
 	private function define_cron_hooks() {
