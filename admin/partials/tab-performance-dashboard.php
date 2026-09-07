@@ -22,7 +22,8 @@ $format_metric = static function ( string $key, $value ): string {
 	if ( 'position' === $key ) return number_format_i18n( (float) $value, 1 );
 	return number_format_i18n( (float) $value, 0 );
 };
-$max_daily = max( 1, ...array_map( static fn( array $row ): float => (float) ( $row['impressions'] ?? 0 ), $daily ) );
+$daily_impressions = array_map( static fn( array $row ): float => (float) ( $row['impressions'] ?? 0 ), $daily );
+$max_daily = $daily_impressions ? max( 1, ...$daily_impressions ) : 1;
 ?>
 <div class="notice notice-info inline" data-ratesight-owner="dashboard" style="margin:0 0 16px;">
 	<p><strong>Performance is managed in the Ratesight Dashboard.</strong> Search Console, Business Profile, and rank results use the provider connections already configured there. You do not need to connect those providers again in WordPress.</p>
