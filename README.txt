@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.4.0
+Stable tag: 3.4.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,13 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+
+3.4.1 - Signed dashboard connection inventory
+
+  - NEW GET /wp-json/ratesight/v1/connection-status reports the plugin release,
+    request-auth readiness, and value-free booleans for legacy provider residue.
+    The endpoint requires rs-hmac-v2 signed-read authorization and never returns
+    tokens, keys, provider identities, property URLs, or location selections.
 
 3.4.0 - Two fatal log calls fixed; update-page honours dry_run; media-alt and
         IndexNow REST routes

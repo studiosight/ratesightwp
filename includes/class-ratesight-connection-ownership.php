@@ -157,7 +157,7 @@ class Ratesight_Connection_Ownership {
 		$definitions = array(
 			'/auth-self-test' => array( 'GET' ), '/create-page' => array( 'POST', 'DELETE' ),
 			'/update-page' => array( 'GET', 'POST' ), '/redirect' => array( 'POST', 'DELETE' ),
-			'/capabilities' => array( 'GET' ), '/redirects' => array( 'GET' ),
+			'/capabilities' => array( 'GET' ), '/connection-status' => array( 'GET' ), '/redirects' => array( 'GET' ),
 			'/inbound-log' => array( 'GET' ), '/redirects-log' => array( 'GET' ),
 			'/related-links' => array( 'GET', 'POST', 'DELETE' ), '/page' => array( 'GET', 'POST' ),
 			'/trash-page' => array( 'POST' ), '/restore-page' => array( 'POST' ),
