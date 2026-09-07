@@ -10,6 +10,9 @@
 
 defined( 'ABSPATH' ) || die;
 
+require __DIR__ . '/tab-performance-dashboard.php';
+return;
+
 // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Table names from $wpdb->prefix, not user input.
 
 
