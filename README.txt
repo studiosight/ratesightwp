@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.5.0
+Stable tag: 3.5.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -68,6 +68,7 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 == Changelog ==
 
+3.5.1 - Prevent a critical error before the first dashboard performance snapshot
 3.5.0 - Display signed dashboard performance snapshots in WordPress
 3.4.4 - Move WordPress Performance to the dashboard-owned Results workspace
 3.4.3 - Correct Ratesight product-name casing

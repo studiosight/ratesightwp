@@ -62,6 +62,11 @@ function check_snapshot_case( string $label, bool $ok ): void {
 	if ( ! $ok ) $failures++;
 }
 
+ob_start();
+require __DIR__ . '/../admin/partials/tab-performance-dashboard.php';
+$empty_rendered = ob_get_clean();
+check_snapshot_case( 'WordPress renders the waiting state before the first snapshot', str_contains( $empty_rendered, 'Waiting for the first dashboard snapshot.' ) );
+
 $normalized = Ratesight_Performance_Snapshot::normalize( $payload, '170652', $now );
 check_snapshot_case( 'valid snapshot normalizes', is_array( $normalized ) );
 check_snapshot_case( 'dashboard URL is canonical and not caller controlled', $normalized['dashboardUrl'] === 'https://dash.ratesight.com/seo/170652/rank' );
