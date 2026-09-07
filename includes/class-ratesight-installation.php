@@ -98,6 +98,7 @@ class Ratesight_Installation {
 			'ratesight_notify_email', 'ratesight_notify_enabled', 'ratesight_rs_redirects',
 			'ratesight_deepseek_api_key', 'ratesight_recovery_actions', 'ratesight_redirect_health_last',
 			'ratesight_redirect_serve_log', 'ratesight_inbound_log', self::RETENTION_OPTION, 'ratesight_health_catch_all_urls',
+			'ratesight_dashboard_performance_snapshot',
 		) );
 		foreach ( array( 'gbp', 'gsc' ) as $service ) {
 			foreach ( array( 'oauth', 'selection', 'locked', 'revoked', 'disconnect_reason', 'refresh_error', 'scope_error' ) as $suffix ) {

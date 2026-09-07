@@ -68,6 +68,7 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 == Changelog ==
 
+3.5.0 - Display signed dashboard performance snapshots in WordPress
 3.4.4 - Move WordPress Performance to the dashboard-owned Results workspace
 3.4.3 - Correct Ratesight product-name casing
 

@@ -23,7 +23,8 @@ check_dashboard_performance_case( 'configured site opens dashboard Results works
 check_dashboard_performance_case( 'missing site ID has safe dashboard fallback', str_contains( $dashboard, "'https://dash.ratesight.com/seo'" ) );
 check_dashboard_performance_case( 'canonical Ratesight casing is used', str_contains( $dashboard, 'Ratesight Dashboard' ) && str_contains( $dashboard, 'Open Performance in Ratesight' ) );
 check_dashboard_performance_case( 'duplicate provider connections are explicitly unnecessary', str_contains( $dashboard, 'do not need to connect those providers again in WordPress' ) );
-check_dashboard_performance_case( 'credential and metric copying is explicitly denied', str_contains( $dashboard, 'No Google, Bing, or Business Profile credentials or performance records are copied' ) );
+check_dashboard_performance_case( 'provider credential copying is explicitly denied', str_contains( $dashboard, 'No Google, Bing, or Business Profile credentials are copied' ) );
+check_dashboard_performance_case( 'stored dashboard metrics render locally', str_contains( $dashboard, 'Ratesight_Performance_Snapshot::OPTION' ) && str_contains( $dashboard, 'Top searches' ) );
 check_dashboard_performance_case( 'dashboard URL is escaped at render boundary', str_contains( $dashboard, 'esc_url( $dashboard_url )' ) );
 
 echo "All dashboard-owned performance tests passed.\n";

@@ -158,6 +158,7 @@ class Ratesight_Connection_Ownership {
 			'/auth-self-test' => array( 'GET' ), '/create-page' => array( 'POST', 'DELETE' ),
 			'/update-page' => array( 'GET', 'POST' ), '/redirect' => array( 'POST', 'DELETE' ),
 			'/capabilities' => array( 'GET' ), '/connection-status' => array( 'GET' ), '/redirects' => array( 'GET' ),
+			'/performance-snapshot' => array( 'GET', 'POST' ),
 			'/inbound-log' => array( 'GET' ), '/redirects-log' => array( 'GET' ),
 			'/related-links' => array( 'GET', 'POST', 'DELETE' ), '/page' => array( 'GET', 'POST' ),
 			'/trash-page' => array( 'POST' ), '/restore-page' => array( 'POST' ),
@@ -169,7 +170,7 @@ class Ratesight_Connection_Ownership {
 			foreach ( $methods as $method ) {
 				$result[] = array(
 					'id' => $method . ' /ratesight/v1' . $path, 'type' => 'rest_route',
-					'source' => str_contains( $path, 'related-links' ) ? 'includes/class-ratesight-related-links.php' : ( str_contains( $path, '/page' ) ? 'includes/class-ratesight-page-api.php' : ( str_contains( $path, 'trash-' ) || str_contains( $path, 'restore-' ) ? 'includes/class-ratesight-page-lifecycle.php' : 'includes/class-ratesight-webhook-handler.php' ) ),
+					'source' => str_contains( $path, 'performance-snapshot' ) ? 'includes/class-ratesight-performance-snapshot.php' : ( str_contains( $path, 'related-links' ) ? 'includes/class-ratesight-related-links.php' : ( str_contains( $path, '/page' ) ? 'includes/class-ratesight-page-api.php' : ( str_contains( $path, 'trash-' ) || str_contains( $path, 'restore-' ) ? 'includes/class-ratesight-page-lifecycle.php' : 'includes/class-ratesight-webhook-handler.php' ) ) ),
 					'owner' => 'wordpress_plugin', 'state' => 'retained_wordpress', 'replacement' => null, 'proofType' => 'route_registration',
 					'reasonCode' => null, 'evidenceToUnblock' => null,
 				);

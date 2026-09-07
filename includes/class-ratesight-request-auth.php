@@ -18,6 +18,8 @@ class Ratesight_Request_Auth {
 		'GET /ratesight/v1/capabilities' => 'public_bootstrap',
 		'GET /ratesight/v1/auth-self-test' => 'signed_read',
 		'GET /ratesight/v1/connection-status' => 'signed_read',
+		'GET /ratesight/v1/performance-snapshot' => 'signed_read',
+		'POST /ratesight/v1/performance-snapshot' => 'signed_mutation',
 		'POST /ratesight/v1/create-page' => 'signed_mutation',
 		'DELETE /ratesight/v1/create-page' => 'signed_mutation',
 		'GET /ratesight/v1/update-page' => 'signed_read',
