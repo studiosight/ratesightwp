@@ -68,6 +68,13 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 == Changelog ==
 
+3.4.2 - Dashboard-owned provider connections
+
+  - WordPress now shows sanitized app/auth health, one dashboard destination,
+    and value-free legacy-state presence instead of provider connection,
+    disconnection, property/location, or API-key controls. Existing state is
+    retained for rollback compatibility.
+
 3.4.1 - Signed dashboard connection inventory
 
   - NEW GET /wp-json/ratesight/v1/connection-status reports the plugin release,

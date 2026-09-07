@@ -8,6 +8,8 @@
 
 defined( 'ABSPATH' ) || die;
 
+require __DIR__ . '/tab-connections-dashboard.php';
+
 // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Table names from $wpdb->prefix, not user input.
 
 
@@ -64,6 +66,7 @@ if ( empty( Ratesight_Options::get( 'code_id' ) ) ) : ?>
 </div>
 <?php endif; ?>
 
+<?php if ( false ) : // Legacy provider controls are retained in source for rollback, but no longer rendered. ?>
 <!-- ── Search Console ────────────────────────────────────────────────────────── -->
 <h2 class="rs-section">Google Search Console</h2>
 <div class="rs-card" id="rs-gsc-card">
@@ -361,6 +364,7 @@ $bing_last_sync = get_option( 'ratesight_bing_last_sync', '' );
 </div>
 </div>
 
+<?php endif; ?>
 <!-- ── Site Status (auto-loaded) ──────────────────────────────────────────── -->
 <h2 class="rs-section">Site Status</h2>
 <div class="rs-card">
