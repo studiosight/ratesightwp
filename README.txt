@@ -68,6 +68,11 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 == Changelog ==
 
+3.4.3 - Correct Ratesight product-name casing
+
+  - Use the canonical Ratesight spelling throughout the dashboard-owned
+    connection surface.
+
 3.4.2 - Dashboard-owned provider connections
 
   - WordPress now shows sanitized app/auth health, one dashboard destination,
