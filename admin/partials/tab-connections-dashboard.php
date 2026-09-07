@@ -25,15 +25,15 @@ $legacy = array(
 $legacy_count = count( array_filter( $legacy ) );
 ?>
 <div class="notice notice-info inline" data-ratesight-owner="dashboard" style="margin:0 0 16px;">
-	<p><strong>Provider connections are managed in the RateSight Dashboard.</strong> Connect Google Search Console and Business Profile, review Bing coverage, and choose the site destination there. Provider credentials are not entered in WordPress.</p>
+	<p><strong>Provider connections are managed in the Ratesight Dashboard.</strong> Connect Google Search Console and Business Profile, review Bing coverage, and choose the site destination there. Provider credentials are not entered in WordPress.</p>
 </div>
 
 <div class="rs-card" id="rs-dashboard-connection-card">
 	<div class="rs-card-body">
-		<h2 style="margin-top:0;">RateSight App Connection</h2>
+		<h2 style="margin-top:0;">Ratesight App Connection</h2>
 		<table class="form-table" role="presentation">
 			<tr><th>Plugin</th><td><strong><?php echo esc_html( RATESIGHT_RELEASE_VERSION ); ?></strong> &middot; <?php echo $installation['active'] ? '<span style="color:#00a32a;">Active</span>' : '<span style="color:#b32d2e;">Inactive installation</span>'; ?></td></tr>
-			<tr><th>RateSight ID</th><td><?php echo $ratesight_id !== '' ? esc_html( $ratesight_id ) : '<span style="color:#b32d2e;">Not configured</span>'; ?></td></tr>
+			<tr><th>Ratesight ID</th><td><?php echo $ratesight_id !== '' ? esc_html( $ratesight_id ) : '<span style="color:#b32d2e;">Not configured</span>'; ?></td></tr>
 			<tr><th>Signed API</th><td><?php echo $signed_secret_configured ? '<span style="color:#00a32a;">Configured</span>' : '<span style="color:#b32d2e;">Not configured</span>'; ?> &middot; mode <code><?php echo esc_html( $auth_mode ); ?></code><?php echo $readiness_current ? ' &middot; readiness current' : ''; ?></td></tr>
 			<tr><th>Provider ownership</th><td>Dashboard only</td></tr>
 		</table>
