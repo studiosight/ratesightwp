@@ -11,10 +11,38 @@ defined( 'ABSPATH' ) || die;
 settings_errors();
 $options = Ratesight_Options::get_all();
 $preview_text_color = $options['dark_text'] ? $options['dark_text_color'] : '#3c434a';
+$dashboard_paired = 'dashboard' === ( Ratesight_Pairing::status()['source'] ?? null );
 ?>
 <div class="rs-widget-intro">
 	<h2>Reviews &amp; Widgets</h2>
 	<p>Choose where visitors see your reviews and match the widget to your website.</p>
+</div>
+
+<h2 class="rs-section">Ratesight Account</h2>
+<div class="rs-card">
+	<div class="rs-card-body">
+		<form method="post" action="options.php">
+			<?php settings_fields( 'ratesight_options_site_identity' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="rs-code-id">Ratesight ID</label></th>
+					<td>
+						<input type="text" id="rs-code-id" name="wp_ratesight_code_id" class="regular-text" inputmode="numeric" pattern="[0-9]{1,20}" maxlength="20" value="<?php echo esc_attr( $options['code_id'] ); ?>" <?php disabled( $dashboard_paired ); ?> aria-describedby="rs-code-id-help">
+						<p class="description" id="rs-code-id-help">
+							<?php if ( $dashboard_paired ) : ?>
+								Connected and managed through Ratesight. Contact support to move this site to a different account.
+							<?php else : ?>
+								Enter the numeric ID supplied by Ratesight. This identifies the account used by review widgets on this site.
+							<?php endif; ?>
+						</p>
+					</td>
+				</tr>
+			</table>
+			<?php if ( ! $dashboard_paired ) : ?>
+				<div class="rs-submit"><?php submit_button( 'Save Ratesight ID' ); ?></div>
+			<?php endif; ?>
+		</form>
+	</div>
 </div>
 
 <form method="post" action="options.php">

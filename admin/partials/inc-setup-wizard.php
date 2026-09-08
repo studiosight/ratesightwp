@@ -18,14 +18,16 @@ $user_id   = get_current_user_id();
 $dismissed = get_user_meta( $user_id, 'ratesight_wizard_dismissed', true );
 if ( $dismissed ) return;
 
+$ratesight_id_set = (bool) preg_match( '/^[0-9]{1,20}$/', trim( (string) Ratesight_Options::get( 'code_id' ) ) );
+
 // Evaluate each step.
 $steps = array(
 	array(
 		'id'      => 'widget_id',
-		'label'   => 'Ratesight is connected',
-		'done'    => Ratesight_Pairing::is_connected(),
-		'action'  => 'Your Ratesight team can finish connecting this site. No action is needed here.',
-		'url'     => '',
+		'label'   => 'Ratesight account identified',
+		'done'    => $ratesight_id_set,
+		'action'  => 'Enter the Ratesight ID supplied with your account.',
+		'url'     => admin_url( 'admin.php?page=ratesight&tab=widgets' ),
 	),
 	array(
 		'id'      => 'blog_public',
