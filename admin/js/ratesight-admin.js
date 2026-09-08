@@ -50,6 +50,22 @@
 			} );
 		} );
 
+		// ── Review widget color preview ───────────────────────────────────────
+		function updateReviewWidgetPreview() {
+			var preview = document.getElementById( 'rs-widget-preview' );
+			var starColor = document.getElementById( 'rs-star-color' );
+			var customText = document.getElementById( 'rs-custom-text-color' );
+			var textColor = document.getElementById( 'rs-review-text-color' );
+			if ( ! preview || ! starColor || ! customText || ! textColor ) return;
+			preview.style.setProperty( '--rs-preview-stars', starColor.value );
+			preview.style.setProperty( '--rs-preview-text', customText.checked ? textColor.value : '#3c434a' );
+			textColor.closest( '.rs-color-row' ).classList.toggle( 'rs-color-row-muted', ! customText.checked );
+		}
+
+		$( '#rs-star-color, #rs-review-text-color' ).on( 'input change', updateReviewWidgetPreview );
+		$( '#rs-custom-text-color' ).on( 'change', updateReviewWidgetPreview );
+		updateReviewWidgetPreview();
+
 		// ── AI worker health test ─────────────────────────────────────────────
 		$( '#rs-test-ai-worker' ).on( 'click', function () {
 			var $btn = $( this ).prop( 'disabled', true ).text( 'Testing…' );

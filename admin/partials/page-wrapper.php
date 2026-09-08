@@ -11,7 +11,7 @@
 
 defined( 'ABSPATH' ) || die;
 
-$valid_tabs = array( 'performance', 'widgets', 'support', 'seo-pages', 'logs', 'connections', 'links', 'help' );
+$valid_tabs = array( 'performance', 'widgets', 'support', 'widget-settings', 'seo-pages', 'logs', 'connections', 'links', 'help' );
 if ( ! in_array( $tab, $valid_tabs, true ) ) {
 	$tab = 'performance';
 }
@@ -85,6 +85,7 @@ if ( ! in_array( $tab, $valid_tabs, true ) ) {
 			'performance' => 'tab-performance.php',
 			'widgets'     => 'tab-widgets.php',
 			'support'     => 'tab-support.php',
+			'widget-settings' => 'tab-widget-settings.php',
 			'seo-pages'   => 'tab-seo-pages.php',
 			'logs'        => 'tab-logs.php',
 			'connections' => 'tab-connections.php',
