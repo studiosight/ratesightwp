@@ -12,6 +12,7 @@ function register_rest_route( $namespace, $path, $definitions ) {
 require __DIR__ . '/../includes/class-ratesight-request-auth.php';
 require __DIR__ . '/../includes/class-ratesight-performance-snapshot.php';
 require __DIR__ . '/../includes/class-ratesight-pairing.php';
+require __DIR__ . '/../includes/class-ratesight-release-update.php';
 require __DIR__ . '/../includes/class-ratesight-webhook-handler.php';
 require __DIR__ . '/../includes/class-ratesight-related-links.php';
 require __DIR__ . '/../includes/class-ratesight-page-api.php';
@@ -26,6 +27,7 @@ Ratesight_Media_Alt::register_routes();
 Ratesight_IndexNow::register_routes();
 Ratesight_Performance_Snapshot::register_routes();
 Ratesight_Pairing::register_route();
+Ratesight_Release_Update::register_route();
 
 $failures = 0;
 foreach ( Ratesight_Request_Auth::ROUTE_POLICIES as $route => $policy ) {

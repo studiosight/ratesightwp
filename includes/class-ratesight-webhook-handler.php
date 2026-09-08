@@ -1300,6 +1300,7 @@ class Ratesight_Webhook_Handler {
 			'plugin_version'       => defined( 'RATESIGHT_RELEASE_VERSION' ) ? RATESIGHT_RELEASE_VERSION : null,
 			'auth'                 => Ratesight_Request_Auth::capability_auth(),
 			'pairing'              => Ratesight_Pairing::status(),
+			'plugin_update_preflight' => true,
 			'create_page'          => true,
 			'set_redirect'         => true,
 			'delete_redirect'      => true,

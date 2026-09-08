@@ -77,6 +77,7 @@ foreach ( array(
 	'includes/class-ratesight-sitemap.php',
 	'includes/class-ratesight-request-auth.php',
 	'includes/class-ratesight-pairing.php',
+	'includes/class-ratesight-release-update.php',
 	'includes/class-ratesight-performance-snapshot.php',
 	'includes/class-ratesight-webhook-handler.php',
 	'includes/class-ratesight-page-lifecycle.php',
