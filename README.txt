@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.7.0
+Stable tag: 3.8.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -59,6 +59,14 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.8.0 - Positive performance storytelling
+
+  - Leads with a plain-English 28-day growth result when verified improvement exists.
+  - Shows customer outcomes and positive comparison badges without diagnostic states.
+  - Groups search wins into Top 3, Page One, Close to Page One, and Biggest Movers.
+  - Replaces implementation totals with confirmed gains and developing results.
+  - Removes raw states, tracking mechanics, site IDs, credential copy, and duplicate ranking tables.
 
 3.7.0 - Client-facing navigation
 
