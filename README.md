@@ -5,7 +5,7 @@ AI-generated SEO pages, review widgets, and local-search performance tracking �
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](LICENSE)
 ![WordPress](https://img.shields.io/badge/WordPress-5.9%2B-21759b.svg)
 ![PHP](https://img.shields.io/badge/PHP-8.0%2B-777bb4.svg)
-![Version](https://img.shields.io/badge/version-3.6.4-brightgreen.svg)
+![Version](https://img.shields.io/badge/version-3.7.0-brightgreen.svg)
 
 Ratesight unifies review generation and search visibility in one place. It publishes AI-generated, SEO-optimized pages through a secure webhook, embeds review widgets anywhere on your site, and surfaces local-search performance from Google Search Console and Business Profile — without loading any third-party dependencies in your admin.
 
@@ -31,12 +31,12 @@ Ratesight unifies review generation and search visibility in one place. It publi
 
 ## Configuration
 
-The settings are organized into four tabs:
+The client-facing menu has four destinations:
 
-- **Widgets** — Ratesight ID, campaign and domain IDs, reviews page, star color and dark-text options, and widget toggles.
-- **AI SEO Pages** — dashboard-managed signed connection health, webhook endpoint reference, and default post status, author, and parent category.
-- **Activity Log** — the last 100 webhook requests with status, title, category, post link, and any error.
-- **Payload Reference** — the complete JSON payload schema and response format.
+- **Overview** — positive search, local visibility, and completed-work results.
+- **SEO Content** — published search-focused service and location content.
+- **Reviews & Widgets** — widget placement and appearance controls.
+- **Support** — a plain-English service summary, connection status, and contact details.
 
 > Deploying the Search Console / Business Profile integration requires a small
 > number of environment secrets defined in `wp-config.php`. See
@@ -55,11 +55,12 @@ The settings are organized into four tabs:
 Publish an AI-generated page programmatically:
 
 ```
-POST /wp-json/ratesight/v1/create-page?secret=YOUR_SECRET_KEY
+POST /wp-json/ratesight/v1/create-page
 ```
 
-Required fields: `title` and `article`. The complete payload schema and response
-format are documented in the **Payload Reference** tab within the plugin settings.
+Required fields are `title` and `article`. Protected requests use the negotiated
+`rs-hmac-v2` headers; shared credentials are not sent in URLs or displayed in the
+client-facing plugin.
 
 ## Contributing
 
