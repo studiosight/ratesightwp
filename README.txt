@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.8.0
+Stable tag: 3.9.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -35,7 +35,8 @@ The client-facing menu has four destinations:
     - Published search-focused service and location content
 
   Reviews & Widgets
-    - Widget placement and appearance controls
+    - Reviews-page selection, a live style preview, appearance controls,
+      and copy-ready review shortcodes
 
   Support
     - Plain-English service summary, connection status, and contact details
@@ -59,6 +60,14 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.9.0 - Client-facing content and review controls
+
+  - Renames WordPress-facing RS Pages and RS Categories labels to SEO Content and SEO Categories.
+  - Adds a live review-widget color preview and clearer review-page and appearance controls.
+  - Keeps only the two review shortcodes on the client page and removes the unrelated Jobs shortcode.
+  - Moves legacy widget identifiers to an unlinked support route without changing stored values.
+  - Separates identity and appearance settings so saving the client page cannot erase connection data.
 
 3.8.0 - Positive performance storytelling
 

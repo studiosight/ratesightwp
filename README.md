@@ -5,7 +5,7 @@ AI-generated SEO pages, review widgets, and local-search performance tracking �
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](LICENSE)
 ![WordPress](https://img.shields.io/badge/WordPress-5.9%2B-21759b.svg)
 ![PHP](https://img.shields.io/badge/PHP-8.0%2B-777bb4.svg)
-![Version](https://img.shields.io/badge/version-3.8.0-brightgreen.svg)
+![Version](https://img.shields.io/badge/version-3.9.0-brightgreen.svg)
 
 Ratesight unifies review generation and search visibility in one place. It publishes AI-generated, SEO-optimized pages through a secure webhook, embeds review widgets anywhere on your site, and surfaces local-search performance from Google Search Console and Business Profile — without loading any third-party dependencies in your admin.
 
@@ -35,7 +35,7 @@ The client-facing menu has four destinations:
 
 - **Overview** — positive search, local visibility, and completed-work results.
 - **SEO Content** — published search-focused service and location content.
-- **Reviews & Widgets** — widget placement and appearance controls.
+- **Reviews & Widgets** — reviews-page selection, a live style preview, appearance controls, and copy-ready review shortcodes.
 - **Support** — a plain-English service summary, connection status, and contact details.
 
 > Deploying the Search Console / Business Profile integration requires a small
@@ -48,7 +48,6 @@ The client-facing menu has four destinations:
 | --- | --- |
 | `[rs_leave_reviews]` | A five-star link to your Ratesight review form and a carousel of recent reviews. Suited to thank-you and landing pages. |
 | `[rs_all_reviews]` | Loads the full Ratesight reviews widget. Intended for your Reviews page. |
-| `[rs_jobs]` | Embeds your Worksight jobs board. Requires a Code ID to be set in the plugin settings. |
 
 ## Webhook
 

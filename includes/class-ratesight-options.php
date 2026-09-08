@@ -14,13 +14,13 @@ class Ratesight_Options {
 		return array(
 
 			// ── Widget / shortcode settings ───────────────────────────────────
-			'code_id'              => array( 'name' => 'wp_ratesight_code_id',     'default' => '',        'type' => 'text',   'group' => 'widgets'   ),
+			'code_id'              => array( 'name' => 'wp_ratesight_code_id',     'default' => '',        'type' => 'text',   'group' => 'widget_identity' ),
 			// Per-site signing key (Option C). Paired with the OID above; used to
 			// authenticate Worker requests once per-site auth is enabled. Secret —
 			// never rendered into public widget markup.
-			'site_key'             => array( 'name' => 'wp_ratesight_site_key',    'default' => '',        'type' => 'text',   'group' => 'widgets'   ),
-			'campaign_id'          => array( 'name' => 'wp_ratesight_campaign_id', 'default' => '',        'type' => 'text',   'group' => 'widgets'   ),
-			'domain_id'            => array( 'name' => 'wp_ratesight_domain_id',   'default' => '',        'type' => 'text',   'group' => 'widgets'   ),
+			'site_key'             => array( 'name' => 'wp_ratesight_site_key',    'default' => '',        'type' => 'text',   'group' => 'internal' ),
+			'campaign_id'          => array( 'name' => 'wp_ratesight_campaign_id', 'default' => '',        'type' => 'text',   'group' => 'widget_identity' ),
+			'domain_id'            => array( 'name' => 'wp_ratesight_domain_id',   'default' => '',        'type' => 'text',   'group' => 'widget_identity' ),
 			'review_page'          => array( 'name' => 'wp_ratesight_rv_page',     'default' => 0,         'type' => 'int',    'group' => 'widgets'   ),
 			'stars_clr'            => array( 'name' => 'wp_ratesight_stars_clr',   'default' => '#1877F2', 'type' => 'color',  'group' => 'widgets'   ),
 			'dark_text'            => array( 'name' => 'wp_ratesight_dark_text',   'default' => 0,         'type' => 'bool',   'group' => 'widgets'   ),

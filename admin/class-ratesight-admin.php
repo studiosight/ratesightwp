@@ -2,8 +2,7 @@
 /**
  * Admin-specific functionality.
  *
- * Single menu item "Ratesight" with four tabs:
- *   Widgets | AI SEO Pages | Activity Log | Payload Reference
+ * Ratesight admin settings, client navigation, and direct support routes.
  *
  * @package    Ratesight
  * @subpackage Ratesight/admin
