@@ -14,7 +14,7 @@ class Ratesight_Options {
 		return array(
 
 			// ── Widget / shortcode settings ───────────────────────────────────
-			'code_id'              => array( 'name' => 'wp_ratesight_code_id',     'default' => '',        'type' => 'text',   'group' => 'widget_identity' ),
+			'code_id'              => array( 'name' => 'wp_ratesight_code_id',     'default' => '',        'type' => 'text',   'group' => 'site_identity' ),
 			// Per-site signing key (Option C). Paired with the OID above; used to
 			// authenticate Worker requests once per-site auth is enabled. Secret —
 			// never rendered into public widget markup.

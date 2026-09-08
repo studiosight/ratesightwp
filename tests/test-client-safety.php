@@ -20,7 +20,7 @@ $connections = file_get_contents( $root . '/admin/partials/tab-connections-dashb
 $performance = file_get_contents( $root . '/admin/partials/tab-performance-dashboard.php' );
 $plugin = file_get_contents( $root . '/ratesight.php' );
 
-check_client_safety_case( 'setup wizard contains only WordPress-local client steps', ! str_contains( $wizard, "'id'      => 'gsc'" ) && ! str_contains( $wizard, "'id'      => 'gbp'" ) && str_contains( $wizard, 'No action is needed here.' ) );
+check_client_safety_case( 'setup wizard contains only WordPress-local client steps', ! str_contains( $wizard, "'id'      => 'gsc'" ) && ! str_contains( $wizard, "'id'      => 'gbp'" ) && str_contains( $wizard, "'id'      => 'widget_id'" ) && str_contains( $wizard, "'id'      => 'blog_public'" ) );
 check_client_safety_case( 'legacy provider revocation notice is not registered or rendered', ! str_contains( $loader, "'revocation_notice'" ) && ! str_contains( $admin, 'public function revocation_notice' ) );
 check_client_safety_case( 'operational email settings are absent from the client UI', ! str_contains( $settings, 'ratesight_notify_enabled' ) && ! str_contains( $settings, 'ratesight_notify_email' ) && ! str_contains( $admin, "register_setting( 'ratesight_options_seo_pages', 'ratesight_notify" ) );
 check_client_safety_case( 'retired notifier cannot schedule or send client email', str_contains( $notifier, 'self::unschedule();' ) && str_contains( $notifier, 'return false;' ) && ! str_contains( $notifier, 'wp_mail(' ) && ! str_contains( $loader, "add_action( 'ratesight_daily_digest'" ) );

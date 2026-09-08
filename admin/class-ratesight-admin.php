@@ -33,6 +33,18 @@ class Ratesight_Admin {
 								: $parsed['value'];
 						}
 						$sanitized = Ratesight_Options::sanitise( $value, $def['type'] );
+						if ( $key === 'code_id' ) {
+							$stored = trim( (string) get_option( $def['name'], '' ) );
+							if ( $sanitized !== '' && ! preg_match( '/^[0-9]{1,20}$/', $sanitized ) ) {
+								add_settings_error( $def['name'], 'ratesight_oid_invalid', 'Ratesight ID must contain only numbers.' );
+								return $stored;
+							}
+							$pairing = Ratesight_Pairing::status();
+							if ( 'dashboard' === ( $pairing['source'] ?? null ) && $stored !== '' && ! hash_equals( $stored, $sanitized ) ) {
+								add_settings_error( $def['name'], 'ratesight_oid_managed', 'This Ratesight ID is managed by the signed dashboard connection and cannot be changed here.' );
+								return $stored;
+							}
+						}
 						// Bust the license cache whenever the Ratesight ID is saved.
 						if ( $key === 'code_id' ) {
 							Ratesight_License::clear_cache();

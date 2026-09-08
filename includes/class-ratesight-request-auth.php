@@ -17,6 +17,7 @@ class Ratesight_Request_Auth {
 	public const ROUTE_POLICIES = array(
 		'GET /ratesight/v1/capabilities' => 'public_bootstrap',
 		'POST /ratesight/v1/pair' => 'public_signed_bootstrap',
+		'POST /ratesight/v1/plugin-update' => 'signed_mutation',
 		'GET /ratesight/v1/auth-self-test' => 'signed_read',
 		'GET /ratesight/v1/connection-status' => 'signed_read',
 		'GET /ratesight/v1/performance-snapshot' => 'signed_read',

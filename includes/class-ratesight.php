@@ -204,6 +204,7 @@ class Ratesight {
 		add_action( 'rest_api_init', array( 'Ratesight_IndexNow', 'register_routes' ) );
 		add_action( 'rest_api_init', array( 'Ratesight_Performance_Snapshot', 'register_routes' ) );
 		add_action( 'rest_api_init', array( 'Ratesight_Pairing', 'register_route' ) );
+		add_action( 'rest_api_init', array( 'Ratesight_Release_Update', 'register_route' ) );
 	}
 
 	private function define_cron_hooks() {
