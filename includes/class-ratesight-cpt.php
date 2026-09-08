@@ -71,6 +71,11 @@ class Ratesight_CPT {
 				'revisions',
 			),
 			'capability_type'     => 'page',
+			'capabilities'        => array(
+				'create_posts' => 'do_not_allow',
+				'edit_post'    => 'do_not_allow',
+				'delete_post'  => 'do_not_allow',
+			),
 		) );
 
 		// ── RS Page Category taxonomy ─────────────────────────────────────────

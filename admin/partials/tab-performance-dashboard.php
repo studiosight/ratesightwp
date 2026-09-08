@@ -14,6 +14,13 @@ $rankings = is_array( $snapshot ) && is_array( $snapshot['rankings'] ?? null ) ?
 $work = is_array( $snapshot ) && is_array( $snapshot['work'] ?? null ) ? $snapshot['work'] : null;
 $metrics = is_array( $organic['metrics'] ?? null ) ? $organic['metrics'] : array();
 $highlights = is_array( $organic['highlights'] ?? null ) ? $organic['highlights'] : array();
+$generated_at = is_array( $snapshot ) ? strtotime( (string) ( $snapshot['generatedAt'] ?? '' ) ) : false;
+$latest_metric_date = is_array( $organic ) ? (string) ( $organic['latestMetricDate'] ?? '' ) : '';
+$report_is_stale = is_array( $snapshot ) && ( 'current' !== ( $organic['freshnessState'] ?? 'unavailable' ) || false === $generated_at || $generated_at < time() - ( 2 * 86400 ) );
+$verified_timestamp = $latest_metric_date !== '' ? strtotime( $latest_metric_date . ' 12:00:00 UTC' ) : false;
+$verified_through = false !== $verified_timestamp
+	? ( function_exists( 'wp_date' ) ? wp_date( get_option( 'date_format' ), $verified_timestamp ) : gmdate( 'F j, Y', $verified_timestamp ) )
+	: '';
 
 $is_improved = static fn( $metric ): bool => is_array( $metric ) && true === ( $metric['directionEligible'] ?? false ) && 'improved' === ( $metric['direction'] ?? null );
 $format_position = static function ( $position ): string {
@@ -101,6 +108,13 @@ $improved_work = is_array( $work ) ? (int) ( $work['improved'] ?? 0 ) : 0;
 $maturing_work = is_array( $work ) ? (int) ( $work['maturing'] ?? 0 ) : 0;
 $has_highlights = (bool) array_filter( $organic_groups, static fn( array $group ): bool => ! empty( $group[1] ) );
 $has_results = ! empty( $outcome_cards ) || $has_highlights || ! empty( $ranking_rows ) || $improved_work > 0 || $maturing_work > 0;
+
+if ( $report_is_stale && $has_results ) {
+	$headline = 'Most recent verified results';
+	$headline_detail = $verified_through !== ''
+		? 'These results are verified through ' . $verified_through . '. We are refreshing this report.'
+		: 'We are refreshing this report. The verified results below remain available in the meantime.';
+}
 ?>
 
 <style>
@@ -111,12 +125,16 @@ $has_results = ! empty( $outcome_cards ) || $has_highlights || ! empty( $ranking
 .rs-outcome-card { border:1px solid #dcdcde!important; border-radius:8px!important; padding:16px!important; background:#fff!important; }
 .rs-outcome-label { color:#50575e!important; font-size:13px!important; font-weight:600!important; }
 .rs-outcome-value { color:#1d2327!important; font-size:28px!important; font-weight:700!important; line-height:1.15!important; margin-top:6px!important; }
-.rs-outcome-detail { color:#646970!important; font-size:12px!important; margin-top:5px!important; }
+.rs-outcome-detail { color:#646970!important; font-size:13px!important; margin-top:5px!important; }
 .rs-positive-badge { display:inline-block!important; margin-top:8px!important; border-radius:999px!important; background:#e7f7ec!important; color:#137333!important; font-size:12px!important; font-weight:700!important; padding:3px 8px!important; }
 .rs-win-list { display:grid!important; grid-template-columns:repeat(auto-fit,minmax(230px,1fr))!important; gap:10px!important; margin:10px 0 18px!important; }
 .rs-win-item { border:1px solid #dcdcde!important; border-left:4px solid #35a853!important; border-radius:6px!important; background:#fff!important; padding:13px 14px!important; }
 .rs-win-term { display:block!important; color:#1d2327!important; font-size:14px!important; font-weight:700!important; }
-.rs-win-meta { display:flex!important; flex-wrap:wrap!important; gap:8px!important; align-items:center!important; color:#50575e!important; font-size:12px!important; margin-top:7px!important; }
+.rs-win-meta { display:flex!important; flex-wrap:wrap!important; gap:8px!important; align-items:center!important; color:#50575e!important; font-size:13px!important; margin-top:7px!important; }
+@media screen and (max-width:600px) {
+	.rs-outcome-grid,.rs-win-list { grid-template-columns:minmax(0,1fr)!important; }
+	.rs-win-term { overflow-wrap:anywhere!important; }
+}
 </style>
 
 <div class="rs-card">
@@ -136,9 +154,9 @@ $has_results = ! empty( $outcome_cards ) || $has_highlights || ! empty( $ranking
 <?php else : ?>
 	<?php if ( $outcome_cards ) : ?>
 		<h2 class="rs-section">How Customers Found You</h2>
-		<div class="rs-outcome-grid">
+		<div class="rs-outcome-grid" role="list">
 			<?php foreach ( $outcome_cards as $card ) : ?>
-				<div class="rs-outcome-card">
+				<div class="rs-outcome-card" role="listitem">
 					<div class="rs-outcome-label"><?php echo esc_html( $card['label'] ); ?></div>
 					<div class="rs-outcome-value"><?php echo esc_html( $card['value'] ); ?></div>
 					<div class="rs-outcome-detail"><?php echo esc_html( $card['detail'] ); ?></div>
@@ -150,9 +168,9 @@ $has_results = ! empty( $outcome_cards ) || $has_highlights || ! empty( $ranking
 
 	<?php foreach ( $organic_groups as $group_key => $group ) : if ( ! $group[1] ) continue; ?>
 		<h2 class="rs-section"><?php echo esc_html( $group[0] ); ?></h2>
-		<div class="rs-win-list">
+		<div class="rs-win-list" role="list">
 			<?php foreach ( $group[1] as $row ) : ?>
-				<div class="rs-win-item">
+				<div class="rs-win-item" role="listitem">
 					<span class="rs-win-term"><?php echo esc_html( (string) $row['value'] ); ?></span>
 					<div class="rs-win-meta">
 						<?php if ( 'improving' !== $group_key ) : ?><strong><?php echo esc_html( $format_position( $row['position'] ) ); ?></strong><?php endif; ?>
@@ -166,9 +184,9 @@ $has_results = ! empty( $outcome_cards ) || $has_highlights || ! empty( $ranking
 
 	<?php if ( $ranking_rows ) : ?>
 		<h2 class="rs-section"><?php echo esc_html( $ranking_title ); ?></h2>
-		<div class="rs-win-list">
+		<div class="rs-win-list" role="list">
 			<?php foreach ( $ranking_rows as $row ) : ?>
-				<div class="rs-win-item">
+				<div class="rs-win-item" role="listitem">
 					<span class="rs-win-term"><?php echo esc_html( (string) $row['keyword'] ); ?></span>
 					<div class="rs-win-meta">
 						<strong><?php echo esc_html( $format_position( $row['bestRank'] ) ); ?></strong>
@@ -182,15 +200,15 @@ $has_results = ! empty( $outcome_cards ) || $has_highlights || ! empty( $ranking
 
 	<?php if ( $improved_work > 0 || $maturing_work > 0 ) : ?>
 		<h2 class="rs-section">SEO Improvements</h2>
-		<div class="rs-outcome-grid">
+		<div class="rs-outcome-grid" role="list">
 			<?php if ( $improved_work > 0 ) : ?>
-				<div class="rs-outcome-card"><div class="rs-outcome-label">Early gains confirmed</div><div class="rs-outcome-value"><?php echo esc_html( number_format_i18n( $improved_work ) ); ?></div><div class="rs-outcome-detail">Measured improvements moving in the right direction</div></div>
+				<div class="rs-outcome-card" role="listitem"><div class="rs-outcome-label">Early gains confirmed</div><div class="rs-outcome-value"><?php echo esc_html( number_format_i18n( $improved_work ) ); ?></div><div class="rs-outcome-detail">Measured improvements moving in the right direction</div></div>
 			<?php endif; ?>
 			<?php if ( $maturing_work > 0 ) : ?>
-				<div class="rs-outcome-card"><div class="rs-outcome-label">Results still developing</div><div class="rs-outcome-value"><?php echo esc_html( number_format_i18n( $maturing_work ) ); ?></div><div class="rs-outcome-detail">Recent improvements gathering enough data</div></div>
+				<div class="rs-outcome-card" role="listitem"><div class="rs-outcome-label">Results still developing</div><div class="rs-outcome-value"><?php echo esc_html( number_format_i18n( $maturing_work ) ); ?></div><div class="rs-outcome-detail">Recent improvements gathering enough data</div></div>
 			<?php endif; ?>
 		</div>
 	<?php endif; ?>
 <?php endif; ?>
 
-<p class="description" style="margin-top:18px;">Results refresh automatically as verified data becomes available.</p>
+<p class="description" style="margin-top:18px;"><?php echo esc_html( $verified_through !== '' ? 'Results verified through ' . $verified_through . '.' : 'Results refresh automatically as verified data becomes available.' ); ?></p>

@@ -118,6 +118,15 @@ PEM;
 		);
 	}
 
+	public static function is_connected(): bool {
+		$status = self::status();
+		$auth = Ratesight_Request_Auth::capability_auth();
+		return 'dashboard' === ( $status['source'] ?? null )
+			&& ! empty( $status['pairedAt'] )
+			&& true === ( $auth['configured'] ?? false )
+			&& in_array( $auth['mode'] ?? '', array( 'observe_v2', 'enforce_v2' ), true );
+	}
+
 	private static function public_key(): string {
 		return (string) apply_filters( 'ratesight_pairing_public_key', self::PUBLIC_KEY );
 	}

@@ -18,35 +18,49 @@
 		var rsLastSync = RatesightAdmin.last_sync || '';
 
 		// ── Generic clipboard helper ──────────────────────────────────────────
-		function copyText( text, onSuccess ) {
+		function copyText( text, onSuccess, onFailure ) {
 			if ( navigator.clipboard && navigator.clipboard.writeText ) {
 				navigator.clipboard.writeText( text ).then( onSuccess ).catch( function () {
-					fallbackCopy( text, onSuccess );
+					fallbackCopy( text, onSuccess, onFailure );
 				} );
 			} else {
-				fallbackCopy( text, onSuccess );
+				fallbackCopy( text, onSuccess, onFailure );
 			}
 		}
 
-		function fallbackCopy( text, onSuccess ) {
+		function fallbackCopy( text, onSuccess, onFailure ) {
+			var activeElement = document.activeElement;
 			var $tmp = $( '<textarea>' )
 				.css( { position: 'fixed', top: 0, left: 0, opacity: 0 } )
 				.val( text ).appendTo( 'body' );
 			$tmp[0].focus();
 			$tmp[0].select();
-			try { document.execCommand( 'copy' ); onSuccess(); } catch ( e ) {}
+			try {
+				if ( document.execCommand( 'copy' ) ) onSuccess();
+				else if ( onFailure ) onFailure();
+			} catch ( error ) {
+				if ( onFailure ) onFailure();
+			}
 			$tmp.remove();
+			if ( activeElement && activeElement.focus ) activeElement.focus();
 		}
 
 		// ── Shortcode / URL copy buttons ──────────────────────────────────────
 		$( document ).on( 'click', '.rs-btn-copy', function () {
 			var $btn = $( this );
 			var text = $btn.data( 'copy' );
+			var status = document.getElementById( $btn.attr( 'aria-describedby' ) || '' );
 			if ( ! text ) return;
 			copyText( text, function () {
 				var orig = $btn.text();
 				$btn.text( 'Copied!' ).addClass( 'rs-copied' );
-				setTimeout( function () { $btn.text( orig ).removeClass( 'rs-copied' ); }, 2000 );
+				if ( status ) status.textContent = 'Shortcode copied to clipboard.';
+				setTimeout( function () {
+					$btn.text( orig ).removeClass( 'rs-copied' );
+					if ( status ) status.textContent = '';
+				}, 2000 );
+			}, function () {
+				if ( status ) status.textContent = 'Copy failed. Select and copy the shortcode manually.';
 			} );
 		} );
 
@@ -56,10 +70,35 @@
 			var starColor = document.getElementById( 'rs-star-color' );
 			var customText = document.getElementById( 'rs-custom-text-color' );
 			var textColor = document.getElementById( 'rs-review-text-color' );
+			var preservedTextColor = document.getElementById( 'rs-review-text-color-preserve' );
 			if ( ! preview || ! starColor || ! customText || ! textColor ) return;
 			preview.style.setProperty( '--rs-preview-stars', starColor.value );
 			preview.style.setProperty( '--rs-preview-text', customText.checked ? textColor.value : '#3c434a' );
 			textColor.closest( '.rs-color-row' ).classList.toggle( 'rs-color-row-muted', ! customText.checked );
+			textColor.disabled = ! customText.checked;
+			textColor.setAttribute( 'aria-disabled', customText.checked ? 'false' : 'true' );
+			preservedTextColor.value = textColor.value;
+			document.getElementById( 'rs-star-color-value' ).textContent = starColor.value.toUpperCase();
+			document.getElementById( 'rs-review-text-color-value' ).textContent = textColor.value.toUpperCase();
+
+			function contrastRatio( hex ) {
+				var channels = [ 1, 3, 5 ].map( function ( offset ) {
+					var channel = parseInt( hex.slice( offset, offset + 2 ), 16 ) / 255;
+					return channel <= 0.03928 ? channel / 12.92 : Math.pow( ( channel + 0.055 ) / 1.055, 2.4 );
+				} );
+				var luminance = ( 0.2126 * channels[0] ) + ( 0.7152 * channels[1] ) + ( 0.0722 * channels[2] );
+				return 1.05 / ( luminance + 0.05 );
+			}
+
+			function updateContrastStatus( elementId, ratio, minimum ) {
+				var element = document.getElementById( elementId );
+				var passes = ratio >= minimum;
+				element.className = passes ? 'rs-contrast-pass' : 'rs-contrast-warning';
+				element.textContent = passes ? 'Readable on white.' : 'Low contrast on white; choose a darker color.';
+			}
+
+			updateContrastStatus( 'rs-star-contrast-status', contrastRatio( starColor.value ), 3 );
+			updateContrastStatus( 'rs-text-contrast-status', contrastRatio( customText.checked ? textColor.value : '#3c434a' ), 4.5 );
 		}
 
 		$( '#rs-star-color, #rs-review-text-color' ).on( 'input change', updateReviewWidgetPreview );

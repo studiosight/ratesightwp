@@ -8,8 +8,13 @@
 
 defined( 'ABSPATH' ) || die;
 
-$ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
+$connected = Ratesight_Pairing::is_connected();
 ?>
+
+<div class="rs-widget-intro">
+	<h2>Support</h2>
+	<p>See what Ratesight manages and how to reach your account team.</p>
+</div>
 
 <h2 class="rs-section">How Ratesight Helps</h2>
 <div class="rs-card">
@@ -19,7 +24,7 @@ $ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
 			<li>Publishes and improves search-focused website content.</li>
 			<li>Tracks positive search and local visibility results.</li>
 			<li>Powers your review and website widgets.</li>
-			<li>Maintains supporting technical SEO features.</li>
+			<li>Keeps search-supporting site features maintained.</li>
 		</ul>
 	</div>
 </div>
@@ -27,8 +32,8 @@ $ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
 <h2 class="rs-section">Connection</h2>
 <div class="rs-card">
 	<div class="rs-card-body">
-		<?php if ( $ratesight_id !== '' ) : ?>
-			<p><strong style="color:#00a32a;">Ratesight is connected</strong></p>
+		<?php if ( $connected ) : ?>
+			<p><strong style="color:#137333;">Ratesight is connected</strong></p>
 			<p class="description">Your services are managed for you. There is nothing you need to connect in WordPress.</p>
 		<?php else : ?>
 			<p><strong>Setup in progress</strong></p>
@@ -37,10 +42,10 @@ $ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
 	</div>
 </div>
 
-<h2 class="rs-section">Need Help?</h2>
+<h2 class="rs-section">Need help?</h2>
 <div class="rs-card">
 	<div class="rs-card-body">
 		<p>Contact your account team or email <a href="mailto:support@ratesight.com">support@ratesight.com</a>.</p>
-		<p class="description">Installed plugin version: <?php echo esc_html( RATESIGHT_RELEASE_VERSION ); ?></p>
+		<p class="description">Include your website address so we can help quickly.</p>
 	</div>
 </div>
