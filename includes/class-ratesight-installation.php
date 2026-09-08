@@ -99,6 +99,7 @@ class Ratesight_Installation {
 			'ratesight_deepseek_api_key', 'ratesight_recovery_actions', 'ratesight_redirect_health_last',
 			'ratesight_redirect_serve_log', 'ratesight_inbound_log', self::RETENTION_OPTION, 'ratesight_health_catch_all_urls',
 			'ratesight_dashboard_performance_snapshot',
+			'ratesight_pairing_receipt',
 		) );
 		foreach ( array( 'gbp', 'gsc' ) as $service ) {
 			foreach ( array( 'oauth', 'selection', 'locked', 'revoked', 'disconnect_reason', 'refresh_error', 'scope_error' ) as $suffix ) {
@@ -110,7 +111,7 @@ class Ratesight_Installation {
 		sort( $options );
 		return array(
 			'options'           => $options,
-			'optionPrefixes'    => array( 'ratesight_auth_nonce_' ),
+			'optionPrefixes'    => array( 'ratesight_auth_nonce_', 'ratesight_pairing_nonce_' ),
 			'tables'            => array( 'ratesight_logs', 'ratesight_performance', 'ratesight_keywords', 'ratesight_gbp_performance', 'ratesight_bing_performance', 'ratesight_bing_keywords', 'ratesight_link_cache' ),
 			'postTypes'         => array( 'ratesight_page' ),
 			'postMeta'          => array( '_ratesight_layout', '_ratesight_meta_description', '_ratesight_meta_title', '_ratesight_related_links', '_ratesight_show_title', '_rs_content_hash', '_rs_created', '_rs_custom_css_url', '_rs_layout', '_rs_manual_links', '_rs_meta_description', '_rs_meta_title', '_rs_pre_update_snapshot', '_rs_schema', '_rs_show_title' ),

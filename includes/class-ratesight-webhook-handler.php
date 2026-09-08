@@ -1190,6 +1190,7 @@ class Ratesight_Webhook_Handler {
 				'readinessCurrent' => (bool) $auth['readiness_current'],
 				'readinessExpires' => $auth['readiness_expires'],
 			),
+			'pairing' => Ratesight_Pairing::status(),
 			'legacyProviderResidue' => array(
 				'gsc' => array(
 					'credentialConfigured' => Ratesight_OAuth_Client::is_connected( 'gsc' ),
@@ -1298,6 +1299,7 @@ class Ratesight_Webhook_Handler {
 		return new \WP_REST_Response( array(
 			'plugin_version'       => defined( 'RATESIGHT_RELEASE_VERSION' ) ? RATESIGHT_RELEASE_VERSION : null,
 			'auth'                 => Ratesight_Request_Auth::capability_auth(),
+			'pairing'              => Ratesight_Pairing::status(),
 			'create_page'          => true,
 			'set_redirect'         => true,
 			'delete_redirect'      => true,

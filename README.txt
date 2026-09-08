@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.5.1
+Stable tag: 3.6.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -35,8 +35,8 @@ The settings page has four tabs:
     - Sidebar widget, analytics script, message widget toggles
 
   AI SEO Pages
-    - Webhook secret key (generate server-side with the Generate button)
-    - Your full webhook URL with the secret embedded (copy with one click)
+    - Dashboard-managed signed app connection status
+    - Webhook endpoint reference without displaying shared credentials
     - Default post status, author, parent category
     - Log retention period (days)
 
@@ -67,6 +67,17 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+
+3.6.0 - Dashboard-managed WordPress pairing
+
+  - Pair or rotate the signed WordPress connection from the Ratesight Dashboard;
+    shared credentials are no longer copied between two admin surfaces.
+  - The public pairing endpoint accepts only a short-lived ECDSA-signed payload
+    bound to the Ratesight ID, canonical HTTPS site origin, and one-time nonce.
+  - WordPress no longer displays, generates, copies, or changes the app secret
+    or request-auth mode. It reports sanitized pairing and readiness health only.
+  - Pairing establishes Observe mode and signed readiness; Enforce remains a
+    separate control-plane decision.
 
 3.5.1 - Prevent a critical error before the first dashboard performance snapshot
 3.5.0 - Display signed dashboard performance snapshots in WordPress

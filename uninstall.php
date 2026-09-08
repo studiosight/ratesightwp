@@ -55,7 +55,8 @@ $wpdb->query(  // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, Wor
 	    OR option_name LIKE '_transient_timeout_rs\_%'
 	    OR option_name LIKE '_transient_ratesight\_%'
 	    OR option_name LIKE '_transient_timeout_ratesight\_%'
-	    OR option_name LIKE 'ratesight_auth_nonce\_%'"
+	    OR option_name LIKE 'ratesight_auth_nonce\_%'
+	    OR option_name LIKE 'ratesight_pairing_nonce\_%'"
 ); // phpcs:ignore
 
 // ── Post meta ─────────────────────────────────────────────────────────────
