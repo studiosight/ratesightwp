@@ -85,8 +85,8 @@ class Ratesight_Admin {
 		// Add Pages list as a submenu — uses the CPT's native list table.
 		add_submenu_page(
 			'ratesight',
-			__( 'Pages', 'ratesight' ),
-			__( 'Pages', 'ratesight' ),
+			__( 'SEO Content', 'ratesight' ),
+			__( 'SEO Content', 'ratesight' ),
 			'manage_options',
 			'edit.php?post_type=ratesight_page'
 		);
@@ -94,7 +94,7 @@ class Ratesight_Admin {
 
 	/**
 	 * Runs at admin_menu priority 11 — after priority 10 has populated $submenu.
-	 * Renames the first item to "Dashboard" and injects tab links.
+	 * Builds the client-facing menu while keeping support routes available directly.
 	 */
 	public function configure_submenu() {
 		global $submenu; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
@@ -104,29 +104,29 @@ class Ratesight_Admin {
 		}
 
 		$base = 'admin.php?page=ratesight&tab=';
-		$tabs = array(
-			'connections' => 'Connections',
-			'seo-pages'   => 'Settings',
-			'performance' => 'Performance',
-			'links'       => 'Links',
-			'logs'        => 'Activity Log',
-			'help'        => 'Reference',
+		$client_tabs = array(
+			'widgets' => 'Reviews & Widgets',
+			'support' => 'Support',
 		);
 
-		// Build a fresh ordered list: Dashboard, then tabs, then everything else.
-		$rebuilt = array();
-		$rest    = array();
+		$overview = null;
+		$content  = null;
+		$rest     = array();
 
 		foreach ( $submenu['ratesight'] as $entry ) {
 			if ( isset( $entry[2] ) && $entry[2] === 'ratesight' ) {
-				$entry[0] = 'Dashboard';
-				array_unshift( $rebuilt, $entry );
+				$entry[0] = 'Overview';
+				$overview = $entry;
+			} elseif ( isset( $entry[2] ) && $entry[2] === 'edit.php?post_type=ratesight_page' ) {
+				$entry[0] = 'SEO Content';
+				$content  = $entry;
 			} else {
 				$rest[] = $entry;
 			}
 		}
 
-		foreach ( $tabs as $slug => $label ) {
+		$rebuilt = array_values( array_filter( array( $overview, $content ) ) );
+		foreach ( $client_tabs as $slug => $label ) {
 			$rebuilt[] = array( $label, 'manage_options', $base . $slug, $label );
 		}
 
@@ -141,7 +141,7 @@ class Ratesight_Admin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'You do not have sufficient permissions.', 'ratesight' ) );
 		}
-		$tab = isset( $_GET['tab'] ) ? sanitize_key( $_GET['tab'] ) : 'widgets'; // phpcs:ignore
+		$tab = isset( $_GET['tab'] ) ? sanitize_key( $_GET['tab'] ) : 'performance'; // phpcs:ignore
 		require_once __DIR__ . '/partials/page-wrapper.php';
 	}
 
@@ -154,11 +154,15 @@ class Ratesight_Admin {
 		$tab  = isset( $_GET['tab'] )  ? sanitize_key( $_GET['tab'] )  : '';
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 
-		if ( $page !== 'ratesight' || $tab === '' || $tab === 'widgets' ) {
+		if ( $page !== 'ratesight' ) {
 			return $submenu_file;
 		}
 
-		return 'admin.php?page=ratesight&tab=' . $tab;
+		if ( in_array( $tab, array( 'widgets', 'support' ), true ) ) {
+			return 'admin.php?page=ratesight&tab=' . $tab;
+		}
+
+		return 'ratesight';
 	}
 
 	// -------------------------------------------------------------------------

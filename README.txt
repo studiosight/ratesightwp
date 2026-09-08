@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.6.4
+Stable tag: 3.7.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -24,28 +24,21 @@ Combines two Ratesight products into a single, unified plugin:
 2. Activate in WP Admin → Plugins
 3. Navigate to the new "Ratesight" menu item in the sidebar
 
-SETTINGS
---------
-The settings page has four tabs:
+CLIENT MENU
+-----------
+The client-facing menu has four destinations:
 
-  Widgets
-    - Ratesight ID, Campaign ID, Domain ID
-    - Reviews page (for "See All Reviews" link)
-    - Star color, dark text toggle + color
-    - Sidebar widget, analytics script, message widget toggles
+  Overview
+    - Positive search, local visibility, and completed-work results
 
-  AI SEO Pages
-    - Dashboard-managed signed app connection status
-    - Webhook endpoint reference without displaying shared credentials
-    - Default post status, author, parent category
-    - Log retention period (days)
+  SEO Content
+    - Published search-focused service and location content
 
-  Activity Log
-    - Last 100 webhook requests with status, title, category, post link, error
+  Reviews & Widgets
+    - Widget placement and appearance controls
 
-  Payload Reference
-    - Full JSON payload schema with required/optional field reference
-    - Response format documentation
+  Support
+    - Plain-English service summary, connection status, and contact details
 
 SHORTCODES
 ----------
@@ -61,12 +54,18 @@ WEBHOOK ENDPOINT
   POST /wp-json/ratesight/v1/create-page
 
 Required payload fields: title, article
-Protected requests require the negotiated rs-hmac-v2 headers documented in the
-plugin settings. Secrets are never sent in URLs.
-See the Payload Reference tab in the plugin settings for full documentation.
+Protected requests require the negotiated rs-hmac-v2 headers. Shared credentials
+are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.7.0 - Client-facing navigation
+
+  - Makes performance outcomes the default Overview.
+  - Reduces the primary menu to Overview, SEO Content, Reviews & Widgets, and Support.
+  - Removes duplicate tabs, technical detection chips, raw version chrome, and Agency labeling.
+  - Keeps legacy operational pages available only through direct support routes.
 
 3.6.4 - Client-safe connection and notification cleanup
 
