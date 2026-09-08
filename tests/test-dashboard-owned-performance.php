@@ -25,5 +25,7 @@ check_dashboard_performance_case( 'duplicate provider connections are explicitly
 check_dashboard_performance_case( 'provider credential copying is explicitly denied', str_contains( $dashboard, 'No Google, Bing, or Business Profile credentials are copied' ) );
 check_dashboard_performance_case( 'stored dashboard metrics render locally', str_contains( $dashboard, 'Ratesight_Performance_Snapshot::OPTION' ) && str_contains( $dashboard, 'Top searches' ) );
 check_dashboard_performance_case( 'expanded performance sections render locally', str_contains( $dashboard, 'Business Profile' ) && str_contains( $dashboard, 'Tracked rankings' ) && str_contains( $dashboard, 'Completed SEO work' ) );
+check_dashboard_performance_case( 'single ranking target is summarized once', str_contains( $dashboard, 'Tracking area:' ) && str_contains( $dashboard, 'count( $ranking_targets ) > 1' ) );
+check_dashboard_performance_case( 'unavailable scans do not claim zero visibility or no ranking', str_contains( $dashboard, 'Ranking scans are waiting to run.' ) && str_contains( $dashboard, "'Waiting for scan'" ) && ! str_contains( $dashboard, '(scan unavailable)' ) );
 
 echo "All dashboard-owned performance tests passed.\n";
