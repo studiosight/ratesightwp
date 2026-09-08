@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.9.2
+Stable tag: 3.10.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -60,6 +60,14 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.10.0 - Dashboard-managed plugin updates
+
+  - Adds a signed dashboard-only preflight and update route for future Ratesight releases.
+  - Restricts packages to immutable Ratesight GitHub release assets and verifies their SHA-256 digest before installation.
+  - Validates the extracted package root, plugin identity, embedded version, entry count, size, and absence of symbolic links before changing files.
+  - Uses WordPress automatic-update maintenance mode, temporary backups, fatal-error checks, and rollback handling.
+  - Refuses unpaired sites, downgrades, unsupported hosts, concurrent updates, and unconfirmed apply requests.
 
 3.9.2 - Dashboard-managed identity bootstrap
 

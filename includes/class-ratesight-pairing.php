@@ -38,9 +38,7 @@ PEM;
 		if ( ! preg_match( '#^[A-Za-z0-9+/]{64,128}={0,2}$#', $signature ) ) {
 			return self::error( 'rs_pairing_signature_invalid', 403 );
 		}
-		$decoded_signature = base64_decode( $signature, true );
-		$public_key        = openssl_pkey_get_public( self::public_key() );
-		if ( false === $decoded_signature || false === $public_key || 1 !== openssl_verify( $body, $decoded_signature, $public_key, OPENSSL_ALGO_SHA256 ) ) {
+		if ( ! self::verify_control_plane_signature( $body, $signature ) ) {
 			return self::error( 'rs_pairing_signature_invalid', 403 );
 		}
 
@@ -133,6 +131,12 @@ PEM;
 			&& ! empty( $status['pairedAt'] )
 			&& true === ( $auth['configured'] ?? false )
 			&& in_array( $auth['mode'] ?? '', array( 'observe_v2', 'enforce_v2' ), true );
+	}
+
+	public static function verify_control_plane_signature( string $body, string $signature ): bool {
+		$decoded_signature = base64_decode( $signature, true );
+		$public_key        = openssl_pkey_get_public( self::public_key() );
+		return false !== $decoded_signature && false !== $public_key && 1 === openssl_verify( $body, $decoded_signature, $public_key, OPENSSL_ALGO_SHA256 );
 	}
 
 	private static function public_key(): string {

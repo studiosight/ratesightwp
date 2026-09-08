@@ -100,6 +100,7 @@ class Ratesight_Installation {
 			'ratesight_redirect_serve_log', 'ratesight_inbound_log', self::RETENTION_OPTION, 'ratesight_health_catch_all_urls',
 			'ratesight_dashboard_performance_snapshot',
 			'ratesight_pairing_receipt',
+			'ratesight_plugin_update_receipt',
 		) );
 		foreach ( array( 'gbp', 'gsc' ) as $service ) {
 			foreach ( array( 'oauth', 'selection', 'locked', 'revoked', 'disconnect_reason', 'refresh_error', 'scope_error' ) as $suffix ) {
