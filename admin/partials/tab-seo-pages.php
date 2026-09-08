@@ -13,10 +13,7 @@ $o   = Ratesight_Options::get_all();
 $url        = rest_url( 'ratesight/v1/create-page' );
 $update_url = rest_url( 'ratesight/v1/update-page' );
 
-$auth       = Ratesight_Request_Auth::capability_auth();
-$pairing    = Ratesight_Pairing::status();
 $ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
-$dashboard_url = $ratesight_id !== '' ? 'https://dash.ratesight.com/seo/' . rawurlencode( $ratesight_id ) . '/setup' : 'https://dash.ratesight.com/seo';
 ?>
 <form method="post" action="options.php">
 <?php settings_fields( 'ratesight_options_seo_pages' ); ?>
@@ -42,14 +39,15 @@ $dashboard_url = $ratesight_id !== '' ? 'https://dash.ratesight.com/seo/' . rawu
 		</td>
 	</tr>
 	<tr>
-		<th scope="row">App Connection</th>
+		<th scope="row">Ratesight Connection</th>
 		<td>
-			<strong><?php echo $auth['configured'] ? '<span style="color:#00a32a;">Paired</span>' : '<span style="color:#b32d2e;">Not paired</span>'; ?></strong>
-			&middot; mode <code><?php echo esc_html( $auth['mode'] ); ?></code>
-			<?php echo $auth['readiness_current'] ? ' &middot; signed readiness current' : ''; ?>
-			<?php echo $pairing['source'] === 'dashboard' ? ' &middot; dashboard managed' : ''; ?>
-			<p class="description">Pairing, rotation, and enforcement are managed in the Ratesight Dashboard. Secrets are never displayed or regenerated in WordPress.</p>
-			<p><a class="button button-primary" href="<?php echo esc_url( $dashboard_url ); ?>" target="_blank" rel="noopener">Manage Connection in Dashboard</a></p>
+			<?php if ( $ratesight_id !== '' ) : ?>
+				<strong style="color:#00a32a;">Connected</strong>
+				<p class="description">Ratesight is managing this site's services. There is nothing you need to connect here.</p>
+			<?php else : ?>
+				<strong>Setup in progress</strong>
+				<p class="description">Your Ratesight team can finish connecting this site. No action is needed here.</p>
+			<?php endif; ?>
 		</td>
 	</tr>
 </table>
@@ -271,33 +269,6 @@ $dashboard_url = $ratesight_id !== '' ? 'https://dash.ratesight.com/seo/' . rawu
 				Write failed webhook errors to the PHP / WP_DEBUG_LOG error log
 			</label>
 			<p class="description">Mirrors every <strong>Failed</strong> activity log entry to your server error log for external monitoring.</p>
-		</td>
-	</tr>
-</table>
-</div>
-</div>
-
-<h2 class="rs-section">Notifications</h2>
-<div class="rs-card">
-<div class="rs-card-body">
-<table class="form-table" role="presentation">
-	<tr>
-		<th scope="row">Email Notifications</th>
-		<td>
-			<label>
-				<input type="checkbox" name="ratesight_notify_enabled" value="1" <?php checked( 1, get_option( 'ratesight_notify_enabled', 0 ) ); ?>>
-				Send a daily digest email
-			</label>
-			<p class="description">Covers: failed webhooks, stale syncs, OAuth disconnections, and broken links. Only sent when there's something to report.</p>
-		</td>
-	</tr>
-	<tr>
-		<th scope="row">Notification Email</th>
-		<td>
-			<input type="email" name="ratesight_notify_email" class="regular-text"
-				value="<?php echo esc_attr( get_option( 'ratesight_notify_email', get_option( 'admin_email', '' ) ) ); ?>"
-				placeholder="<?php echo esc_attr( get_option( 'admin_email', '' ) ); ?>">
-			<p class="description">Defaults to the WordPress admin email if left blank.</p>
 		</td>
 	</tr>
 </table>

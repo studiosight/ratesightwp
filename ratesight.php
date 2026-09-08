@@ -3,7 +3,7 @@
  * Plugin Name:       Ratesight
  * Plugin URI:        https://ratesight.com
  * Description:       Review widgets, shortcodes, and AI-powered SEO page creation via webhook.
- * Version:           3.6.3
+ * Version:           3.6.4
  * Requires at least: 5.9
  * Requires PHP:      8.0
  * Author:            Ratesight
@@ -18,7 +18,7 @@
 
 defined( 'WPINC' ) || die;
 
-define( 'RATESIGHT_RELEASE_VERSION', '3.6.3' );
+define( 'RATESIGHT_RELEASE_VERSION', '3.6.4' );
 define( 'RATESIGHT_VERSION', RATESIGHT_RELEASE_VERSION . '.' . filemtime( __FILE__ ) );
 define( 'RATESIGHT_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'RATESIGHT_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -187,20 +187,7 @@ unset( $_rs_sitemap );
 
 if ( ! Ratesight_License::is_valid() ) {
 	add_action( 'admin_notices', static function (): void {
-		$code_id     = Ratesight_Options::get( 'code_id' );
-		$widgets_url = admin_url( 'admin.php?page=ratesight&tab=widgets' );
-
-		if ( $code_id === '' ) {
-			$msg = sprintf(
-				'<strong>Ratesight:</strong> Plugin disabled — no Ratesight ID configured. <a href="%s">Enter your ID here.</a>',
-				esc_url( $widgets_url )
-			);
-		} else {
-			$msg = sprintf(
-				'<strong>Ratesight:</strong> Plugin disabled — license inactive. Check your Ratesight ID on the <a href="%s">Widgets tab</a> or contact <a href="mailto:support@ratesight.com">support@ratesight.com</a>.',
-				esc_url( $widgets_url )
-			);
-		}
+		$msg = '<strong>Ratesight setup needs attention.</strong> Please contact your account team or <a href="mailto:support@ratesight.com">support@ratesight.com</a> for help.';
 
 		echo '<div class="notice notice-error"><p>' . wp_kses( $msg, array( 'strong' => array(), 'a' => array( 'href' => array() ), 'em' => array() ) ) . '</p></div>';
 	} );

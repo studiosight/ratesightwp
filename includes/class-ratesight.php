@@ -34,7 +34,6 @@ class Ratesight {
 		$this->loader->add_action( 'admin_init',             $admin, 'register_settings'      );
 		$this->loader->add_action( 'admin_init',             $admin, 'handle_oauth_callback', 5 );
 		$this->loader->add_action( 'admin_notices',          $admin, 'license_notice'                 );
-		$this->loader->add_action( 'admin_notices',          $admin, 'revocation_notice'              );
 		$this->loader->add_action( 'admin_notices',          $admin, 'bulk_publish_progress_notice'   );
 		$this->loader->add_action( 'admin_menu',             $admin, 'add_menu_page'           );
 		$this->loader->add_action( 'admin_menu',             $admin, 'configure_submenu',   11 );
@@ -175,7 +174,6 @@ class Ratesight {
 			$path = trim( wp_make_link_relative( $url ), '/' );
 			Ratesight_Link_Manager::delete_redirect( $path );
 		} );
-		add_action( 'ratesight_daily_digest',       array( 'Ratesight_Notifier',     'send_digest'       ) );
 
 		// Bulk operations.
 		$bulk = new Ratesight_Bulk_Operations();
