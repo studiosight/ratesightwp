@@ -8,11 +8,11 @@
 defined( 'ABSPATH' ) || die;
 
 $ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
-$dashboard_url = $ratesight_id !== ''
-	? 'https://dash.ratesight.com/seo/' . rawurlencode( $ratesight_id ) . '/rank'
-	: 'https://dash.ratesight.com/seo';
 $snapshot = get_option( Ratesight_Performance_Snapshot::OPTION, null );
 $organic = is_array( $snapshot ) && is_array( $snapshot['organic'] ?? null ) ? $snapshot['organic'] : null;
+$local = is_array( $snapshot ) && is_array( $snapshot['local'] ?? null ) ? $snapshot['local'] : null;
+$rankings = is_array( $snapshot ) && is_array( $snapshot['rankings'] ?? null ) ? $snapshot['rankings'] : null;
+$work = is_array( $snapshot ) && is_array( $snapshot['work'] ?? null ) ? $snapshot['work'] : null;
 $metrics = is_array( $organic['metrics'] ?? null ) ? $organic['metrics'] : array();
 $daily = is_array( $organic['daily'] ?? null ) ? array_slice( $organic['daily'], -14 ) : array();
 $queries = is_array( $organic['queries'] ?? null ) ? $organic['queries'] : array();
@@ -31,7 +31,8 @@ $max_daily = $daily_impressions ? max( 1, ...$daily_impressions ) : 1;
 
 <div class="rs-card" id="rs-dashboard-performance-card">
 	<div class="rs-card-body">
-		<h2 style="margin-top:0;">SEO Performance</h2>
+		<h2 style="margin-top:0;">Performance overview</h2>
+		<h3>Search performance</h3>
 		<?php if ( ! $organic ) : ?>
 			<p><strong>Waiting for the first dashboard snapshot.</strong> The next dashboard Search Console refresh will send performance here automatically.</p>
 		<?php else : ?>
@@ -77,10 +78,61 @@ $max_daily = $daily_impressions ? max( 1, ...$daily_impressions ) : 1;
 				</div>
 			<?php endif; ?>
 		<?php endif; ?>
-		<p>The dashboard remains the source of truth for organic search, local visibility, rankings, outcomes, and completed work. WordPress stores this bounded display snapshot only.</p>
-		<p><a class="button button-primary" href="<?php echo esc_url( $dashboard_url ); ?>" target="_blank" rel="noopener">Open Performance in Ratesight</a></p>
+
+		<hr style="margin:24px 0;">
+		<h3>Business Profile</h3>
+		<?php if ( ! $local ) : ?>
+			<p><strong>Waiting for Business Profile data.</strong> It will appear after the dashboard sends the next expanded snapshot.</p>
+		<?php else : ?>
+			<p>Status: <strong><?php echo esc_html( (string) $local['state'] ); ?></strong><?php if ( ! empty( $local['latestMetricDate'] ) ) : ?> &middot; source through <?php echo esc_html( (string) $local['latestMetricDate'] ); ?><?php endif; ?></p>
+			<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:12px;margin:18px 0;">
+				<?php foreach ( array( 'impressions' => 'Profile views', 'calls' => 'Calls', 'directions' => 'Directions', 'websiteClicks' => 'Website clicks' ) as $key => $label ) : ?>
+					<div style="border:1px solid #dcdcde;border-radius:5px;padding:14px;background:#fff;">
+						<div style="color:#646970;font-size:12px;text-transform:uppercase;"><?php echo esc_html( $label ); ?></div>
+						<div style="font-size:24px;font-weight:700;margin-top:4px;"><?php echo esc_html( $format_metric( $key, $local['metrics'][ $key ]['current'] ?? null ) ); ?></div>
+						<?php if ( false === ( $local['metrics'][ $key ]['complete'] ?? false ) ) : ?><div style="font-size:12px;color:#996800;margin-top:4px;">Partial data</div><?php endif; ?>
+					</div>
+				<?php endforeach; ?>
+			</div>
+		<?php endif; ?>
+
+		<hr style="margin:24px 0;">
+		<h3>Tracked rankings</h3>
+		<?php if ( ! $rankings ) : ?>
+			<p><strong>Waiting for ranking data.</strong> It will appear after the dashboard sends the next expanded snapshot.</p>
+		<?php else : ?>
+			<p>Status: <strong><?php echo esc_html( (string) $rankings['state'] ); ?></strong><?php if ( ! empty( $rankings['latestMetricDate'] ) ) : ?> &middot; latest scan <?php echo esc_html( (string) $rankings['latestMetricDate'] ); ?><?php endif; ?></p>
+			<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:12px;margin:18px 0;">
+				<?php foreach ( array( 'tracked' => 'Tracked searches', 'ranking' => 'Ranking', 'top3' => 'Top 3', 'notRanking' => 'Not ranking' ) as $key => $label ) : ?>
+					<div style="border:1px solid #dcdcde;border-radius:5px;padding:14px;background:#fff;"><div style="color:#646970;font-size:12px;text-transform:uppercase;"><?php echo esc_html( $label ); ?></div><div style="font-size:24px;font-weight:700;margin-top:4px;"><?php echo esc_html( number_format_i18n( (int) ( $rankings[ $key ] ?? 0 ) ) ); ?></div></div>
+				<?php endforeach; ?>
+			</div>
+			<?php if ( ! empty( $rankings['keywords'] ) ) : ?>
+				<div style="overflow-x:auto;"><table class="widefat striped"><thead><tr><th>Search</th><th>Area</th><th>Best rank</th><th>Visibility</th></tr></thead><tbody>
+				<?php foreach ( $rankings['keywords'] as $row ) : ?>
+					<tr><td><?php echo esc_html( (string) $row['keyword'] ); ?></td><td><?php echo esc_html( (string) $row['target'] ); ?></td><td><?php echo esc_html( null === $row['bestRank'] ? 'Not ranking' : number_format_i18n( (float) $row['bestRank'], 0 ) ); ?></td><td><?php echo esc_html( number_format_i18n( (float) $row['visibilityPct'], 0 ) . '%' ); ?><?php if ( 'untrusted' === $row['trust'] ) : ?> <span style="color:#996800;">(scan unavailable)</span><?php endif; ?></td></tr>
+				<?php endforeach; ?>
+				</tbody></table></div>
+			<?php endif; ?>
+		<?php endif; ?>
+
+		<hr style="margin:24px 0;">
+		<h3>Completed SEO work</h3>
+		<?php if ( ! $work ) : ?>
+			<p><strong>Waiting for completed-work data.</strong> It will appear after the dashboard sends the next expanded snapshot.</p>
+		<?php else : ?>
+			<p>Status: <strong><?php echo esc_html( (string) $work['state'] ); ?></strong></p>
+			<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:12px;margin:18px 0;">
+				<?php foreach ( array( 'applied' => 'Changes applied', 'measured' => 'Measured', 'improved' => 'Improved', 'maturing' => 'Still measuring' ) as $key => $label ) : ?>
+					<div style="border:1px solid #dcdcde;border-radius:5px;padding:14px;background:#fff;"><div style="color:#646970;font-size:12px;text-transform:uppercase;"><?php echo esc_html( $label ); ?></div><div style="font-size:24px;font-weight:700;margin-top:4px;"><?php echo esc_html( number_format_i18n( (int) ( $work[ $key ] ?? 0 ) ) ); ?></div></div>
+				<?php endforeach; ?>
+			</div>
+			<?php if ( null !== ( $work['moveRate'] ?? null ) ) : ?><p><strong><?php echo esc_html( number_format_i18n( (float) $work['moveRate'] * 100, 0 ) . '%' ); ?></strong> of measured changes improved.</p><?php endif; ?>
+		<?php endif; ?>
+
+		<p>The dashboard remains the source of truth. WordPress stores this bounded display snapshot only.</p>
 		<?php if ( $ratesight_id === '' ) : ?>
-			<p class="description" style="color:#b32d2e;">Add the Ratesight ID on the Connections tab so this link can open the correct site automatically.</p>
+			<p class="description" style="color:#b32d2e;">Add the Ratesight ID on the Connections tab so this site can receive dashboard performance snapshots.</p>
 		<?php else : ?>
 			<p class="description">Connected site ID: <?php echo esc_html( $ratesight_id ); ?></p>
 		<?php endif; ?>

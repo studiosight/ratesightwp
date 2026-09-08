@@ -19,12 +19,11 @@ $legacy_position = strpos( $performance, 'Ratesight_GSC_Client::is_locked()' );
 
 check_dashboard_performance_case( 'dashboard performance partial exists', is_string( $dashboard ) );
 check_dashboard_performance_case( 'dashboard partial loads before legacy provider work', false !== $include_position && false !== $return_position && false !== $legacy_position && $include_position < $return_position && $return_position < $legacy_position );
-check_dashboard_performance_case( 'configured site opens dashboard Results workspace', str_contains( $dashboard, "'https://dash.ratesight.com/seo/' . rawurlencode( \$ratesight_id ) . '/rank'" ) );
-check_dashboard_performance_case( 'missing site ID has safe dashboard fallback', str_contains( $dashboard, "'https://dash.ratesight.com/seo'" ) );
-check_dashboard_performance_case( 'canonical Ratesight casing is used', str_contains( $dashboard, 'Ratesight Dashboard' ) && str_contains( $dashboard, 'Open Performance in Ratesight' ) );
+check_dashboard_performance_case( 'canonical Ratesight casing is used', str_contains( $dashboard, 'Ratesight Dashboard' ) );
+check_dashboard_performance_case( 'dashboard CTA is removed', ! str_contains( $dashboard, 'Open Performance in Ratesight' ) && ! str_contains( $dashboard, 'button button-primary' ) );
 check_dashboard_performance_case( 'duplicate provider connections are explicitly unnecessary', str_contains( $dashboard, 'do not need to connect those providers again in WordPress' ) );
 check_dashboard_performance_case( 'provider credential copying is explicitly denied', str_contains( $dashboard, 'No Google, Bing, or Business Profile credentials are copied' ) );
 check_dashboard_performance_case( 'stored dashboard metrics render locally', str_contains( $dashboard, 'Ratesight_Performance_Snapshot::OPTION' ) && str_contains( $dashboard, 'Top searches' ) );
-check_dashboard_performance_case( 'dashboard URL is escaped at render boundary', str_contains( $dashboard, 'esc_url( $dashboard_url )' ) );
+check_dashboard_performance_case( 'expanded performance sections render locally', str_contains( $dashboard, 'Business Profile' ) && str_contains( $dashboard, 'Tracked rankings' ) && str_contains( $dashboard, 'Completed SEO work' ) );
 
 echo "All dashboard-owned performance tests passed.\n";

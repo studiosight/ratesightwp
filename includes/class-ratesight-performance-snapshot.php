@@ -135,7 +135,7 @@ class Ratesight_Performance_Snapshot {
 		}
 
 		$latest_date = self::date( $organic['latestMetricDate'] ?? null );
-		return array(
+		$normalized = array(
 			'contract' => self::CONTRACT,
 			'siteId' => $site_id,
 			'generatedAt' => $generated_at,
@@ -154,6 +154,76 @@ class Ratesight_Performance_Snapshot {
 				'queries' => $queries,
 			),
 		);
+		if ( array_key_exists( 'local', $input ) ) {
+			$local = self::local( $input['local'] );
+			if ( is_wp_error( $local ) ) return $local;
+			$normalized['local'] = $local;
+		}
+		if ( array_key_exists( 'rankings', $input ) ) {
+			$rankings = self::rankings( $input['rankings'] );
+			if ( is_wp_error( $rankings ) ) return $rankings;
+			$normalized['rankings'] = $rankings;
+		}
+		if ( array_key_exists( 'work', $input ) ) {
+			$work = self::work( $input['work'] );
+			if ( is_wp_error( $work ) ) return $work;
+			$normalized['work'] = $work;
+		}
+		return $normalized;
+	}
+
+	private static function local( $input ) {
+		if ( ! is_array( $input ) || ! in_array( $input['state'] ?? null, array( 'available', 'partial', 'not_connected', 'failed' ), true ) ) return self::error( 'local', 'Local performance snapshot is invalid.' );
+		$metrics = array();
+		foreach ( array( 'impressions', 'calls', 'directions', 'websiteClicks' ) as $key ) {
+			$row = is_array( $input['metrics'][ $key ] ?? null ) ? $input['metrics'][ $key ] : null;
+			$current = self::number( $row['current'] ?? null );
+			if ( ! is_array( $row ) || ! is_bool( $row['complete'] ?? null ) || ( null !== $current && $current < 0 ) ) return self::error( 'local', 'Local performance metric is invalid.' );
+			$metrics[ $key ] = array( 'current' => $current, 'complete' => $row['complete'] );
+		}
+		$latest = null === ( $input['latestMetricDate'] ?? null ) ? null : self::date( $input['latestMetricDate'] );
+		if ( null !== ( $input['latestMetricDate'] ?? null ) && ! $latest ) return self::error( 'local', 'Local performance date is invalid.' );
+		return array( 'state' => $input['state'], 'latestMetricDate' => $latest, 'metrics' => $metrics );
+	}
+
+	private static function rankings( $input ) {
+		if ( ! is_array( $input ) || ! in_array( $input['state'] ?? null, array( 'available', 'partial', 'collecting', 'failed' ), true ) ) return self::error( 'rankings', 'Ranking snapshot is invalid.' );
+		$counts = array();
+		foreach ( array( 'tracked', 'ranking', 'notRanking', 'top3' ) as $key ) {
+			$count = self::count( $input[ $key ] ?? null );
+			if ( null === $count ) return self::error( 'rankings', 'Ranking totals are invalid.' );
+			$counts[ $key ] = $count;
+		}
+		$rows = is_array( $input['keywords'] ?? null ) ? array_values( $input['keywords'] ) : array();
+		if ( count( $rows ) > 10 ) return self::error( 'rankings', 'Ranking snapshot exceeds row limits.' );
+		$keywords = array();
+		foreach ( $rows as $row ) {
+			$keyword = is_array( $row ) ? sanitize_text_field( trim( (string) ( $row['keyword'] ?? '' ) ) ) : '';
+			$target = is_array( $row ) ? sanitize_text_field( trim( (string) ( $row['target'] ?? '' ) ) ) : '';
+			$best_rank = self::number( $row['bestRank'] ?? null );
+			$visibility = self::number( $row['visibilityPct'] ?? null, false );
+			$trust = $row['trust'] ?? null;
+			$row_date = null === ( $row['date'] ?? null ) ? null : self::date( $row['date'] );
+			if ( '' === $keyword || strlen( $keyword ) > 200 || '' === $target || strlen( $target ) > 200 || ( null !== $best_rank && ( $best_rank < 1 || $best_rank > 100 ) ) || null === $visibility || $visibility < 0 || $visibility > 100 || ! in_array( $trust, array( 'trusted', 'degraded', 'untrusted' ), true ) || ( null !== ( $row['date'] ?? null ) && ! $row_date ) ) return self::error( 'rankings', 'Ranking row is invalid.' );
+			$keywords[] = array( 'keyword' => $keyword, 'target' => $target, 'bestRank' => $best_rank, 'visibilityPct' => $visibility, 'date' => $row_date, 'trust' => $trust );
+		}
+		$latest = null === ( $input['latestMetricDate'] ?? null ) ? null : self::date( $input['latestMetricDate'] );
+		if ( null !== ( $input['latestMetricDate'] ?? null ) && ! $latest ) return self::error( 'rankings', 'Ranking date is invalid.' );
+		return array_merge( array( 'state' => $input['state'], 'latestMetricDate' => $latest ), $counts, array( 'keywords' => $keywords ) );
+	}
+
+	private static function work( $input ) {
+		if ( ! is_array( $input ) || ! in_array( $input['state'] ?? null, array( 'available', 'partial', 'collecting', 'failed' ), true ) ) return self::error( 'work', 'Completed work snapshot is invalid.' );
+		$normalized = array( 'state' => $input['state'] );
+		foreach ( array( 'applied', 'skipped', 'measured', 'improved', 'regressed', 'maturing', 'ungradable' ) as $key ) {
+			$count = self::count( $input[ $key ] ?? null );
+			if ( null === $count ) return self::error( 'work', 'Completed work totals are invalid.' );
+			$normalized[ $key ] = $count;
+		}
+		$move_rate = self::number( $input['moveRate'] ?? null );
+		if ( null !== $move_rate && ( $move_rate < 0 || $move_rate > 1 ) ) return self::error( 'work', 'Completed work rate is invalid.' );
+		$normalized['moveRate'] = $move_rate;
+		return $normalized;
 	}
 
 	private static function metric( $input ) {
@@ -176,6 +246,10 @@ class Ratesight_Performance_Snapshot {
 		if ( ! is_int( $value ) && ! is_float( $value ) ) return null;
 		$value = (float) $value;
 		return is_finite( $value ) && abs( $value ) <= 1000000000000 ? $value : null;
+	}
+
+	private static function count( $value ): ?int {
+		return is_int( $value ) && $value >= 0 && $value <= 1000000 ? $value : null;
 	}
 
 	private static function date_range( $input, bool $nullable = false ) {
