@@ -78,6 +78,8 @@ See the Payload Reference tab in the plugin settings for full documentation.
     or request-auth mode. It reports sanitized pairing and readiness health only.
   - Pairing establishes Observe mode and signed readiness; Enforce remains a
     separate control-plane decision.
+  - Signed release manifests can be checked for fixed-host, version, PHP, and
+    WordPress rollback eligibility without downloading or applying an update.
 
 3.5.1 - Prevent a critical error before the first dashboard performance snapshot
 3.5.0 - Display signed dashboard performance snapshots in WordPress
