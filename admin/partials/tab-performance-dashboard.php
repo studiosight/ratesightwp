@@ -15,14 +15,12 @@ $rankings = is_array( $snapshot ) && is_array( $snapshot['rankings'] ?? null ) ?
 $work = is_array( $snapshot ) && is_array( $snapshot['work'] ?? null ) ? $snapshot['work'] : null;
 $metrics = is_array( $organic['metrics'] ?? null ) ? $organic['metrics'] : array();
 $daily = is_array( $organic['daily'] ?? null ) ? array_slice( $organic['daily'], -14 ) : array();
-$queries = is_array( $organic['queries'] ?? null ) ? $organic['queries'] : array();
-$ranking_rows = is_array( $rankings['keywords'] ?? null ) ? $rankings['keywords'] : array();
+$highlights = is_array( $organic['highlights'] ?? null ) ? $organic['highlights'] : array();
+$ranking_rows = is_array( $rankings['keywords'] ?? null ) ? array_values( array_filter( $rankings['keywords'], static fn( array $row ): bool => null !== ( $row['bestRank'] ?? null ) && 'untrusted' !== ( $row['trust'] ?? '' ) ) ) : array();
 $ranking_targets = array();
-$all_ranking_scans_unavailable = ! empty( $ranking_rows );
 foreach ( $ranking_rows as $ranking_row ) {
 	$target = trim( (string) ( $ranking_row['target'] ?? '' ) );
 	if ( '' !== $target && ! in_array( $target, $ranking_targets, true ) ) $ranking_targets[] = $target;
-	if ( 'untrusted' !== ( $ranking_row['trust'] ?? '' ) ) $all_ranking_scans_unavailable = false;
 }
 $single_ranking_target = 1 === count( $ranking_targets ) ? preg_replace( '/^Organic\s+[—-]\s+/u', '', $ranking_targets[0] ) : null;
 $format_metric = static function ( string $key, $value ): string {
@@ -51,8 +49,8 @@ $max_daily = $daily_impressions ? max( 1, ...$daily_impressions ) : 1;
 					<div style="border:1px solid #dcdcde;border-radius:5px;padding:14px;background:#fff;">
 						<div style="color:#646970;font-size:12px;text-transform:uppercase;"><?php echo esc_html( $label ); ?></div>
 						<div style="font-size:24px;font-weight:700;margin-top:4px;"><?php echo esc_html( $format_metric( $key, $metrics[ $key ]['current'] ?? null ) ); ?></div>
-						<?php if ( true === ( $metrics[ $key ]['directionEligible'] ?? false ) ) : ?>
-							<div style="font-size:12px;color:#646970;margin-top:4px;">vs previous 28 days: <?php echo esc_html( (string) ( $metrics[ $key ]['direction'] ?? 'flat' ) ); ?></div>
+						<?php if ( true === ( $metrics[ $key ]['directionEligible'] ?? false ) && 'improved' === ( $metrics[ $key ]['direction'] ?? null ) ) : ?>
+							<div style="font-size:12px;color:#16803c;margin-top:4px;font-weight:600;">Improved vs previous 28 days</div>
 						<?php endif; ?>
 					</div>
 				<?php endforeach; ?>
@@ -67,25 +65,16 @@ $max_daily = $daily_impressions ? max( 1, ...$daily_impressions ) : 1;
 				</div>
 			<?php endif; ?>
 
-			<?php if ( $queries ) : ?>
-				<h3>Top searches</h3>
-				<div style="overflow-x:auto;">
-					<table class="widefat striped">
-						<thead><tr><th>Search</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th>Position</th></tr></thead>
-						<tbody>
-						<?php foreach ( $queries as $query ) : ?>
-							<tr>
-								<td><?php echo esc_html( (string) $query['value'] ); ?></td>
-								<td><?php echo esc_html( number_format_i18n( (float) $query['impressions'], 0 ) ); ?></td>
-								<td><?php echo esc_html( number_format_i18n( (float) $query['clicks'], 0 ) ); ?></td>
-								<td><?php echo esc_html( $format_metric( 'ctr', $query['ctr'] ?? null ) ); ?></td>
-								<td><?php echo esc_html( $format_metric( 'position', $query['position'] ?? null ) ); ?></td>
-							</tr>
-						<?php endforeach; ?>
-						</tbody>
-					</table>
-				</div>
-			<?php endif; ?>
+			<?php foreach ( array( 'wins' => array( 'Ranking wins', 'Searches already appearing on page one.' ), 'close' => array( 'Close to page one', 'Searches within reach of page-one visibility.' ), 'improving' => array( 'Biggest improvements', 'Searches making meaningful upward progress.' ) ) as $group => $copy ) : ?>
+				<?php $highlight_rows = is_array( $highlights[ $group ] ?? null ) ? $highlights[ $group ] : array(); if ( ! $highlight_rows ) continue; ?>
+				<h3><?php echo esc_html( $copy[0] ); ?></h3>
+				<p class="description"><?php echo esc_html( $copy[1] ); ?></p>
+				<div style="overflow-x:auto;margin:10px 0 18px;"><table class="widefat striped"><thead><tr><th>Search</th><th>Position</th><th>Progress</th><th>Clicks</th></tr></thead><tbody>
+				<?php foreach ( $highlight_rows as $row ) : ?>
+					<tr><td><strong><?php echo esc_html( (string) $row['value'] ); ?></strong></td><td><?php echo esc_html( number_format_i18n( (float) $row['position'], 1 ) ); ?></td><td style="color:#16803c;font-weight:600;"><?php echo esc_html( null !== ( $row['positionGain'] ?? null ) ? 'Up ' . number_format_i18n( (float) $row['positionGain'], 1 ) . ' positions' : ( 'wins' === $group ? 'Page one' : 'Within reach' ) ); ?></td><td><?php echo esc_html( number_format_i18n( (float) $row['clicks'], 0 ) ); ?></td></tr>
+				<?php endforeach; ?>
+				</tbody></table></div>
+			<?php endforeach; ?>
 		<?php endif; ?>
 
 		<hr style="margin:24px 0;">
@@ -105,37 +94,27 @@ $max_daily = $daily_impressions ? max( 1, ...$daily_impressions ) : 1;
 			</div>
 		<?php endif; ?>
 
-		<hr style="margin:24px 0;">
-		<h3>Tracked rankings</h3>
-		<?php if ( ! $rankings ) : ?>
-			<p><strong>Waiting for ranking data.</strong> It will appear after the dashboard sends the next expanded snapshot.</p>
-		<?php else : ?>
-			<p><strong><?php echo esc_html( number_format_i18n( (int) ( $rankings['tracked'] ?? 0 ) ) ); ?> searches tracked.</strong><?php if ( ! empty( $rankings['latestMetricDate'] ) ) : ?> Latest scan: <?php echo esc_html( (string) $rankings['latestMetricDate'] ); ?>.<?php endif; ?></p>
+		<?php if ( $rankings && $ranking_rows ) : ?>
+			<hr style="margin:24px 0;">
+			<h3>Ranking highlights</h3>
+			<p><strong><?php echo esc_html( number_format_i18n( count( $ranking_rows ) ) ); ?> verified ranking <?php echo 1 === count( $ranking_rows ) ? 'win' : 'wins'; ?>.</strong><?php if ( ! empty( $rankings['latestMetricDate'] ) ) : ?> Latest scan: <?php echo esc_html( (string) $rankings['latestMetricDate'] ); ?>.<?php endif; ?></p>
 			<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:12px;margin:18px 0;">
-				<?php foreach ( array( 'tracked' => 'Tracked searches', 'ranking' => 'Ranking', 'top3' => 'Top 3', 'notRanking' => 'Not ranking' ) as $key => $label ) : ?>
+				<?php foreach ( array( 'ranking' => 'Ranking', 'top3' => 'Top 3' ) as $key => $label ) : ?>
 					<div style="border:1px solid #dcdcde;border-radius:5px;padding:14px;background:#fff;"><div style="color:#646970;font-size:12px;text-transform:uppercase;"><?php echo esc_html( $label ); ?></div><div style="font-size:24px;font-weight:700;margin-top:4px;"><?php echo esc_html( number_format_i18n( (int) ( $rankings[ $key ] ?? 0 ) ) ); ?></div></div>
 				<?php endforeach; ?>
 			</div>
 			<?php if ( $single_ranking_target ) : ?>
 				<p class="description"><strong>Tracking area:</strong> <?php echo esc_html( (string) $single_ranking_target ); ?></p>
 			<?php endif; ?>
-			<?php if ( $all_ranking_scans_unavailable ) : ?>
-				<div style="border-left:4px solid #dba617;background:#fcf9e8;padding:12px 16px;margin-top:14px;">
-					<strong>Ranking scans are waiting to run.</strong>
-					<p style="margin:4px 0 10px;">These searches are tracked. Positions and visibility will appear after the next successful scan.</p>
-					<ul style="columns:2;column-gap:28px;margin:0 0 0 18px;">
-						<?php foreach ( $ranking_rows as $row ) : ?><li style="break-inside:avoid;margin-bottom:4px;"><?php echo esc_html( (string) $row['keyword'] ); ?></li><?php endforeach; ?>
-					</ul>
-				</div>
-			<?php elseif ( $ranking_rows ) : ?>
+			<?php if ( $ranking_rows ) : ?>
 				<?php $show_ranking_area = count( $ranking_targets ) > 1; ?>
 				<div style="overflow-x:auto;"><table class="widefat striped"><thead><tr><th>Search</th><?php if ( $show_ranking_area ) : ?><th>Tracking area</th><?php endif; ?><th>Best rank</th><th>Visibility</th></tr></thead><tbody>
-				<?php foreach ( $ranking_rows as $row ) : $scan_unavailable = 'untrusted' === ( $row['trust'] ?? '' ); ?>
+				<?php foreach ( $ranking_rows as $row ) : ?>
 					<tr>
 						<td><?php echo esc_html( (string) $row['keyword'] ); ?></td>
 						<?php if ( $show_ranking_area ) : ?><td><?php echo esc_html( (string) preg_replace( '/^Organic\s+[—-]\s+/u', '', (string) $row['target'] ) ); ?></td><?php endif; ?>
-						<td><?php echo esc_html( $scan_unavailable ? 'Waiting for scan' : ( null === $row['bestRank'] ? 'Not ranking' : number_format_i18n( (float) $row['bestRank'], 0 ) ) ); ?></td>
-						<td><?php echo esc_html( $scan_unavailable ? '—' : number_format_i18n( (float) $row['visibilityPct'], 0 ) . '%' ); ?></td>
+						<td><?php echo esc_html( number_format_i18n( (float) $row['bestRank'], 0 ) ); ?></td>
+						<td><?php echo esc_html( number_format_i18n( (float) $row['visibilityPct'], 0 ) . '%' ); ?></td>
 					</tr>
 				<?php endforeach; ?>
 				</tbody></table></div>

@@ -52,6 +52,11 @@ $payload = array(
 		),
 		'daily' => array( array( 'date' => '2026-09-06', 'clicks' => 2, 'impressions' => 100, 'ctr' => 0.02, 'position' => 8.5 ) ),
 		'queries' => array( array( 'value' => '<b>window cleaning</b>', 'current' => array( 'clicks' => 3, 'impressions' => 90, 'ctr' => 0.033, 'position' => 4.2 ) ) ),
+		'highlights' => array(
+			'wins' => array( array( 'value' => '<b>window cleaning</b>', 'position' => 4.2, 'clicks' => 3, 'impressions' => 90, 'positionGain' => 2.4 ) ),
+			'close' => array( array( 'value' => 'gutter cleaning', 'position' => 14.8, 'clicks' => 1, 'impressions' => 48, 'positionGain' => null ) ),
+			'improving' => array( array( 'value' => 'commercial cleaning', 'position' => 31.2, 'clicks' => 0, 'impressions' => 70, 'positionGain' => 8.1 ) ),
+		),
 	),
 	'local' => array(
 		'state' => 'available',
@@ -67,7 +72,7 @@ $payload = array(
 		'state' => 'partial', 'latestMetricDate' => '2026-09-06', 'tracked' => 2, 'ranking' => 1, 'notRanking' => 1, 'top3' => 1,
 		'keywords' => array(
 			array( 'keyword' => '<b>window cleaning</b>', 'target' => 'Brentwood', 'bestRank' => 2, 'visibilityPct' => 80, 'date' => '2026-09-06', 'trust' => 'trusted' ),
-			array( 'keyword' => 'gutter cleaning', 'target' => 'Brentwood', 'bestRank' => null, 'visibilityPct' => 0, 'date' => '2026-09-06', 'trust' => 'untrusted' ),
+			array( 'keyword' => 'unverified scan term', 'target' => 'Brentwood', 'bestRank' => null, 'visibilityPct' => 0, 'date' => '2026-09-06', 'trust' => 'untrusted' ),
 		),
 	),
 	'work' => array( 'state' => 'available', 'applied' => 12, 'skipped' => 2, 'measured' => 4, 'improved' => 2, 'regressed' => 1, 'maturing' => 3, 'ungradable' => 1, 'moveRate' => 0.5 ),
@@ -89,6 +94,7 @@ $normalized = Ratesight_Performance_Snapshot::normalize( $payload, '170652', $no
 check_snapshot_case( 'valid snapshot normalizes', is_array( $normalized ) );
 check_snapshot_case( 'dashboard URL is canonical and not caller controlled', $normalized['dashboardUrl'] === 'https://dash.ratesight.com/seo/170652/rank' );
 check_snapshot_case( 'query text is sanitized', $normalized['organic']['queries'][0]['value'] === 'window cleaning' );
+check_snapshot_case( 'client-safe highlights normalize', $normalized['organic']['highlights']['wins'][0]['value'] === 'window cleaning' && $normalized['organic']['highlights']['improving'][0]['positionGain'] === 8.1 );
 check_snapshot_case( 'metrics remain numeric and bounded', $normalized['organic']['metrics']['clicks']['current'] === 12.0 && count( $normalized['organic']['daily'] ) === 1 );
 check_snapshot_case( 'Business Profile totals normalize', $normalized['local']['metrics']['calls']['current'] === 14.0 && false === $normalized['local']['metrics']['websiteClicks']['complete'] );
 check_snapshot_case( 'ranking rows are sanitized and bounded', $normalized['rankings']['keywords'][0]['keyword'] === 'window cleaning' && $normalized['rankings']['top3'] === 1 );
@@ -113,6 +119,9 @@ check_snapshot_case( 'negative daily totals are refused', Ratesight_Performance_
 $too_many_rankings = $payload;
 $too_many_rankings['rankings']['keywords'] = array_fill( 0, 11, $payload['rankings']['keywords'][0] );
 check_snapshot_case( 'unbounded ranking rows are refused', Ratesight_Performance_Snapshot::normalize( $too_many_rankings, '170652', $now ) instanceof WP_Error );
+$too_many_highlights = $payload;
+$too_many_highlights['organic']['highlights']['wins'] = array_fill( 0, 6, $payload['organic']['highlights']['wins'][0] );
+check_snapshot_case( 'unbounded client highlights are refused', Ratesight_Performance_Snapshot::normalize( $too_many_highlights, '170652', $now ) instanceof WP_Error );
 $bad_work = $payload;
 $bad_work['work']['applied'] = -1;
 check_snapshot_case( 'negative completed-work totals are refused', Ratesight_Performance_Snapshot::normalize( $bad_work, '170652', $now ) instanceof WP_Error );
@@ -137,9 +146,10 @@ ob_start();
 require __DIR__ . '/../admin/partials/tab-performance-dashboard.php';
 $rendered = ob_get_clean();
 check_snapshot_case( 'WordPress renders dashboard metric values', str_contains( $rendered, '>12<' ) && str_contains( $rendered, '>1,200<' ) );
-check_snapshot_case( 'WordPress renders sanitized query evidence', str_contains( $rendered, 'window cleaning' ) && ! str_contains( $rendered, '<b>window cleaning</b>' ) );
+check_snapshot_case( 'WordPress renders positive search evidence', str_contains( $rendered, 'Ranking wins' ) && str_contains( $rendered, 'Close to page one' ) && str_contains( $rendered, 'Biggest improvements' ) && str_contains( $rendered, 'window cleaning' ) && ! str_contains( $rendered, '<b>window cleaning</b>' ) );
 check_snapshot_case( 'WordPress renders Business Profile performance', str_contains( $rendered, 'Business Profile' ) && str_contains( $rendered, '>14<' ) );
-check_snapshot_case( 'WordPress renders tracked rankings', str_contains( $rendered, 'Tracked rankings' ) && str_contains( $rendered, 'Brentwood' ) );
+check_snapshot_case( 'WordPress renders verified ranking wins only', str_contains( $rendered, 'Ranking highlights' ) && str_contains( $rendered, 'Brentwood' ) && ! str_contains( $rendered, 'unverified scan term' ) );
+check_snapshot_case( 'WordPress suppresses client-negative ranking language', ! str_contains( $rendered, 'Not ranking' ) && ! str_contains( $rendered, 'scan unavailable' ) && ! str_contains( $rendered, 'worse' ) );
 check_snapshot_case( 'WordPress renders completed work and outcomes', str_contains( $rendered, 'Completed SEO work' ) && str_contains( $rendered, '50%' ) );
 check_snapshot_case( 'WordPress does not render a dashboard CTA', ! str_contains( $rendered, 'Open Performance in Ratesight' ) );
 

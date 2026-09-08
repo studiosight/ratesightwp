@@ -23,9 +23,9 @@ check_dashboard_performance_case( 'canonical Ratesight casing is used', str_cont
 check_dashboard_performance_case( 'dashboard CTA is removed', ! str_contains( $dashboard, 'Open Performance in Ratesight' ) && ! str_contains( $dashboard, 'button button-primary' ) );
 check_dashboard_performance_case( 'duplicate provider connections are explicitly unnecessary', str_contains( $dashboard, 'do not need to connect those providers again in WordPress' ) );
 check_dashboard_performance_case( 'provider credential copying is explicitly denied', str_contains( $dashboard, 'No Google, Bing, or Business Profile credentials are copied' ) );
-check_dashboard_performance_case( 'stored dashboard metrics render locally', str_contains( $dashboard, 'Ratesight_Performance_Snapshot::OPTION' ) && str_contains( $dashboard, 'Top searches' ) );
-check_dashboard_performance_case( 'expanded performance sections render locally', str_contains( $dashboard, 'Business Profile' ) && str_contains( $dashboard, 'Tracked rankings' ) && str_contains( $dashboard, 'Completed SEO work' ) );
+check_dashboard_performance_case( 'stored dashboard metrics render locally', str_contains( $dashboard, 'Ratesight_Performance_Snapshot::OPTION' ) && str_contains( $dashboard, 'Ranking wins' ) );
+check_dashboard_performance_case( 'expanded performance sections render locally', str_contains( $dashboard, 'Business Profile' ) && str_contains( $dashboard, 'Ranking highlights' ) && str_contains( $dashboard, 'Completed SEO work' ) );
 check_dashboard_performance_case( 'single ranking target is summarized once', str_contains( $dashboard, 'Tracking area:' ) && str_contains( $dashboard, 'count( $ranking_targets ) > 1' ) );
-check_dashboard_performance_case( 'unavailable scans do not claim zero visibility or no ranking', str_contains( $dashboard, 'Ranking scans are waiting to run.' ) && str_contains( $dashboard, "'Waiting for scan'" ) && ! str_contains( $dashboard, '(scan unavailable)' ) );
+check_dashboard_performance_case( 'client surface is positive-only', str_contains( $dashboard, 'Close to page one' ) && str_contains( $dashboard, 'Biggest improvements' ) && str_contains( $dashboard, "'improved' ===" ) && ! str_contains( $dashboard, 'Not ranking' ) && ! str_contains( $dashboard, 'scan unavailable' ) && ! str_contains( $dashboard, "'notRanking' =>" ) );
 
 echo "All dashboard-owned performance tests passed.\n";

@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.6.2
+Stable tag: 3.6.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -68,6 +68,7 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 == Changelog ==
 
+3.6.3 - Client-safe performance wins and search-growth highlights
 3.6.2 - Cleaner tracked-ranking states and layout
 3.6.1 - Expanded dashboard-owned performance
 

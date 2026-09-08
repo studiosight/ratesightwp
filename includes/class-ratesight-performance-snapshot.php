@@ -133,6 +133,25 @@ class Ratesight_Performance_Snapshot {
 			);
 			if ( in_array( null, array( $queries[count( $queries ) - 1]['clicks'], $queries[count( $queries ) - 1]['impressions'] ), true ) || $queries[count( $queries ) - 1]['clicks'] < 0 || $queries[count( $queries ) - 1]['impressions'] < 0 ) return self::error( 'query', 'Performance snapshot query totals are invalid.' );
 		}
+		$highlights = null;
+		if ( array_key_exists( 'highlights', $organic ) ) {
+			if ( ! is_array( $organic['highlights'] ) ) return self::error( 'highlights', 'Performance highlights are invalid.' );
+			$highlights = array();
+			foreach ( array( 'wins', 'close', 'improving' ) as $group ) {
+				$rows = is_array( $organic['highlights'][ $group ] ?? null ) ? array_values( $organic['highlights'][ $group ] ) : null;
+				if ( null === $rows || count( $rows ) > 5 ) return self::error( 'highlights', 'Performance highlights exceed row limits.' );
+				$highlights[ $group ] = array();
+				foreach ( $rows as $row ) {
+					$value = is_array( $row ) ? sanitize_text_field( trim( (string) ( $row['value'] ?? '' ) ) ) : '';
+					$position = self::number( $row['position'] ?? null, false );
+					$clicks = self::number( $row['clicks'] ?? null, false );
+					$impressions = self::number( $row['impressions'] ?? null, false );
+					$position_gain = self::number( $row['positionGain'] ?? null );
+					if ( '' === $value || strlen( $value ) > 200 || null === $position || $position <= 0 || $position > 100 || null === $clicks || $clicks < 0 || null === $impressions || $impressions < 0 || ( null !== $position_gain && $position_gain <= 0 ) ) return self::error( 'highlights', 'Performance highlight row is invalid.' );
+					$highlights[ $group ][] = array( 'value' => $value, 'position' => $position, 'clicks' => $clicks, 'impressions' => $impressions, 'positionGain' => $position_gain );
+				}
+			}
+		}
 
 		$latest_date = self::date( $organic['latestMetricDate'] ?? null );
 		$normalized = array(
@@ -154,6 +173,7 @@ class Ratesight_Performance_Snapshot {
 				'queries' => $queries,
 			),
 		);
+		if ( null !== $highlights ) $normalized['organic']['highlights'] = $highlights;
 		if ( array_key_exists( 'local', $input ) ) {
 			$local = self::local( $input['local'] );
 			if ( is_wp_error( $local ) ) return $local;
