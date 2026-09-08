@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.6.0
+Stable tag: 3.6.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,12 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+
+3.6.1 - Expanded dashboard-owned performance
+
+  - Adds Business Profile, tracked ranking, and completed SEO work summaries
+    from the signed dashboard snapshot.
+  - Removes the outbound Performance dashboard button.
 
 3.6.0 - Dashboard-managed WordPress pairing
 
