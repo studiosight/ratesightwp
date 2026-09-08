@@ -1,13 +1,10 @@
 <?php
 /**
- * Setup wizard — dismissible checklist shown until all steps are complete.
+ * Setup wizard — dismissible checklist for WordPress-local setup only.
  *
  * Checks:
- *   1. Widget IDs (Ratesight ID) configured
- *   2. GSC connected and locked
- *   3. GBP connected and locked (optional — shown but not blocking)
- *   4. OAuth credentials configured
- *   5. Search engines allowed (blog_public)
+ *   1. Ratesight site connection configured
+ *   2. Search engines allowed (blog_public)
  *
  * Dismissed per-user via a user meta flag.
  *
@@ -21,18 +18,14 @@ $user_id   = get_current_user_id();
 $dismissed = get_user_meta( $user_id, 'ratesight_wizard_dismissed', true );
 if ( $dismissed ) return;
 
-$connections_url = admin_url( 'admin.php?page=ratesight&tab=connections' );
-$widgets_url     = admin_url( 'admin.php?page=ratesight&tab=widgets' );
-$settings_url    = admin_url( 'admin.php?page=ratesight&tab=seo-pages' );
-
 // Evaluate each step.
 $steps = array(
 	array(
 		'id'      => 'widget_id',
-		'label'   => 'Ratesight ID entered',
+		'label'   => 'Ratesight is connected',
 		'done'    => ! empty( Ratesight_Options::get( 'code_id' ) ),
-		'action'  => 'Enter your Ratesight ID on the Widgets tab — this authenticates the site.',
-		'url'     => $widgets_url,
+		'action'  => 'Your Ratesight team can finish connecting this site. No action is needed here.',
+		'url'     => '',
 	),
 	array(
 		'id'      => 'blog_public',
@@ -41,28 +34,10 @@ $steps = array(
 		'action'  => 'Go to Settings → Reading and uncheck "Discourage search engines".',
 		'url'     => admin_url( 'options-reading.php' ),
 	),
-	array(
-		'id'      => 'gsc',
-		'label'   => 'Google Search Console connected',
-		'done'    => Ratesight_OAuth_Client::is_connected( 'gsc' ) && Ratesight_GSC_Client::is_locked(),
-		'action'  => Ratesight_OAuth_Client::is_connected( 'gsc' ) ? 'Select and lock a property on the Connections tab.' : 'Connect Google Search Console on the Connections tab.',
-		'url'     => $connections_url,
-	),
-	array(
-		'id'      => 'gbp',
-		'label'   => 'Google Business Profile connected',
-		'done'    => Ratesight_OAuth_Client::is_connected( 'gbp' ) && Ratesight_GBP_Client::is_locked(),
-		'action'  => Ratesight_OAuth_Client::is_connected( 'gbp' ) ? 'Select and lock a location on the Connections tab.' : 'Connect Google Business Profile on the Connections tab.',
-		'url'     => $connections_url,
-		'optional' => true,
-	),
 );
 
-$incomplete   = array_filter( $steps, static fn( $s ) => ! $s['done'] );
-$required     = array_filter( $incomplete, static fn( $s ) => empty( $s['optional'] ) );
-$all_required = empty( $required );
+$incomplete = array_filter( $steps, static fn( $s ) => ! $s['done'] );
 
-// If only optional steps remain, still show but style differently.
 if ( empty( $incomplete ) ) return; // Everything done — hide wizard entirely.
 
 $pct = round( ( count( array_filter( $steps, static fn( $s ) => $s['done'] ) ) / count( $steps ) ) * 100 );
@@ -84,7 +59,7 @@ $pct = round( ( count( array_filter( $steps, static fn( $s ) => $s['done'] ) ) /
 
 	<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;">
 		<?php foreach ( $steps as $step ) :
-			$icon   = $step['done'] ? '✅' : ( ! empty( $step['optional'] ) ? '⭕' : '❌' );
+			$icon   = $step['done'] ? '✅' : '○';
 			$style  = $step['done'] ? 'opacity:.6;' : '';
 		?>
 		<div style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background:#f6f7f7;border-radius:4px;<?php echo esc_attr( $style ); ?>">
@@ -104,10 +79,6 @@ $pct = round( ( count( array_filter( $steps, static fn( $s ) => $s['done'] ) ) /
 		</div>
 		<?php endforeach; ?>
 	</div>
-
-	<?php if ( $all_required ) : ?>
-		<p style="font-size:12px;color:#646970;margin:10px 0 0;">✅ Required steps complete! GBP connection is optional but recommended for local SEO tracking.</p>
-	<?php endif; ?>
 
 </div>
 

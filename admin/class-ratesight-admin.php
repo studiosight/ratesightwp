@@ -48,9 +48,6 @@ class Ratesight_Admin {
 			);
 		}
 
-		// Notification options — stored directly, not in the schema.
-		register_setting( 'ratesight_options_seo_pages', 'ratesight_notify_enabled', array( 'sanitize_callback' => 'absint' ) );
-		register_setting( 'ratesight_options_seo_pages', 'ratesight_notify_email',   array( 'sanitize_callback' => 'sanitize_email' ) );
 	}
 
 	/**
@@ -66,53 +63,9 @@ class Ratesight_Admin {
 			return;
 		}
 
-		$code_id     = Ratesight_Options::get( 'code_id' );
-		$widgets_url = admin_url( 'admin.php?page=ratesight&tab=widgets' );
-
-		if ( $code_id === '' ) {
-			$msg = sprintf(
-				'<strong>Ratesight:</strong> No Ratesight ID set — RS Pages are hidden and the webhook is disabled. <a href="%s">Enter your ID on the Widgets tab.</a>',
-				esc_url( $widgets_url )
-			);
-		} else {
-			$msg = sprintf(
-				'<strong>Ratesight:</strong> License inactive — RS Pages are hidden and the webhook is disabled. Check your Ratesight ID on the <a href="%s">Widgets tab</a> or contact <a href="mailto:support@ratesight.com">support@ratesight.com</a>.',
-				esc_url( $widgets_url )
-			);
-		}
+		$msg = '<strong>Ratesight setup needs attention.</strong> Please contact your account team or <a href="mailto:support@ratesight.com">support@ratesight.com</a> for help.';
 
 		echo '<div class="notice notice-error"><p>' . wp_kses( $msg, array( 'strong' => array(), 'a' => array( 'href' => array() ), 'em' => array() ) ) . '</p></div>';
-	}
-
-	/**
-	 * Show a sitewide admin notice when Google silently revokes a token.
-	 * Clears itself once the user visits the Connections tab to reconnect.
-	 */
-	public function revocation_notice() {
-		$connections_url = admin_url( 'admin.php?page=ratesight&tab=connections' );
-		$notices         = array();
-
-		foreach ( array( 'gsc' => 'Search Console', 'gbp' => 'Business Profile' ) as $service => $label ) {
-			if ( get_option( 'ratesight_' . $service . '_revoked' ) ) {
-				$notices[] = sprintf(
-					'<strong>Ratesight — %s disconnected:</strong> Google revoked the connection (password change, access removed, or token expired). <a href="%s">Reconnect on the Connections tab →</a>',
-					esc_html( $label ),
-					esc_url( $connections_url )
-				);
-			}
-		}
-
-		// Scope error — token exists but was granted without the required permission.
-		if ( get_option( 'ratesight_gsc_scope_error' ) ) {
-			$notices[] = sprintf(
-				'<strong>Ratesight — Search Console needs reauthorization:</strong> The connection is missing the Search Console permission. Please <a href="%s">disconnect and reconnect GSC</a> — when Google asks for permissions, make sure to click <strong>Allow</strong> on the Search Console access screen.',
-				esc_url( $connections_url )
-			);
-		}
-
-		foreach ( $notices as $msg ) {
-			echo '<div class="notice notice-error"><p>' . wp_kses( $msg, array( 'strong' => array(), 'a' => array( 'href' => array() ) ) ) . '</p></div>';
-		}
 	}
 
 	// -------------------------------------------------------------------------

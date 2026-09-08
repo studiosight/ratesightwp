@@ -137,7 +137,7 @@ $max_daily = $daily_impressions ? max( 1, ...$daily_impressions ) : 1;
 
 		<p>The dashboard remains the source of truth. WordPress stores this bounded display snapshot only.</p>
 		<?php if ( $ratesight_id === '' ) : ?>
-			<p class="description" style="color:#b32d2e;">Add the Ratesight ID on the Connections tab so this site can receive dashboard performance snapshots.</p>
+			<p class="description">Performance reporting is being prepared. No action is needed here.</p>
 		<?php else : ?>
 			<p class="description">Connected site ID: <?php echo esc_html( $ratesight_id ); ?></p>
 		<?php endif; ?>

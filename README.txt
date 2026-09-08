@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.6.3
+Stable tag: 3.6.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,12 @@ See the Payload Reference tab in the plugin settings for full documentation.
 
 
 == Changelog ==
+
+3.6.4 - Client-safe connection and notification cleanup
+
+  - Removes obsolete WordPress prompts to connect dashboard-owned providers.
+  - Retires client-facing operational failure emails and provider revocation notices.
+  - Replaces connection internals with a calm, read-only setup status.
 
 3.6.3 - Client-safe performance wins and search-growth highlights
 3.6.2 - Cleaner tracked-ranking states and layout
