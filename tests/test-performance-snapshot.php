@@ -69,9 +69,10 @@ $payload = array(
 		),
 	),
 	'rankings' => array(
-		'state' => 'partial', 'latestMetricDate' => '2026-09-06', 'tracked' => 2, 'ranking' => 1, 'notRanking' => 1, 'top3' => 1,
+		'state' => 'partial', 'latestMetricDate' => '2026-09-06', 'tracked' => 3, 'ranking' => 2, 'notRanking' => 1, 'top3' => 1,
 		'keywords' => array(
 			array( 'keyword' => '<b>window cleaning</b>', 'target' => 'Brentwood', 'bestRank' => 2, 'visibilityPct' => 80, 'date' => '2026-09-06', 'trust' => 'trusted' ),
+			array( 'keyword' => 'gutter repair', 'target' => 'Organic — onetwotree.net (Atlanta, GA)', 'bestRank' => 8, 'visibilityPct' => 45, 'date' => '2026-09-06', 'trust' => 'trusted' ),
 			array( 'keyword' => 'unverified scan term', 'target' => 'Brentwood', 'bestRank' => null, 'visibilityPct' => 0, 'date' => '2026-09-06', 'trust' => 'untrusted' ),
 		),
 	),
@@ -88,7 +89,7 @@ function check_snapshot_case( string $label, bool $ok ): void {
 ob_start();
 require __DIR__ . '/../admin/partials/tab-performance-dashboard.php';
 $empty_rendered = ob_get_clean();
-check_snapshot_case( 'WordPress renders the waiting state before the first snapshot', str_contains( $empty_rendered, 'Waiting for the first dashboard snapshot.' ) );
+check_snapshot_case( 'WordPress renders the waiting state before the first snapshot', str_contains( $empty_rendered, 'Your results are being prepared' ) && str_contains( $empty_rendered, 'No action is needed.' ) );
 
 $normalized = Ratesight_Performance_Snapshot::normalize( $payload, '170652', $now );
 check_snapshot_case( 'valid snapshot normalizes', is_array( $normalized ) );
@@ -146,11 +147,13 @@ ob_start();
 require __DIR__ . '/../admin/partials/tab-performance-dashboard.php';
 $rendered = ob_get_clean();
 check_snapshot_case( 'WordPress renders dashboard metric values', str_contains( $rendered, '>12<' ) && str_contains( $rendered, '>1,200<' ) );
-check_snapshot_case( 'WordPress renders positive search evidence', str_contains( $rendered, 'Ranking wins' ) && str_contains( $rendered, 'Close to page one' ) && str_contains( $rendered, 'Biggest improvements' ) && str_contains( $rendered, 'window cleaning' ) && ! str_contains( $rendered, '<b>window cleaning</b>' ) );
-check_snapshot_case( 'WordPress renders Business Profile performance', str_contains( $rendered, 'Business Profile' ) && str_contains( $rendered, '>14<' ) );
-check_snapshot_case( 'WordPress renders verified ranking wins only', str_contains( $rendered, 'Ranking highlights' ) && str_contains( $rendered, 'Brentwood' ) && ! str_contains( $rendered, 'unverified scan term' ) );
+check_snapshot_case( 'WordPress leads with verified improvement', str_contains( $rendered, 'Google search visits increased 20%' ) && str_contains( $rendered, 'Compared with the previous 28 days.' ) );
+check_snapshot_case( 'WordPress renders positive search evidence', str_contains( $rendered, 'Page-one searches' ) && str_contains( $rendered, 'Close to page one' ) && str_contains( $rendered, 'Biggest movers' ) && str_contains( $rendered, 'window cleaning' ) && ! str_contains( $rendered, '<b>window cleaning</b>' ) );
+check_snapshot_case( 'WordPress renders complete Business Profile outcomes only', str_contains( $rendered, 'From your Business Profile' ) && str_contains( $rendered, '>14<' ) && ! str_contains( $rendered, '>31<' ) && ! str_contains( $rendered, 'Partial data' ) );
+check_snapshot_case( 'WordPress renders verified ranking wins without duplication', substr_count( $rendered, 'window cleaning' ) === 1 && str_contains( $rendered, 'gutter repair' ) && str_contains( $rendered, 'Atlanta, GA' ) && ! str_contains( $rendered, 'onetwotree.net' ) && ! str_contains( $rendered, 'unverified scan term' ) );
 check_snapshot_case( 'WordPress suppresses client-negative ranking language', ! str_contains( $rendered, 'Not ranking' ) && ! str_contains( $rendered, 'scan unavailable' ) && ! str_contains( $rendered, 'worse' ) );
-check_snapshot_case( 'WordPress renders completed work and outcomes', str_contains( $rendered, 'Completed SEO work' ) && str_contains( $rendered, '50%' ) );
+check_snapshot_case( 'WordPress renders completed work as client outcomes', str_contains( $rendered, 'SEO Improvements' ) && str_contains( $rendered, 'Early gains confirmed' ) && str_contains( $rendered, 'Results still developing' ) && ! str_contains( $rendered, 'Changes applied' ) && ! str_contains( $rendered, '50%' ) );
+check_snapshot_case( 'WordPress suppresses technical snapshot details', ! str_contains( $rendered, 'source through' ) && ! str_contains( $rendered, 'Connected site ID' ) && ! str_contains( $rendered, 'credentials' ) && ! str_contains( $rendered, 'dashboard remains the source of truth' ) );
 check_snapshot_case( 'WordPress does not render a dashboard CTA', ! str_contains( $rendered, 'Open Performance in Ratesight' ) );
 
 echo $failures ? "{$failures} PERFORMANCE SNAPSHOT CHECKS FAILED\n" : "ALL PERFORMANCE SNAPSHOT CHECKS PASSED\n";
