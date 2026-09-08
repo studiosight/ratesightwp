@@ -39,6 +39,9 @@ class Ratesight_Bulk_Operations {
 	}
 
 	public function register_bulk_actions( array $actions ) {
+		if ( 'bulk_actions-edit-ratesight_page' === current_filter() ) {
+			return array();
+		}
 		$actions['rs_submit_indexnow'] = '🔍 Submit to IndexNow';
 		$actions['rs_add_schema']      = '📋 Add Schema Markup';
 		return $actions;

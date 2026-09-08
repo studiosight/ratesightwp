@@ -52,8 +52,9 @@ $preview_text_color = $options['dark_text'] ? $options['dark_text_color'] : '#3c
 						<th scope="row"><label for="rs-star-color">Star color</label></th>
 						<td>
 							<div class="rs-color-row">
-								<input type="color" id="rs-star-color" name="wp_ratesight_stars_clr" value="<?php echo esc_attr( $options['stars_clr'] ); ?>">
-								<span class="description">Used for the five review stars.</span>
+								<input type="color" id="rs-star-color" name="wp_ratesight_stars_clr" value="<?php echo esc_attr( $options['stars_clr'] ); ?>" aria-describedby="rs-star-color-help rs-star-color-value">
+								<output id="rs-star-color-value" for="rs-star-color"><?php echo esc_html( strtoupper( $options['stars_clr'] ) ); ?></output>
+								<span class="description" id="rs-star-color-help">Used for the five review stars. <span id="rs-star-contrast-status"></span></span>
 							</div>
 						</td>
 					</tr>
@@ -65,8 +66,11 @@ $preview_text_color = $options['dark_text'] ? $options['dark_text_color'] : '#3c
 								Use a custom text color
 							</label>
 							<div class="rs-color-row">
-								<input type="color" id="rs-review-text-color" name="wp_ratesight_dark_clr" value="<?php echo esc_attr( $options['dark_text_color'] ); ?>">
-								<span class="description">Choose a readable color for review text.</span>
+								<input type="hidden" id="rs-review-text-color-preserve" name="wp_ratesight_dark_clr" value="<?php echo esc_attr( $options['dark_text_color'] ); ?>">
+								<label for="rs-review-text-color" class="screen-reader-text">Review text color</label>
+								<input type="color" id="rs-review-text-color" name="wp_ratesight_dark_clr" value="<?php echo esc_attr( $options['dark_text_color'] ); ?>" aria-describedby="rs-review-text-color-help rs-review-text-color-value">
+								<output id="rs-review-text-color-value" for="rs-review-text-color"><?php echo esc_html( strtoupper( $options['dark_text_color'] ) ); ?></output>
+								<span class="description" id="rs-review-text-color-help">Choose a readable color for review text. <span id="rs-text-contrast-status"></span></span>
 							</div>
 						</td>
 					</tr>
@@ -77,11 +81,13 @@ $preview_text_color = $options['dark_text'] ? $options['dark_text_color'] : '#3c
 
 	<div>
 		<h2 class="rs-section">Preview</h2>
-		<div class="rs-widget-preview" id="rs-widget-preview" style="--rs-preview-stars:<?php echo esc_attr( $options['stars_clr'] ); ?>;--rs-preview-text:<?php echo esc_attr( $preview_text_color ); ?>;">
-			<div class="rs-widget-preview-stars" aria-label="Five stars">★★★★★</div>
-			<blockquote>“The team made everything easy and the results were excellent.”</blockquote>
-			<p>— A happy customer</p>
-			<span class="rs-widget-preview-link">See all reviews</span>
+		<div class="rs-widget-preview" id="rs-widget-preview" role="img" aria-label="Example review widget with five stars, sample review text, and a reviews-page link" style="--rs-preview-stars:<?php echo esc_attr( $options['stars_clr'] ); ?>;--rs-preview-text:<?php echo esc_attr( $preview_text_color ); ?>;">
+			<div aria-hidden="true">
+				<div class="rs-widget-preview-stars">★★★★★</div>
+				<blockquote>“The team made everything easy and the results were excellent.”</blockquote>
+				<p>— A happy customer</p>
+				<span class="rs-widget-preview-link">Reviews-page link</span>
+			</div>
 		</div>
 		<p class="description rs-preview-note">This preview shows the colors visitors will see. Your live reviews remain unchanged.</p>
 	</div>
@@ -93,13 +99,15 @@ $preview_text_color = $options['dark_text'] ? $options['dark_text_color'] : '#3c
 		<div class="rs-sc-row">
 			<span class="rs-sc-name">Review invitation</span>
 			<span class="rs-sc-code">[rs_leave_reviews]</span>
-			<button type="button" class="button rs-btn-copy" data-copy="[rs_leave_reviews]">Copy</button>
+			<button type="button" class="button rs-btn-copy" data-copy="[rs_leave_reviews]" aria-describedby="rs-leave-reviews-copy-status">Copy</button>
+			<span class="screen-reader-text" id="rs-leave-reviews-copy-status" role="status" aria-live="polite"></span>
 		</div>
 		<p class="description">Adds five stars, a review invitation, and recent customer reviews.</p>
 		<div class="rs-sc-row">
 			<span class="rs-sc-name">All reviews</span>
 			<span class="rs-sc-code">[rs_all_reviews]</span>
-			<button type="button" class="button rs-btn-copy" data-copy="[rs_all_reviews]">Copy</button>
+			<button type="button" class="button rs-btn-copy" data-copy="[rs_all_reviews]" aria-describedby="rs-all-reviews-copy-status">Copy</button>
+			<span class="screen-reader-text" id="rs-all-reviews-copy-status" role="status" aria-live="polite"></span>
 		</div>
 		<p class="description">Adds the complete reviews experience to a dedicated page.</p>
 	</div>

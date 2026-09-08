@@ -30,7 +30,7 @@ if ( ! in_array( $tab, $valid_tabs, true ) ) {
 .rs-body { background:#f0f0f1!important; border:1px solid #c3c4c7!important; border-top:none!important; padding:20px!important; border-radius:0 0 4px 4px!important; }
 
 /* Section headings */
-.rs-section { font-size:11px!important; font-weight:700!important; text-transform:uppercase!important; letter-spacing:.08em!important; color:#646970!important; margin:20px 0 8px!important; padding:0 0 0 10px!important; border:none!important; border-left:3px solid #1877F2!important; line-height:1.4!important; }
+.rs-section { font-size:14px!important; font-weight:650!important; color:#50575e!important; margin:20px 0 8px!important; padding:0 0 0 10px!important; border:none!important; border-left:3px solid #1877F2!important; line-height:1.4!important; }
 .rs-section:first-child { margin-top:0!important; }
 
 /* Cards */
@@ -57,14 +57,24 @@ if ( ! in_array( $tab, $valid_tabs, true ) ) {
 .rs-url-box { display:flex!important; align-items:center!important; gap:8px!important; background:#f6f7f7!important; border:1px solid #dcdcde!important; border-radius:3px!important; padding:7px 10px!important; }
 .rs-url-box input[type="text"] { flex:1!important; border:none!important; background:transparent!important; box-shadow:none!important; font-family:ui-monospace,Consolas,monospace!important; font-size:12px!important; color:#646970!important; padding:0!important; min-width:0; }
 .rs-url-box input[type="text"]:focus { border:none!important; box-shadow:none!important; outline:none!important; }
+.rs-url-box input[type="text"]:focus-visible { outline:2px solid #2271b1!important; outline-offset:2px!important; }
 
 /* Submit area */
 .rs-submit { margin-top:16px!important; padding-top:14px!important; border-top:1px solid #f0f0f1!important; }
 
 /* Feedback */
 .rs-feedback { font-size:13px!important; margin-left:8px!important; }
-.rs-feedback.ok  { color:#00a32a!important; }
+.rs-feedback.ok  { color:#137333!important; }
 .rs-feedback.err { color:#d63638!important; }
+
+@media screen and (max-width:600px) {
+	.rs-body { padding:14px!important; }
+	.rs-card-body { padding-left:14px!important; padding-right:14px!important; }
+}
+
+@media (prefers-reduced-motion:reduce) {
+	.rs-body * { scroll-behavior:auto!important; transition-duration:.01ms!important; animation-duration:.01ms!important; animation-iteration-count:1!important; }
+}
 </style>
 
 <div class="wrap rs-page">

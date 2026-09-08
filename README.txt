@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.9.0
+Stable tag: 3.9.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -60,6 +60,17 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.9.1 - Client accessibility and interaction polish
+
+  - Bases client connection status on dashboard pairing and configured request authentication rather than a legacy ID alone.
+  - Labels older performance snapshots as the most recent verified results and shows the verified-through date.
+  - Makes dashboard-managed SEO Content view-only inside WordPress and removes technical bulk actions.
+  - Announces shortcode copy success and failure to assistive technology and restores keyboard focus after fallback copying.
+  - Adds visible color values, explicit control descriptions, and strong focus indicators.
+  - Reflows settings controls and shortcode rows cleanly on narrow screens.
+  - Marks result collections as semantic lists and makes the widget preview clearly illustrative rather than clickable.
+  - Moves the technical plugin version from the client Support page to the unlinked support route.
 
 3.9.0 - Client-facing content and review controls
 

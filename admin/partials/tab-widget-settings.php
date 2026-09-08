@@ -15,6 +15,7 @@ $options = Ratesight_Options::get_all();
 <div class="rs-card">
 	<div class="rs-card-body">
 		<p>These identifiers support legacy review widgets. Change them only when directed by Ratesight support.</p>
+		<p class="description">Installed plugin version: <?php echo esc_html( RATESIGHT_RELEASE_VERSION ); ?></p>
 		<form method="post" action="options.php">
 			<?php settings_fields( 'ratesight_options_widget_identity' ); ?>
 			<table class="form-table" role="presentation">
