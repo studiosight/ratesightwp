@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.9.1
+Stable tag: 3.9.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -60,6 +60,12 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.9.2 - Dashboard-managed identity bootstrap
+
+  - Allows a valid signed dashboard pairing request to set the Ratesight ID when a new installation has no local identity yet.
+  - Continues to refuse any attempt to replace a different existing Ratesight ID.
+  - Stores the identity only after the signed request, site origin, expiry, replay protection, and authentication mode have passed validation.
 
 3.9.1 - Client accessibility and interaction polish
 

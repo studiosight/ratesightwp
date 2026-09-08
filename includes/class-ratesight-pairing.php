@@ -58,7 +58,7 @@ PEM;
 		$stored_oid = trim( (string) Ratesight_Options::get( 'code_id' ) );
 		$local_site = self::normalize_origin( home_url( '/' ) );
 
-		if ( ! preg_match( '/^[0-9]{1,20}$/', $oid ) || $stored_oid === '' || ! hash_equals( $stored_oid, $oid ) ) {
+		if ( ! preg_match( '/^[0-9]{1,20}$/', $oid ) || ( $stored_oid !== '' && ! hash_equals( $stored_oid, $oid ) ) ) {
 			return self::error( 'rs_pairing_oid_mismatch', 409 );
 		}
 		if ( null === $site || null === $local_site || ! hash_equals( $local_site, $site ) ) {
@@ -77,6 +77,13 @@ PEM;
 			return self::error( 'rs_pairing_replayed', 409 );
 		}
 
+		if ( Ratesight_Request_Auth::mode() !== 'enforce_v2' ) {
+			$mode_result = Ratesight_Request_Auth::set_mode( 'observe_v2' );
+			if ( is_wp_error( $mode_result ) ) {
+				return $mode_result;
+			}
+		}
+
 		$previous = (string) get_option( 'ratesight_webhook_secret', '' );
 		if ( $previous !== '' && ! hash_equals( $previous, $secret ) ) {
 			update_option( 'ratesight_webhook_secret_previous', $previous, false );
@@ -84,10 +91,11 @@ PEM;
 		}
 		update_option( 'ratesight_webhook_secret', $secret, false );
 		delete_option( 'ratesight_auth_v2_readiness' );
-		if ( Ratesight_Request_Auth::mode() !== 'enforce_v2' ) {
-			$mode_result = Ratesight_Request_Auth::set_mode( 'observe_v2' );
-			if ( is_wp_error( $mode_result ) ) {
-				return $mode_result;
+
+		if ( $stored_oid === '' ) {
+			update_option( Ratesight_Options::option_name( 'code_id' ), $oid, false );
+			if ( ! hash_equals( $oid, trim( (string) Ratesight_Options::get( 'code_id' ) ) ) ) {
+				return self::error( 'rs_pairing_identity_store_failed', 500 );
 			}
 		}
 

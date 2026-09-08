@@ -3,10 +3,12 @@ define( 'ABSPATH', sys_get_temp_dir() . '/' );
 define( 'DAY_IN_SECONDS', 86400 );
 
 $options = array(
+	'wp_ratesight_code_id' => '2',
 	'ratesight_webhook_secret' => 'previous-secret-value',
 	'ratesight_auth_v2_readiness' => array( 'key_id' => 'stale', 'completed_at' => time() ),
 );
 $public_key = '';
+$fail_mode_update = false;
 
 class WP_Error {
 	public function __construct( private string $code, private string $message = '', private array $data = array() ) {}
@@ -21,11 +23,12 @@ class WP_REST_Response {
 	public function __construct( public array $data, public int $status ) {}
 }
 class Ratesight_Options {
-	public static function get( string $key ) { return $key === 'code_id' ? '2' : ''; }
+	public static function get( string $key ) { return $key === 'code_id' ? get_option( 'wp_ratesight_code_id', '' ) : ''; }
+	public static function option_name( string $key ): string { return $key === 'code_id' ? 'wp_ratesight_code_id' : ''; }
 }
 class Ratesight_Request_Auth {
 	public static function mode(): string { return (string) get_option( 'ratesight_auth_mode', 'legacy' ); }
-	public static function set_mode( string $mode ) { update_option( 'ratesight_auth_mode', $mode ); return true; }
+	public static function set_mode( string $mode ) { global $fail_mode_update; if ( $fail_mode_update ) return new WP_Error( 'rs_auth_mode_failed' ); update_option( 'ratesight_auth_mode', $mode ); return true; }
 	public static function key_id( string $secret ): string { return substr( hash( 'sha256', $secret ), 0, 16 ); }
 }
 function get_option( $name, $default = false ) { global $options; return $options[ $name ] ?? $default; }
@@ -83,6 +86,25 @@ $tampered = pairing_request();
 $tampered_request = new WP_REST_Request( $tampered->get_body() . ' ', array( 'x-ratesight-pairing-signature' => $tampered->get_header( 'x-ratesight-pairing-signature' ) ) );
 $invalid = Ratesight_Pairing::handle( $tampered_request );
 check_pairing_case( 'body tampering invalidates the signature before mutation', $invalid instanceof WP_Error && $invalid->get_error_code() === 'rs_pairing_signature_invalid' && get_option( 'ratesight_webhook_secret' ) === $before );
+
+delete_option( 'wp_ratesight_code_id' );
+$bootstrap = Ratesight_Pairing::handle( pairing_request( array( 'oid' => '170652' ) ) );
+check_pairing_case( 'signed dashboard pairing bootstraps a blank local Ratesight ID', $bootstrap instanceof WP_REST_Response && $bootstrap->status === 200 && get_option( 'wp_ratesight_code_id' ) === '170652' );
+
+$before = get_option( 'ratesight_webhook_secret' );
+$mismatch = Ratesight_Pairing::handle( pairing_request( array( 'oid' => '2' ) ) );
+check_pairing_case( 'dashboard pairing cannot silently rebind an existing Ratesight ID', $mismatch instanceof WP_Error && $mismatch->get_error_code() === 'rs_pairing_oid_mismatch' && get_option( 'wp_ratesight_code_id' ) === '170652' && get_option( 'ratesight_webhook_secret' ) === $before );
+
+delete_option( 'wp_ratesight_code_id' );
+$before = get_option( 'ratesight_webhook_secret' );
+$wrong_site_bootstrap = Ratesight_Pairing::handle( pairing_request( array( 'oid' => '2', 'site' => 'https://attacker.invalid' ) ) );
+check_pairing_case( 'site validation completes before a blank identity is stored', $wrong_site_bootstrap instanceof WP_Error && get_option( 'wp_ratesight_code_id', '' ) === '' && get_option( 'ratesight_webhook_secret' ) === $before );
+
+update_option( 'ratesight_auth_mode', 'legacy' );
+$fail_mode_update = true;
+$mode_failure = Ratesight_Pairing::handle( pairing_request( array( 'oid' => '2' ) ) );
+$fail_mode_update = false;
+check_pairing_case( 'authentication setup completes before a blank identity is stored', $mode_failure instanceof WP_Error && $mode_failure->get_error_code() === 'rs_auth_mode_failed' && get_option( 'wp_ratesight_code_id', '' ) === '' && get_option( 'ratesight_webhook_secret' ) === $before );
 
 echo $failures ? "{$failures} PAIRING CHECKS FAILED\n" : "ALL PAIRING CHECKS PASSED\n";
 exit( $failures ? 1 : 0 );
