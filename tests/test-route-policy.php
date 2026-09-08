@@ -11,6 +11,7 @@ function register_rest_route( $namespace, $path, $definitions ) {
 }
 require __DIR__ . '/../includes/class-ratesight-request-auth.php';
 require __DIR__ . '/../includes/class-ratesight-performance-snapshot.php';
+require __DIR__ . '/../includes/class-ratesight-pairing.php';
 require __DIR__ . '/../includes/class-ratesight-webhook-handler.php';
 require __DIR__ . '/../includes/class-ratesight-related-links.php';
 require __DIR__ . '/../includes/class-ratesight-page-api.php';
@@ -24,12 +25,17 @@ Ratesight_Page_Lifecycle::register_routes();
 Ratesight_Media_Alt::register_routes();
 Ratesight_IndexNow::register_routes();
 Ratesight_Performance_Snapshot::register_routes();
+Ratesight_Pairing::register_route();
 
 $failures = 0;
 foreach ( Ratesight_Request_Auth::ROUTE_POLICIES as $route => $policy ) {
 	$callback = $registered[ $route ] ?? null;
-	$method = $policy === 'public_bootstrap' ? 'authorize_public' : ( $policy === 'signed_read' ? 'authorize_read' : 'authorize_mutation' );
-	$ok = $callback === array( 'Ratesight_Request_Auth', $method );
+	if ( $policy === 'public_signed_bootstrap' ) {
+		$ok = $callback === '__return_true';
+	} else {
+		$method = $policy === 'public_bootstrap' ? 'authorize_public' : ( $policy === 'signed_read' ? 'authorize_read' : 'authorize_mutation' );
+		$ok = $callback === array( 'Ratesight_Request_Auth', $method );
+	}
 	echo ( $ok ? 'ok     ' : 'NOT OK ' ) . $route . ' => ' . $policy . PHP_EOL;
 	if ( ! $ok ) $failures++;
 }

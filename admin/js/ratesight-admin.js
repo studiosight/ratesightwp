@@ -69,67 +69,6 @@
 				} );
 		} );
 
-		// ── Send test request ─────────────────────────────────────────────────
-		$( '#rs-regen-secret' ).on( 'click', function () {
-			var isFirst = $( '#rs-webhook-secret' ).val() === '';
-			var msg = isFirst
-				? 'Generate a webhook secret for server-side rs-hmac-v2 signing?'
-				: 'Regenerate the webhook secret? The previous key remains valid for a seven-day rotation grace period.';
-			if ( ! confirm( msg ) ) return;
-			var $btn = $( this ).prop( 'disabled', true ).text( isFirst ? 'Generating…' : 'Regenerating…' );
-			$.post( ajax, { action: 'ratesight_regen_webhook_secret', nonce: nonce } )
-				.done( function ( r ) {
-					$btn.prop( 'disabled', false ).text( isFirst ? 'Generate Secret' : 'Regenerate' );
-					if ( r.success ) {
-						$( '#rs-webhook-secret' ).val( r.data.secret );
-						$( '#rs-webhook-secret-wrap' ).show();
-						$( '.rs-btn-copy[data-copy]' ).each( function() {
-							if ( $( this ).prev( 'input' ).is( '#rs-webhook-secret' ) ) {
-								$( this ).data( 'copy', r.data.secret ).attr( 'data-copy', r.data.secret );
-							}
-						} );
-					}
-				} )
-				.fail( function () { $btn.prop( 'disabled', false ); } );
-		} );
-
-		$( '#rs-save-auth-mode' ).on( 'click', function () {
-			var $btn = $( this ).prop( 'disabled', true );
-			var $feedback = $( '#rs-auth-mode-feedback' ).show().text( 'Saving…' );
-			$.post( ajax, { action: 'ratesight_set_auth_mode', nonce: nonce, mode: $( '#rs-auth-mode' ).val() } )
-				.done( function ( r ) {
-					$btn.prop( 'disabled', false );
-					$feedback.text( r.success ? 'Saved.' : ( r.data && r.data.message ? r.data.message : 'Could not save mode.' ) );
-					if ( r.success && r.data.auth ) $( '#rs-auth-mode' ).val( r.data.auth.mode );
-				} )
-				.fail( function ( xhr ) {
-					$btn.prop( 'disabled', false );
-					var data = xhr.responseJSON && xhr.responseJSON.data;
-					$feedback.text( data && data.message ? data.message : 'Could not save mode.' );
-				} );
-		} );
-
-		$( '#rs-send-test' ).on( 'click', function () {
-			var $btn      = $( this ).prop( 'disabled', true ).text( 'Sending…' );
-			var $feedback = $( '#rs-test-feedback' ).show().text( '' ).removeClass( 'rs-feedback-ok rs-feedback-err' );
-
-			$.post( ajax, { action: 'ratesight_send_test', nonce: nonce } )
-				.done( function ( r ) {
-					if ( r.success ) {
-						$feedback.addClass( 'rs-feedback-ok' ).html(
-							'✓ ' + r.data.message +
-							( r.data.post_url ? ' <a href="' + r.data.post_url + '" target="_blank">View post ↗</a>' : '' )
-						);
-					} else {
-						$feedback.addClass( 'rs-feedback-err' ).text( '✗ ' + ( r.data && r.data.message ? r.data.message : 'Unknown error.' ) );
-					}
-				} )
-				.fail( function () {
-					$feedback.addClass( 'rs-feedback-err' ).text( '✗ Request failed.' );
-				} )
-				.always( function () { $btn.prop( 'disabled', false ).text( 'Send Test Request' ); } );
-		} );
-
 		// ── Clear logs ────────────────────────────────────────────────────────
 		$( '#rs-clear-logs' ).on( 'click', function () {
 			if ( ! window.confirm( 'Delete all activity log entries? This cannot be undone.' ) ) {

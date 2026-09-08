@@ -52,7 +52,6 @@ class Ratesight {
 		$this->loader->add_action( 'wp_ajax_ratesight_retry_log',           $admin, 'ajax_retry_log'           );
 		$this->loader->add_action( 'wp_ajax_ratesight_retry_gbp',           $admin, 'ajax_retry_gbp'          );
 		$this->loader->add_action( 'wp_ajax_ratesight_recheck_pending',      $admin, 'ajax_recheck_pending'    );
-		$this->loader->add_action( 'wp_ajax_ratesight_send_test',           $admin, 'ajax_send_test'          );
 		// GBP connection
 		$this->loader->add_action( 'wp_ajax_ratesight_list_gbp',            $admin, 'ajax_list_gbp'           );
 		$this->loader->add_action( 'wp_ajax_ratesight_lock_gbp',            $admin, 'ajax_lock_gbp'           );
@@ -116,8 +115,6 @@ class Ratesight {
 		$this->loader->add_action( 'wp_ajax_ratesight_link_fix_targets',       $admin, 'ajax_link_fix_targets'       );
 		$this->loader->add_action( 'wp_ajax_ratesight_link_refresh_suggestions', $admin, 'ajax_link_refresh_suggestions' );
 		$this->loader->add_action( 'wp_ajax_ratesight_test_ai_worker',           $admin, 'ajax_test_ai_worker'           );
-		$this->loader->add_action( 'wp_ajax_ratesight_regen_webhook_secret',  $admin, 'ajax_regen_webhook_secret'  );
-		$this->loader->add_action( 'wp_ajax_ratesight_set_auth_mode',         $admin, 'ajax_set_auth_mode'         );
 		$this->loader->add_action( 'wp_ajax_ratesight_link_get_manual',       $admin, 'ajax_link_get_manual'       );
 		$this->loader->add_action( 'wp_ajax_ratesight_link_remove_manual',    $admin, 'ajax_link_remove_manual'    );
 		$this->loader->add_action( 'wp_ajax_ratesight_redirect_update',       $admin, 'ajax_redirect_update'       );
@@ -208,6 +205,7 @@ class Ratesight {
 		add_action( 'rest_api_init', array( 'Ratesight_Media_Alt', 'register_routes' ) );
 		add_action( 'rest_api_init', array( 'Ratesight_IndexNow', 'register_routes' ) );
 		add_action( 'rest_api_init', array( 'Ratesight_Performance_Snapshot', 'register_routes' ) );
+		add_action( 'rest_api_init', array( 'Ratesight_Pairing', 'register_route' ) );
 	}
 
 	private function define_cron_hooks() {

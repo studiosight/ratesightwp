@@ -40,6 +40,9 @@ class Ratesight_Bing_Client {
 	public static function is_connected(): bool { return true; }
 	public static function is_locked(): bool { return false; }
 }
+class Ratesight_Pairing {
+	public static function status(): array { return array( 'supported' => true, 'contract' => 'ratesight-wordpress-pairing-v1', 'source' => null, 'pairedAt' => null ); }
+}
 
 require __DIR__ . '/../includes/class-ratesight-request-auth.php';
 require __DIR__ . '/../includes/class-ratesight-webhook-handler.php';

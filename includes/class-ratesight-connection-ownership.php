@@ -144,10 +144,10 @@ class Ratesight_Connection_Ownership {
 			'ratesight_link_unlink', 'ratesight_list_gbp', 'ratesight_list_gsc', 'ratesight_load_bing_sites',
 			'ratesight_lock_bing_site', 'ratesight_lock_gbp', 'ratesight_lock_gsc', 'ratesight_preview_schema',
 			'ratesight_recheck_pending', 'ratesight_redirect_delete', 'ratesight_redirect_update',
-			'ratesight_regen_webhook_secret', 'ratesight_remove_schema', 'ratesight_reply_review',
+			'ratesight_remove_schema', 'ratesight_reply_review',
 			'ratesight_retry_gbp', 'ratesight_retry_log', 'ratesight_review_velocity', 'ratesight_rewrite_meta',
-			'ratesight_save_bing_key', 'ratesight_save_meta', 'ratesight_save_schema', 'ratesight_send_test',
-			'ratesight_set_auth_mode', 'ratesight_sitemap_status', 'ratesight_sync_bing_now',
+			'ratesight_save_bing_key', 'ratesight_save_meta', 'ratesight_save_schema',
+			'ratesight_sitemap_status', 'ratesight_sync_bing_now',
 			'ratesight_sync_gbp_now', 'ratesight_sync_gsc_finalise', 'ratesight_sync_gsc_keywords',
 			'ratesight_sync_gsc_now', 'ratesight_test_ai_worker', 'ratesight_update_secret_setting',
 		);
@@ -158,6 +158,7 @@ class Ratesight_Connection_Ownership {
 			'/auth-self-test' => array( 'GET' ), '/create-page' => array( 'POST', 'DELETE' ),
 			'/update-page' => array( 'GET', 'POST' ), '/redirect' => array( 'POST', 'DELETE' ),
 			'/capabilities' => array( 'GET' ), '/connection-status' => array( 'GET' ), '/redirects' => array( 'GET' ),
+			'/pair' => array( 'POST' ),
 			'/performance-snapshot' => array( 'GET', 'POST' ),
 			'/inbound-log' => array( 'GET' ), '/redirects-log' => array( 'GET' ),
 			'/related-links' => array( 'GET', 'POST', 'DELETE' ), '/page' => array( 'GET', 'POST' ),
@@ -170,7 +171,7 @@ class Ratesight_Connection_Ownership {
 			foreach ( $methods as $method ) {
 				$result[] = array(
 					'id' => $method . ' /ratesight/v1' . $path, 'type' => 'rest_route',
-					'source' => str_contains( $path, 'performance-snapshot' ) ? 'includes/class-ratesight-performance-snapshot.php' : ( str_contains( $path, 'related-links' ) ? 'includes/class-ratesight-related-links.php' : ( str_contains( $path, '/page' ) ? 'includes/class-ratesight-page-api.php' : ( str_contains( $path, 'trash-' ) || str_contains( $path, 'restore-' ) ? 'includes/class-ratesight-page-lifecycle.php' : 'includes/class-ratesight-webhook-handler.php' ) ) ),
+					'source' => str_contains( $path, 'performance-snapshot' ) ? 'includes/class-ratesight-performance-snapshot.php' : ( $path === '/pair' ? 'includes/class-ratesight-pairing.php' : ( str_contains( $path, 'related-links' ) ? 'includes/class-ratesight-related-links.php' : ( str_contains( $path, '/page' ) ? 'includes/class-ratesight-page-api.php' : ( str_contains( $path, 'trash-' ) || str_contains( $path, 'restore-' ) ? 'includes/class-ratesight-page-lifecycle.php' : 'includes/class-ratesight-webhook-handler.php' ) ) ) ),
 					'owner' => 'wordpress_plugin', 'state' => 'retained_wordpress', 'replacement' => null, 'proofType' => 'route_registration',
 					'reasonCode' => null, 'evidenceToUnblock' => null,
 				);

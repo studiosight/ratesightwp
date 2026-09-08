@@ -13,8 +13,10 @@ $o   = Ratesight_Options::get_all();
 $url        = rest_url( 'ratesight/v1/create-page' );
 $update_url = rest_url( 'ratesight/v1/update-page' );
 
-$webhook_secret = get_option( 'ratesight_webhook_secret', '' );
-$auth_mode      = Ratesight_Request_Auth::mode();
+$auth       = Ratesight_Request_Auth::capability_auth();
+$pairing    = Ratesight_Pairing::status();
+$ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
+$dashboard_url = $ratesight_id !== '' ? 'https://dash.ratesight.com/seo/' . rawurlencode( $ratesight_id ) . '/setup' : 'https://dash.ratesight.com/seo';
 ?>
 <form method="post" action="options.php">
 <?php settings_fields( 'ratesight_options_seo_pages' ); ?>
@@ -40,48 +42,14 @@ $auth_mode      = Ratesight_Request_Auth::mode();
 		</td>
 	</tr>
 	<tr>
-		<th scope="row">Webhook Secret</th>
+		<th scope="row">App Connection</th>
 		<td>
-			<?php if ( $webhook_secret ) : ?>
-			<div class="rs-url-box">
-				<input type="text" id="rs-webhook-secret" value="<?php echo esc_attr( $webhook_secret ); ?>" readonly style="font-family:monospace;">
-				<button type="button" class="button rs-btn-copy" data-copy="<?php echo esc_attr( $webhook_secret ); ?>">Copy</button>
-			</div>
-			<button type="button" class="button button-small" id="rs-regen-secret" style="margin-top:6px;">Regenerate</button>
-			<p class="description">
-				Protected requests use negotiated <code>rs-hmac-v2</code> headers that bind the method, route, query, timestamp, nonce, and raw body digest. A regenerated secret keeps the previous key valid for seven days.
-			</p>
-			<?php else : ?>
-			<button type="button" class="button" id="rs-regen-secret">Generate Secret</button>
-			<span id="rs-webhook-secret-wrap" style="display:none;margin-top:6px;">
-				<div class="rs-url-box">
-					<input type="text" id="rs-webhook-secret" value="" readonly style="font-family:monospace;">
-					<button type="button" class="button rs-btn-copy" data-copy="">Copy</button>
-				</div>
-			</span>
-			<p class="description">Generate a secret before enabling signed request observation or enforcement. The secret must be stored in the server-side integration credential store.</p>
-			<?php endif; ?>
-		</td>
-	</tr>
-	<tr>
-		<th scope="row">Request Authentication</th>
-		<td>
-			<select id="rs-auth-mode">
-				<option value="legacy" <?php selected( $auth_mode, 'legacy' ); ?>>Legacy compatibility</option>
-				<option value="observe_v2" <?php selected( $auth_mode, 'observe_v2' ); ?>>Observe rs-hmac-v2</option>
-				<option value="enforce_v2" <?php selected( $auth_mode, 'enforce_v2' ); ?>>Enforce rs-hmac-v2</option>
-			</select>
-			<button type="button" class="button" id="rs-save-auth-mode">Save Mode</button>
-			<span id="rs-auth-mode-feedback" class="rs-feedback" style="display:none;"></span>
-			<p class="description">Use Observe while validating callers, then Enforce. After enforcement, rollback is limited to Observe; Legacy cannot be restored silently or through this control.</p>
-		</td>
-	</tr>
-	<tr>
-		<th scope="row">Test Connection</th>
-		<td>
-			<button type="button" id="rs-send-test" class="button button-secondary">Send Test Request</button>
-			<span id="rs-test-feedback" class="rs-feedback" style="display:none;"></span>
-			<p class="description">In Observe or Enforce mode, runs a signed, server-side rs-hmac-v2 no-op through the REST handler. A successful test establishes the current-key readiness proof required for enforcement without exposing the secret to the browser.</p>
+			<strong><?php echo $auth['configured'] ? '<span style="color:#00a32a;">Paired</span>' : '<span style="color:#b32d2e;">Not paired</span>'; ?></strong>
+			&middot; mode <code><?php echo esc_html( $auth['mode'] ); ?></code>
+			<?php echo $auth['readiness_current'] ? ' &middot; signed readiness current' : ''; ?>
+			<?php echo $pairing['source'] === 'dashboard' ? ' &middot; dashboard managed' : ''; ?>
+			<p class="description">Pairing, rotation, and enforcement are managed in the Ratesight Dashboard. Secrets are never displayed or regenerated in WordPress.</p>
+			<p><a class="button button-primary" href="<?php echo esc_url( $dashboard_url ); ?>" target="_blank" rel="noopener">Manage Connection in Dashboard</a></p>
 		</td>
 	</tr>
 </table>

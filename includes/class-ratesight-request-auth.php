@@ -16,6 +16,7 @@ class Ratesight_Request_Auth {
 	private static $operational_candidates = array();
 	public const ROUTE_POLICIES = array(
 		'GET /ratesight/v1/capabilities' => 'public_bootstrap',
+		'POST /ratesight/v1/pair' => 'public_signed_bootstrap',
 		'GET /ratesight/v1/auth-self-test' => 'signed_read',
 		'GET /ratesight/v1/connection-status' => 'signed_read',
 		'GET /ratesight/v1/performance-snapshot' => 'signed_read',
@@ -309,14 +310,16 @@ class Ratesight_Request_Auth {
 
 	public static function prune_nonces(): void {
 		global $wpdb;
-		$like = $wpdb->esc_like( 'ratesight_auth_nonce_' ) . '%';
-		$rows = $wpdb->get_results( $wpdb->prepare(
-			"SELECT option_name, option_value FROM {$wpdb->options} WHERE option_name LIKE %s LIMIT 500",
-			$like
-		), ARRAY_A );
-		foreach ( (array) $rows as $row ) {
-			if ( (int) $row['option_value'] < time() ) {
-				delete_option( $row['option_name'] );
+		foreach ( array( 'ratesight_auth_nonce_', 'ratesight_pairing_nonce_' ) as $prefix ) {
+			$like = $wpdb->esc_like( $prefix ) . '%';
+			$rows = $wpdb->get_results( $wpdb->prepare(
+				"SELECT option_name, option_value FROM {$wpdb->options} WHERE option_name LIKE %s LIMIT 500",
+				$like
+			), ARRAY_A );
+			foreach ( (array) $rows as $row ) {
+				if ( (int) $row['option_value'] < time() ) {
+					delete_option( $row['option_name'] );
+				}
 			}
 		}
 	}
