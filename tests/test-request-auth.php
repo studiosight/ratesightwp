@@ -166,7 +166,10 @@ check_auth_case( 'enforce mode rejects valid legacy signature', error_code( Rate
 check_auth_case( 'enforce mode rejects unsigned mutation', error_code( Ratesight_Request_Auth::authorize_mutation( legacy_request( $fixture['secret'], '{}', false ) ) ) === 'rs_auth_version_required' );
 $options['ratesight_auth_mode'] = 'observe_v2';
 check_auth_case( 'observe mode accepts valid legacy signature', Ratesight_Request_Auth::authorize_mutation( legacy_request( $fixture['secret'] ) ) === true );
-check_auth_case( 'observe mode rejects unsigned mutation', error_code( Ratesight_Request_Auth::authorize_mutation( legacy_request( $fixture['secret'], '{}', false ) ) ) === 'rs_signature_required' );
+$observe_unsigned = Ratesight_Request_Auth::authorize_mutation( legacy_request( $fixture['secret'], '{}', false ) );
+$latest_auth_event = $options['ratesight_auth_audit'][ array_key_last( $options['ratesight_auth_audit'] ) ] ?? array();
+check_auth_case( 'observe mode preserves unsigned legacy mutation while recording migration evidence', $observe_unsigned === true && ( $latest_auth_event['result'] ?? '' ) === 'legacy_unsigned_observed' );
+check_auth_case( 'observe mode rejects an invalid supplied legacy signature', error_code( Ratesight_Request_Auth::authorize_mutation( new Auth_Request( 'POST', '/ratesight/v1/update-page', array(), '{}', array( 'x-ratesight-signature' => 'sha256=' . str_repeat( '0', 64 ) ) ) ) ) === 'rs_bad_signature' );
 $options['ratesight_auth_mode'] = 'legacy';
 unset( $options['ratesight_auth_ever_enforced'] );
 check_auth_case( 'legacy mode remains compatible with unsigned mutation', Ratesight_Request_Auth::authorize_mutation( legacy_request( $fixture['secret'], '{}', false ) ) === true );

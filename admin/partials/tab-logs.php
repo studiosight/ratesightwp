@@ -13,6 +13,8 @@ $status  = sanitize_key( wp_unslash( $_GET['rs_status'] ?? '' ) );  // phpcs:ign
 $logs    = Ratesight_Logger::get_recent_logs( 200, $search, $status );
 $days    = (int) Ratesight_Options::get( 'log_retention_days' );
 $current_url = admin_url( 'admin.php?page=ratesight&tab=logs' );
+$auth_events = get_option( 'ratesight_auth_audit', array() );
+$auth_events = is_array( $auth_events ) ? array_reverse( array_slice( $auth_events, -25 ) ) : array();
 
 $pills = array(
 	Ratesight_Logger::STATUS_PENDING          => array( 'Pending',  'pending'  ),
@@ -22,6 +24,29 @@ $pills = array(
 	Ratesight_Logger::STATUS_MODIFIED         => array( 'Modified', 'modified' ),
 );
 ?>
+
+<h2 class="rs-section">Request Diagnostics</h2>
+<div class="rs-card" style="margin-bottom:16px;">
+	<div class="rs-card-body" style="padding-top:14px;">
+		<?php if ( empty( $auth_events ) ) : ?>
+			<p style="margin:0;color:#d63638;"><strong>No recent webhook request reached Ratesight.</strong></p>
+			<p class="description">If the sender says it published, check that it posted to the exact URL on the Publishing page. A missing row means the request stopped in the sender, DNS, firewall, or web server before the plugin.</p>
+		<?php else : ?>
+			<p style="margin-top:0;"><strong>Recent requests reaching Ratesight</strong> <span class="description">— metadata only; request bodies, signatures, and secrets are never shown.</span></p>
+			<div style="overflow-x:auto;">
+			<table class="widefat striped">
+				<thead><tr><th>Time</th><th>Method</th><th>Route</th><th>Result</th></tr></thead>
+				<tbody><?php foreach ( $auth_events as $entry ) : ?><tr>
+					<td><?php echo esc_html( (string) ( $entry['time'] ?? '—' ) ); ?></td>
+					<td><?php echo esc_html( (string) ( $entry['method'] ?? '—' ) ); ?></td>
+					<td><code><?php echo esc_html( (string) ( $entry['route'] ?? '—' ) ); ?></code></td>
+					<td><code><?php echo esc_html( (string) ( $entry['result'] ?? 'unknown' ) ); ?></code></td>
+				</tr><?php endforeach; ?></tbody>
+			</table>
+			</div>
+		<?php endif; ?>
+	</div>
+</div>
 
 <form method="get" action="<?php echo esc_url( $current_url ); ?>" style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
 	<input type="hidden" name="page" value="ratesight">

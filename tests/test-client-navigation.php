@@ -14,6 +14,7 @@ $root = dirname( __DIR__ );
 $admin = file_get_contents( $root . '/admin/class-ratesight-admin.php' );
 $wrapper = file_get_contents( $root . '/admin/partials/page-wrapper.php' );
 $support = file_get_contents( $root . '/admin/partials/tab-support.php' );
+$logs = file_get_contents( $root . '/admin/partials/tab-logs.php' );
 
 $client_menu_start = strpos( $admin, '$client_tabs = array(' );
 $client_menu_end = strpos( $admin, ');', $client_menu_start );
@@ -27,6 +28,7 @@ check_client_navigation_case( 'duplicate in-page tab navigation is removed', ! s
 check_client_navigation_case( 'technical header chrome is removed', ! str_contains( $wrapper, 'Agency' ) && ! str_contains( $wrapper, 'rs-header-ver' ) && ! str_contains( $wrapper, 'rs-chips' ) && ! str_contains( $wrapper, 'detected_plugins()' ) );
 check_client_navigation_case( 'technical support routes remain available without primary links', str_contains( $wrapper, "'connections' => 'tab-connections.php'") && str_contains( $wrapper, "'seo-pages'   => 'tab-seo-pages.php'") && str_contains( $wrapper, "'links'       => 'tab-links.php'") && str_contains( $wrapper, "'logs'        => 'tab-logs.php'") && str_contains( $wrapper, "'help'        => 'tab-help.php'") && str_contains( $wrapper, "'widget-settings' => 'tab-widget-settings.php'") && ! str_contains( $client_menu, 'connections' ) && ! str_contains( $client_menu, 'links' ) && ! str_contains( $client_menu, 'help' ) && ! str_contains( $client_menu, 'widget-settings' ) );
 check_client_navigation_case( 'Support explains value without dashboard or auth internals', str_contains( $support, 'How Ratesight Helps' ) && str_contains( $support, 'support@ratesight.com' ) && ! preg_match( '/dashboard|webhook|auth mode|secret|credential/i', $support ) );
+check_client_navigation_case( 'Activity Log exposes sanitized arrival and authentication diagnostics', str_contains( $logs, 'Request Diagnostics' ) && str_contains( $logs, 'ratesight_auth_audit' ) && str_contains( $logs, 'request bodies, signatures, and secrets are never shown' ) );
 
 if ( $failures ) {
 	echo "\nFAIL — {$checks} checks, {$failures} failure(s)\n";
