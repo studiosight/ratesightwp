@@ -25,29 +25,6 @@ $pills = array(
 );
 ?>
 
-<h2 class="rs-section">Request Diagnostics</h2>
-<div class="rs-card" style="margin-bottom:16px;">
-	<div class="rs-card-body" style="padding-top:14px;">
-		<?php if ( empty( $auth_events ) ) : ?>
-			<p style="margin:0;color:#d63638;"><strong>No recent webhook request reached Ratesight.</strong></p>
-			<p class="description">If the sender says it published, check that it posted to the exact URL on the Publishing page. A missing row means the request stopped in the sender, DNS, firewall, or web server before the plugin.</p>
-		<?php else : ?>
-			<p style="margin-top:0;"><strong>Recent requests reaching Ratesight</strong> <span class="description">— metadata only; request bodies, signatures, and secrets are never shown.</span></p>
-			<div style="overflow-x:auto;">
-			<table class="widefat striped">
-				<thead><tr><th>Time</th><th>Method</th><th>Route</th><th>Result</th></tr></thead>
-				<tbody><?php foreach ( $auth_events as $entry ) : ?><tr>
-					<td><?php echo esc_html( (string) ( $entry['time'] ?? '—' ) ); ?></td>
-					<td><?php echo esc_html( (string) ( $entry['method'] ?? '—' ) ); ?></td>
-					<td><code><?php echo esc_html( (string) ( $entry['route'] ?? '—' ) ); ?></code></td>
-					<td><code><?php echo esc_html( (string) ( $entry['result'] ?? 'unknown' ) ); ?></code></td>
-				</tr><?php endforeach; ?></tbody>
-			</table>
-			</div>
-		<?php endif; ?>
-	</div>
-</div>
-
 <form method="get" action="<?php echo esc_url( $current_url ); ?>" style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
 	<input type="hidden" name="page" value="ratesight">
 	<input type="hidden" name="tab"  value="logs">
@@ -147,3 +124,26 @@ $pills = array(
 		</table>
 	</div>
 <?php endif; ?>
+
+<details class="rs-card" style="margin-top:16px;">
+	<summary class="rs-card-body" style="cursor:pointer;padding-top:14px;padding-bottom:14px;"><strong>Webhook Request Diagnostics</strong> <span class="description">— technical request-arrival details</span></summary>
+	<div class="rs-card-body" style="padding-top:0;">
+		<?php if ( empty( $auth_events ) ) : ?>
+			<p style="margin:0;color:#d63638;"><strong>No recent webhook request reached Ratesight.</strong></p>
+			<p class="description">If the sender says it published, check that it posted to the exact URL on the Publishing page. A missing row means the request stopped in the sender, DNS, firewall, or web server before the plugin.</p>
+		<?php else : ?>
+			<p style="margin-top:0;"><strong>Recent requests reaching Ratesight</strong> <span class="description">— metadata only; request bodies, signatures, and secrets are never shown.</span></p>
+			<div style="overflow-x:auto;">
+			<table class="widefat striped">
+				<thead><tr><th>Time</th><th>Method</th><th>Route</th><th>Result</th></tr></thead>
+				<tbody><?php foreach ( $auth_events as $entry ) : ?><tr>
+					<td><?php echo esc_html( (string) ( $entry['time'] ?? '—' ) ); ?></td>
+					<td><?php echo esc_html( (string) ( $entry['method'] ?? '—' ) ); ?></td>
+					<td><code><?php echo esc_html( (string) ( $entry['route'] ?? '—' ) ); ?></code></td>
+					<td><code><?php echo esc_html( (string) ( $entry['result'] ?? 'unknown' ) ); ?></code></td>
+				</tr><?php endforeach; ?></tbody>
+			</table>
+			</div>
+		<?php endif; ?>
+	</div>
+</details>
