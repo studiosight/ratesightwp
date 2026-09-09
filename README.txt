@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.11.3
+Stable tag: 3.12.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -66,6 +66,11 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.12.0 - Approval-first dashboard enrollment
+
+  - Announces eligible OID-bound installations to the Ratesight dashboard without provider credentials.
+  - Proves site ownership through a stable installation key before an operator can approve pairing.
 
 3.11.3 - Restore Activity Log layout
 

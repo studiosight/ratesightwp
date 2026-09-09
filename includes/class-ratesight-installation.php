@@ -101,6 +101,9 @@ class Ratesight_Installation {
 			'ratesight_dashboard_performance_snapshot',
 			'ratesight_pairing_receipt',
 			'ratesight_plugin_update_receipt',
+			'ratesight_enrollment_installation_id',
+			'ratesight_enrollment_private_key',
+			'ratesight_enrollment_receipt',
 		) );
 		foreach ( array( 'gbp', 'gsc' ) as $service ) {
 			foreach ( array( 'oauth', 'selection', 'locked', 'revoked', 'disconnect_reason', 'refresh_error', 'scope_error' ) as $suffix ) {
@@ -118,7 +121,7 @@ class Ratesight_Installation {
 			'postMeta'          => array( '_ratesight_layout', '_ratesight_meta_description', '_ratesight_meta_title', '_ratesight_related_links', '_ratesight_show_title', '_ratesight_publication_event_sequence', '_rs_content_hash', '_rs_created', '_rs_custom_css_url', '_rs_layout', '_rs_manual_links', '_rs_meta_description', '_rs_meta_title', '_rs_pre_update_snapshot', '_rs_schema', '_rs_show_title' ),
 			'userMeta'          => array( 'ratesight_wizard_dismissed' ),
 			'transientPrefixes' => array( 'rs_', 'ratesight_' ),
-			'cronHooks'         => array( 'ratesight_prune_logs', 'ratesight_sync_gsc', 'ratesight_sync_gbp_performance', 'ratesight_sync_bing', 'ratesight_retry_pending', 'ratesight_check_broken_links', 'ratesight_redirect_health', 'ratesight_prune_auth_nonces', 'ratesight_daily_digest', 'ratesight_process_bulk_queue', 'ratesight_bulk_publish_batch', 'ratesight_deferred_publish' ),
+			'cronHooks'         => array( 'ratesight_prune_logs', 'ratesight_sync_gsc', 'ratesight_sync_gbp_performance', 'ratesight_sync_bing', 'ratesight_retry_pending', 'ratesight_check_broken_links', 'ratesight_redirect_health', 'ratesight_prune_auth_nonces', 'ratesight_daily_digest', 'ratesight_process_bulk_queue', 'ratesight_bulk_publish_batch', 'ratesight_deferred_publish', 'ratesight_enrollment_retry' ),
 		);
 	}
 

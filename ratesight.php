@@ -3,7 +3,7 @@
  * Plugin Name:       Ratesight
  * Plugin URI:        https://ratesight.com
  * Description:       Review widgets, shortcodes, and AI-powered SEO page creation via webhook.
- * Version:           3.11.3
+ * Version:           3.12.0
  * Requires at least: 5.9
  * Requires PHP:      8.0
  * Author:            Ratesight
@@ -18,7 +18,7 @@
 
 defined( 'WPINC' ) || die;
 
-define( 'RATESIGHT_RELEASE_VERSION', '3.11.3' );
+define( 'RATESIGHT_RELEASE_VERSION', '3.12.0' );
 define( 'RATESIGHT_VERSION', RATESIGHT_RELEASE_VERSION . '.' . filemtime( __FILE__ ) );
 define( 'RATESIGHT_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'RATESIGHT_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -78,6 +78,7 @@ foreach ( array(
 	'includes/class-ratesight-request-auth.php',
 	'includes/class-ratesight-publication-events.php',
 	'includes/class-ratesight-pairing.php',
+	'includes/class-ratesight-enrollment.php',
 	'includes/class-ratesight-release-update.php',
 	'includes/class-ratesight-performance-snapshot.php',
 	'includes/class-ratesight-webhook-handler.php',
@@ -181,6 +182,11 @@ add_filter( 'sq_custom_robots',         [ $_rs_sitemap, 'add_to_squirrly_robots'
 // do_feed_{type} before rendering — hook here to serve our XML instead.
 add_action( 'do_feed_sitemap-rs-pages', [ $_rs_sitemap, 'serve_squirrly'         ], 1 );
 unset( $_rs_sitemap );
+
+// Enrollment must remain available before pairing and regardless of license state.
+add_action( 'rest_api_init', array( Ratesight_Enrollment::class, 'register_route' ) );
+add_action( Ratesight_Enrollment::RETRY_HOOK, array( Ratesight_Enrollment::class, 'send' ) );
+add_action( 'updated_option', array( Ratesight_Enrollment::class, 'option_updated' ), 10, 3 );
 
 // ---------------------------------------------------------------------------
 // License gate — if enforcement is on and the license is invalid, the plugin
