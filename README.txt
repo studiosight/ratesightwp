@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.10.5
+Stable tag: 3.10.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -60,6 +60,10 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.10.6 - End-to-end managed update proof
+
+  - Advances the version to verify that the dashboard can update an active Ratesight installation without manual WordPress recovery.
 
 3.10.5 - Active plugin update lifecycle
 
