@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.11.2
+Stable tag: 3.11.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -66,6 +66,10 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.11.3 - Restore Activity Log layout
+
+  - Keeps the original Activity Log as the primary view and moves technical request diagnostics into a collapsed section below it.
 
 3.11.2 - Preserve CRM publishing during signed-auth observation
 
