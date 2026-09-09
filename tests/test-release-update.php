@@ -7,6 +7,7 @@ define( 'RATESIGHT_PLUGIN_DIR', sys_get_temp_dir() . '/wp-content/plugins/ratesi
 $control_signature_valid = true;
 $dashboard_connected = true;
 $file_modifications_allowed = true;
+$wp_doing_cron_filter = null;
 
 class WP_Error {
 	public function __construct( private string $code, private string $message = '', private array $data = array() ) {}
@@ -22,6 +23,7 @@ class WP_REST_Request {
 class WP_REST_Server { public const CREATABLE = 'POST'; }
 class WP_Automatic_Updater {
 	public function should_update( $type, $item, $context ) { return false; }
+	public function update( $type, $item ) { return wp_doing_cron(); }
 }
 class Ratesight_Request_Auth { public static function authorize_mutation() { return true; } }
 class Ratesight_Pairing {
@@ -33,6 +35,18 @@ function wp_is_file_mod_allowed() { global $file_modifications_allowed; return $
 function untrailingslashit( $value ) { return rtrim( $value, '/\\' ); }
 function is_wp_error( $value ) { return $value instanceof WP_Error; }
 function register_rest_route() {}
+function add_filter( $hook, $callback, $priority = 10 ) {
+	global $wp_doing_cron_filter;
+	if ( $hook === 'wp_doing_cron' ) $wp_doing_cron_filter = $callback;
+}
+function remove_filter( $hook, $callback, $priority = 10 ) {
+	global $wp_doing_cron_filter;
+	if ( $hook === 'wp_doing_cron' && $wp_doing_cron_filter === $callback ) $wp_doing_cron_filter = null;
+}
+function wp_doing_cron() {
+	global $wp_doing_cron_filter;
+	return is_callable( $wp_doing_cron_filter ) ? (bool) $wp_doing_cron_filter( false ) : false;
+}
 function get_plugin_data( $file ) {
 	$contents = file_get_contents( $file );
 	preg_match( '/Plugin Name:\s*(.+)/', $contents, $name );
@@ -98,6 +112,8 @@ check_release_case( 'apply requires literal confirmation', $unconfirmed instance
 check_release_case( 'confirmed apply bypasses background-update eligibility policy', $explicit_updater->should_update( 'plugin', (object) array(), '' ) === true );
 check_release_case( 'explicit updater remains scoped to plugin updates', $explicit_updater->should_update( 'theme', (object) array(), '' ) === false );
 check_release_case( 'confirmed apply no longer depends on the auto-update preference filter', ! str_contains( $release_source, "add_filter( 'auto_update_plugin'" ) );
+check_release_case( 'managed update runs with the WordPress background lifecycle', $explicit_updater->update( 'plugin', (object) array() ) === true );
+check_release_case( 'background lifecycle scope is removed after the update', wp_doing_cron() === false );
 
 $package = sys_get_temp_dir() . '/ratesight-package-' . bin2hex( random_bytes( 8 ) );
 mkdir( $package . '/ratesight', 0777, true );

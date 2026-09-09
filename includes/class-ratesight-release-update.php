@@ -190,6 +190,18 @@ class Ratesight_Release_Update {
 			public function should_update( $type, $item, $context ) {
 				return $type === 'plugin';
 			}
+
+			public function update( $type, $item ) {
+				$run_as_background = static function () {
+					return true;
+				};
+				add_filter( 'wp_doing_cron', $run_as_background, PHP_INT_MAX );
+				try {
+					return parent::update( $type, $item );
+				} finally {
+					remove_filter( 'wp_doing_cron', $run_as_background, PHP_INT_MAX );
+				}
+			}
 		};
 	}
 
