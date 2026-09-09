@@ -150,14 +150,9 @@ class Ratesight_Release_Update {
 			$updates->response = isset( $updates->response ) && is_array( $updates->response ) ? $updates->response : array();
 			$updates->response[ self::PLUGIN_BASENAME ] = $offer;
 			set_site_transient( 'update_plugins', $updates );
-			$allow = static function ( $allowed, $item ) use ( $offer ) {
-				return is_object( $item ) && ( $item->id ?? '' ) === $offer->id ? true : $allowed;
-			};
-			add_filter( 'auto_update_plugin', $allow, PHP_INT_MAX, 2 );
 			try {
-				$result = ( new \WP_Automatic_Updater() )->update( 'plugin', $offer );
+				$result = self::explicit_updater()->update( 'plugin', $offer );
 			} finally {
-				remove_filter( 'auto_update_plugin', $allow, PHP_INT_MAX );
 				if ( false === $updates_before ) delete_site_transient( 'update_plugins' );
 				else set_site_transient( 'update_plugins', $updates_before );
 			}
@@ -188,6 +183,14 @@ class Ratesight_Release_Update {
 			if ( is_string( $package ) && file_exists( $package ) ) wp_delete_file( $package );
 			\WP_Upgrader::release_lock( 'ratesight_plugin_update' );
 		}
+	}
+
+	private static function explicit_updater(): \WP_Automatic_Updater {
+		return new class() extends \WP_Automatic_Updater {
+			public function should_update( $type, $item, $context ) {
+				return $type === 'plugin';
+			}
+		};
 	}
 
 	private static function inspect_package( string $package, string $version ) {

@@ -20,6 +20,9 @@ class WP_REST_Request {
 	public function get_json_params(): array { return $this->params; }
 }
 class WP_REST_Server { public const CREATABLE = 'POST'; }
+class WP_Automatic_Updater {
+	public function should_update( $type, $item, $context ) { return false; }
+}
 class Ratesight_Request_Auth { public static function authorize_mutation() { return true; } }
 class Ratesight_Pairing {
 	public static function verify_control_plane_signature( string $body, string $signature ): bool { global $control_signature_valid; return $control_signature_valid; }
@@ -38,6 +41,10 @@ function get_plugin_data( $file ) {
 }
 
 require __DIR__ . '/../includes/class-ratesight-release-update.php';
+
+$release_source = file_get_contents( __DIR__ . '/../includes/class-ratesight-release-update.php' );
+$updater_method = new ReflectionMethod( Ratesight_Release_Update::class, 'explicit_updater' );
+$explicit_updater = $updater_method->invoke( null );
 
 function release_request( array $overrides = array(), string $action = 'preflight', bool $confirm = false ): WP_REST_Request {
 	$manifest = array_merge( array(
@@ -88,6 +95,9 @@ $control_signature_valid = true;
 check_release_case( 'unknown release signer is refused', $unsigned instanceof WP_Error && $unsigned->get_error_code() === 'rs_release_signature_invalid' );
 $unconfirmed = Ratesight_Release_Update::handle( release_request( array(), 'apply' ) );
 check_release_case( 'apply requires literal confirmation', $unconfirmed instanceof WP_Error && $unconfirmed->get_error_code() === 'rs_release_confirmation_required' );
+check_release_case( 'confirmed apply bypasses background-update eligibility policy', $explicit_updater->should_update( 'plugin', (object) array(), '' ) === true );
+check_release_case( 'explicit updater remains scoped to plugin updates', $explicit_updater->should_update( 'theme', (object) array(), '' ) === false );
+check_release_case( 'confirmed apply no longer depends on the auto-update preference filter', ! str_contains( $release_source, "add_filter( 'auto_update_plugin'" ) );
 
 $package = sys_get_temp_dir() . '/ratesight-package-' . bin2hex( random_bytes( 8 ) );
 mkdir( $package . '/ratesight', 0777, true );
