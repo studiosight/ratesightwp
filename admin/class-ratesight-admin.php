@@ -116,8 +116,10 @@ class Ratesight_Admin {
 
 		$base = 'admin.php?page=ratesight&tab=';
 		$client_tabs = array(
-			'widgets' => 'Reviews & Widgets',
-			'support' => 'Support',
+			'seo-pages' => 'Publishing',
+			'logs'      => 'Activity Log',
+			'widgets'   => 'Reviews & Widgets',
+			'support'   => 'Support',
 		);
 
 		$overview = null;
@@ -169,7 +171,7 @@ class Ratesight_Admin {
 			return $submenu_file;
 		}
 
-		if ( in_array( $tab, array( 'widgets', 'support' ), true ) ) {
+		if ( in_array( $tab, array( 'seo-pages', 'logs', 'widgets', 'support' ), true ) ) {
 			return 'admin.php?page=ratesight&tab=' . $tab;
 		}
 

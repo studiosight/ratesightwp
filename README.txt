@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.11.0
+Stable tag: 3.11.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -26,13 +26,19 @@ Combines two Ratesight products into a single, unified plugin:
 
 CLIENT MENU
 -----------
-The client-facing menu has four destinations:
+The client-facing menu has six destinations:
 
   Overview
     - Positive search, local visibility, and completed-work results
 
   SEO Content
     - Published search-focused service and location content
+
+  Publishing
+    - Exact site-specific webhook URLs and publishing defaults
+
+  Activity Log
+    - Webhook successes, warnings, failures, payload diagnostics, and retries
 
   Reviews & Widgets
     - Reviews-page selection, a live style preview, appearance controls,
@@ -60,6 +66,12 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.11.1 - Restore publishing diagnostics
+
+  - Restores Publishing and Activity Log to the WordPress admin menu.
+  - Shows the exact site-specific webhook URL without exposing provider credentials.
+  - Restores failed-request diagnostics, filtering, and retry controls.
 
 3.11.0 - Dashboard-owned blog publication events
 
