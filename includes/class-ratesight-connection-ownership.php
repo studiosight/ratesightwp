@@ -159,6 +159,7 @@ class Ratesight_Connection_Ownership {
 			'/update-page' => array( 'GET', 'POST' ), '/redirect' => array( 'POST', 'DELETE' ),
 			'/capabilities' => array( 'GET' ), '/connection-status' => array( 'GET' ), '/redirects' => array( 'GET' ),
 			'/pair' => array( 'POST' ),
+			'/enrollment-challenge' => array( 'POST' ),
 			'/plugin-update' => array( 'POST' ),
 			'/performance-snapshot' => array( 'GET', 'POST' ),
 			'/inbound-log' => array( 'GET' ), '/redirects-log' => array( 'GET' ),
@@ -172,7 +173,7 @@ class Ratesight_Connection_Ownership {
 			foreach ( $methods as $method ) {
 				$result[] = array(
 					'id' => $method . ' /ratesight/v1' . $path, 'type' => 'rest_route',
-					'source' => str_contains( $path, 'performance-snapshot' ) ? 'includes/class-ratesight-performance-snapshot.php' : ( $path === '/pair' ? 'includes/class-ratesight-pairing.php' : ( $path === '/plugin-update' ? 'includes/class-ratesight-release-update.php' : ( str_contains( $path, 'related-links' ) ? 'includes/class-ratesight-related-links.php' : ( str_contains( $path, '/page' ) ? 'includes/class-ratesight-page-api.php' : ( str_contains( $path, 'trash-' ) || str_contains( $path, 'restore-' ) ? 'includes/class-ratesight-page-lifecycle.php' : 'includes/class-ratesight-webhook-handler.php' ) ) ) ) ),
+					'source' => str_contains( $path, 'performance-snapshot' ) ? 'includes/class-ratesight-performance-snapshot.php' : ( $path === '/pair' ? 'includes/class-ratesight-pairing.php' : ( $path === '/enrollment-challenge' ? 'includes/class-ratesight-enrollment.php' : ( $path === '/plugin-update' ? 'includes/class-ratesight-release-update.php' : ( str_contains( $path, 'related-links' ) ? 'includes/class-ratesight-related-links.php' : ( str_contains( $path, '/page' ) ? 'includes/class-ratesight-page-api.php' : ( str_contains( $path, 'trash-' ) || str_contains( $path, 'restore-' ) ? 'includes/class-ratesight-page-lifecycle.php' : 'includes/class-ratesight-webhook-handler.php' ) ) ) ) ) ),
 					'owner' => 'wordpress_plugin', 'state' => 'retained_wordpress', 'replacement' => null, 'proofType' => 'route_registration',
 					'reasonCode' => null, 'evidenceToUnblock' => null,
 				);
@@ -237,6 +238,7 @@ class Ratesight_Connection_Ownership {
 			'includes/class-ratesight-oauth-client.php::handle_token_return:wp_remote_post#1' => 'provider_write',
 			'includes/class-ratesight-oauth-client.php::refresh_via_worker:wp_remote_post#1' => 'external_worker_write',
 			'includes/class-ratesight-publication-events.php::send:wp_remote_post#1' => 'dashboard_event_write',
+			'includes/class-ratesight-enrollment.php::send:wp_remote_post#1' => 'dashboard_enrollment_write',
 			'includes/class-ratesight-publisher.php::auto_submit_to_bing:wp_remote_post#1' => 'external_worker_write',
 			'includes/class-ratesight-redirect-health.php::check_url:wp_remote_head#1' => 'external_http_read',
 			'includes/class-ratesight-redirect-health.php::check_url:wp_remote_head#2' => 'external_http_read',

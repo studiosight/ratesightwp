@@ -26,13 +26,22 @@ class Ratesight_Release_Update {
 	public static function handle( \WP_REST_Request $request ) {
 		$params = $request->get_json_params();
 		$action = is_array( $params ) ? (string) ( $params['action'] ?? '' ) : '';
-		if ( ! in_array( $action, array( 'preflight', 'apply' ), true ) ) {
+		if ( ! in_array( $action, array( 'preflight', 'apply', 'rollback' ), true ) ) {
 			return self::error( 'rs_release_action_invalid', 400 );
 		}
 
 		$manifest = self::validated_manifest( $params );
 		if ( is_wp_error( $manifest ) ) {
 			return $manifest;
+		}
+
+		$operation_id = is_array( $params ) ? (string) ( $params['operationId'] ?? '' ) : '';
+		if ( in_array( $action, array( 'apply', 'rollback' ), true ) && ! preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/', $operation_id ) ) {
+			return self::error( 'rs_release_operation_invalid', 400 );
+		}
+		if ( 'rollback' === $action ) {
+			if ( ( $params['confirm'] ?? null ) !== true ) return self::error( 'rs_release_confirmation_required', 409 );
+			return self::rollback_release( $manifest, $operation_id );
 		}
 
 		$preflight = self::preflight_result( $manifest );
@@ -46,7 +55,7 @@ class Ratesight_Release_Update {
 			return new \WP_REST_Response( $preflight, 409 );
 		}
 
-		return self::apply_release( $manifest, $preflight );
+		return self::apply_release( $manifest, $preflight, $operation_id );
 	}
 
 	private static function validated_manifest( $params ) {
@@ -110,7 +119,7 @@ class Ratesight_Release_Update {
 		);
 	}
 
-	private static function apply_release( array $manifest, array $preflight ) {
+	private static function apply_release( array $manifest, array $preflight, string $operation_id ) {
 		require_once ABSPATH . 'wp-admin/includes/file.php';
 		require_once ABSPATH . 'wp-admin/includes/plugin.php';
 		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
@@ -121,8 +130,11 @@ class Ratesight_Release_Update {
 			return self::error( 'rs_release_update_locked', 409 );
 		}
 
-		$package = null;
+		$package       = null;
+		$retain_backup = false;
 		try {
+			$backup = self::backup_plugin( $operation_id );
+			if ( is_wp_error( $backup ) ) return $backup;
 			$package = download_url( $manifest['assetUrl'], 60 );
 			if ( is_wp_error( $package ) || ! is_string( $package ) ) {
 				return self::error( 'rs_release_download_failed', 502 );
@@ -165,11 +177,13 @@ class Ratesight_Release_Update {
 				return self::error( 'rs_release_post_update_version_mismatch', 500 );
 			}
 			update_option( 'ratesight_plugin_update_receipt', array(
+				'operation_id'  => $operation_id,
 				'from_version'   => $preflight['currentVersion'],
 				'to_version'     => $manifest['version'],
 				'manifest_digest' => $manifest['manifestDigest'],
 				'applied_at'     => time(),
 			), false );
+			$retain_backup = true;
 			return new \WP_REST_Response( array(
 				'ok'               => true,
 				'contract'         => self::CONTRACT,
@@ -181,8 +195,62 @@ class Ratesight_Release_Update {
 			), 200 );
 		} finally {
 			if ( is_string( $package ) && file_exists( $package ) ) wp_delete_file( $package );
+			if ( ! $retain_backup ) self::delete_backup( $operation_id );
 			\WP_Upgrader::release_lock( 'ratesight_plugin_update' );
 		}
+	}
+
+	private static function backup_directory( string $operation_id ): string {
+		return trailingslashit( WP_CONTENT_DIR ) . 'upgrade/ratesight-rollback-' . $operation_id;
+	}
+
+	private static function backup_plugin( string $operation_id ) {
+		global $wp_filesystem;
+		if ( ! WP_Filesystem() ) return self::error( 'rs_release_filesystem_unavailable', 503 );
+		$prior = get_option( 'ratesight_plugin_update_receipt', array() );
+		$prior_operation = is_array( $prior ) ? (string) ( $prior['operation_id'] ?? '' ) : '';
+		if ( $prior_operation !== $operation_id && preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/', $prior_operation ) ) self::delete_backup( $prior_operation );
+		$backup = self::backup_directory( $operation_id );
+		if ( $wp_filesystem->exists( $backup ) ) $wp_filesystem->delete( $backup, true );
+		if ( ! wp_mkdir_p( dirname( $backup ) ) ) return self::error( 'rs_release_backup_failed', 500 );
+		$result = copy_dir( untrailingslashit( RATESIGHT_PLUGIN_DIR ), $backup );
+		return is_wp_error( $result ) ? self::error( 'rs_release_backup_failed', 500 ) : $backup;
+	}
+
+	private static function delete_backup( string $operation_id ): void {
+		global $wp_filesystem;
+		if ( WP_Filesystem() ) $wp_filesystem->delete( self::backup_directory( $operation_id ), true );
+	}
+
+	private static function rollback_release( array $manifest, string $operation_id ) {
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		global $wp_filesystem;
+		$receipt = get_option( 'ratesight_plugin_update_receipt', array() );
+		if ( ! is_array( $receipt ) || ! hash_equals( (string) ( $receipt['operation_id'] ?? '' ), $operation_id )
+			|| ! hash_equals( (string) ( $receipt['to_version'] ?? '' ), $manifest['version'] ) ) return self::error( 'rs_release_rollback_receipt_invalid', 409 );
+		if ( ! WP_Filesystem() ) return self::error( 'rs_release_filesystem_unavailable', 503 );
+		$backup = self::backup_directory( $operation_id );
+		$current = untrailingslashit( RATESIGHT_PLUGIN_DIR );
+		$failed = trailingslashit( WP_CONTENT_DIR ) . 'upgrade/ratesight-failed-' . $operation_id;
+		if ( ! $wp_filesystem->is_dir( $backup ) ) return self::error( 'rs_release_rollback_backup_missing', 409 );
+		if ( $wp_filesystem->exists( $failed ) ) $wp_filesystem->delete( $failed, true );
+		if ( ! $wp_filesystem->move( $current, $failed, true ) ) return self::error( 'rs_release_rollback_failed', 500 );
+		if ( ! $wp_filesystem->move( $backup, $current, true ) ) {
+			$wp_filesystem->move( $failed, $current, true );
+			return self::error( 'rs_release_rollback_failed', 500 );
+		}
+		$installed = get_plugin_data( WP_PLUGIN_DIR . '/' . self::PLUGIN_BASENAME, false, false );
+		if ( (string) ( $installed['Version'] ?? '' ) !== (string) ( $receipt['from_version'] ?? '' ) ) return self::error( 'rs_release_rollback_version_mismatch', 500 );
+		$wp_filesystem->delete( $failed, true );
+		delete_option( 'ratesight_plugin_update_receipt' );
+		return new \WP_REST_Response( array(
+			'ok'              => true,
+			'contract'        => self::CONTRACT,
+			'rolledBack'      => true,
+			'failedVersion'   => $manifest['version'],
+			'restoredVersion' => (string) $receipt['from_version'],
+		), 200 );
 	}
 
 	private static function explicit_updater(): \WP_Automatic_Updater {

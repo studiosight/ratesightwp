@@ -16,6 +16,7 @@ class Ratesight_Activator {
 		self::create_or_upgrade_tables();
 		Ratesight_Options::migrate_legacy();
 		self::schedule_cron();
+		Ratesight_Enrollment::schedule_retry( 60 );
 		self::ensure_loads_first();
 		self::clear_squirrly_sitemap_cache();
 	}

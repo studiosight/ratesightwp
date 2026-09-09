@@ -1,13 +1,20 @@
 <?php
 
-define( 'ABSPATH', sys_get_temp_dir() . '/' );
+$release_test_root = sys_get_temp_dir() . '/ratesight-release-test-' . getmypid();
+mkdir( $release_test_root . '/wp-admin/includes', 0777, true );
+file_put_contents( $release_test_root . '/wp-admin/includes/file.php', "<?php\n" );
+file_put_contents( $release_test_root . '/wp-admin/includes/plugin.php', "<?php\n" );
+define( 'ABSPATH', $release_test_root . '/' );
 define( 'RATESIGHT_RELEASE_VERSION', '3.10.0' );
-define( 'RATESIGHT_PLUGIN_DIR', sys_get_temp_dir() . '/wp-content/plugins/ratesight/' );
+define( 'RATESIGHT_PLUGIN_DIR', $release_test_root . '/wp-content/plugins/ratesight/' );
+define( 'WP_CONTENT_DIR', $release_test_root . '/wp-content' );
+define( 'WP_PLUGIN_DIR', WP_CONTENT_DIR . '/plugins' );
 
 $control_signature_valid = true;
 $dashboard_connected = true;
 $file_modifications_allowed = true;
 $wp_doing_cron_filter = null;
+$release_options = array();
 
 class WP_Error {
 	public function __construct( private string $code, private string $message = '', private array $data = array() ) {}
@@ -25,6 +32,22 @@ class WP_Automatic_Updater {
 	public function should_update( $type, $item, $context ) { return false; }
 	public function update( $type, $item ) { return wp_doing_cron(); }
 }
+class Release_Test_Filesystem {
+	public function exists( $path ) { return file_exists( $path ); }
+	public function is_dir( $path ) { return is_dir( $path ); }
+	public function delete( $path, $recursive = false ) {
+		if ( ! file_exists( $path ) ) return true;
+		if ( is_dir( $path ) && $recursive ) {
+			foreach ( array_diff( scandir( $path ), array( '.', '..' ) ) as $entry ) $this->delete( $path . '/' . $entry, true );
+			return rmdir( $path );
+		}
+		return is_dir( $path ) ? rmdir( $path ) : unlink( $path );
+	}
+	public function move( $source, $destination, $overwrite = false ) {
+		if ( $overwrite && file_exists( $destination ) ) $this->delete( $destination, true );
+		return rename( $source, $destination );
+	}
+}
 class Ratesight_Request_Auth { public static function authorize_mutation() { return true; } }
 class Ratesight_Pairing {
 	public static function verify_control_plane_signature( string $body, string $signature ): bool { global $control_signature_valid; return $control_signature_valid; }
@@ -33,7 +56,11 @@ class Ratesight_Pairing {
 function get_bloginfo() { return '6.6.0'; }
 function wp_is_file_mod_allowed() { global $file_modifications_allowed; return $file_modifications_allowed; }
 function untrailingslashit( $value ) { return rtrim( $value, '/\\' ); }
+function trailingslashit( $value ) { return rtrim( $value, '/\\' ) . '/'; }
 function is_wp_error( $value ) { return $value instanceof WP_Error; }
+function WP_Filesystem() { global $wp_filesystem; $wp_filesystem = $wp_filesystem ?? new Release_Test_Filesystem(); return true; }
+function get_option( $key, $default = false ) { global $release_options; return $release_options[ $key ] ?? $default; }
+function delete_option( $key ) { global $release_options; unset( $release_options[ $key ] ); return true; }
 function register_rest_route() {}
 function add_filter( $hook, $callback, $priority = 10 ) {
 	global $wp_doing_cron_filter;
@@ -73,6 +100,7 @@ function release_request( array $overrides = array(), string $action = 'prefligh
 	return new WP_REST_Request( array(
 		'action' => $action,
 		'confirm' => $confirm,
+		'operationId' => '123e4567-e89b-42d3-a456-426614174000',
 		'manifestJson' => json_encode( $manifest, JSON_UNESCAPED_SLASHES ),
 		'signature' => str_repeat( 'A', 88 ),
 	) );
@@ -109,6 +137,18 @@ $control_signature_valid = true;
 check_release_case( 'unknown release signer is refused', $unsigned instanceof WP_Error && $unsigned->get_error_code() === 'rs_release_signature_invalid' );
 $unconfirmed = Ratesight_Release_Update::handle( release_request( array(), 'apply' ) );
 check_release_case( 'apply requires literal confirmation', $unconfirmed instanceof WP_Error && $unconfirmed->get_error_code() === 'rs_release_confirmation_required' );
+$bad_operation = Ratesight_Release_Update::handle( new WP_REST_Request( array_merge( release_request()->get_json_params(), array( 'action' => 'rollback', 'confirm' => true, 'operationId' => 'bad' ) ) ) );
+check_release_case( 'rollback requires a bounded operation identity', $bad_operation instanceof WP_Error && $bad_operation->get_error_code() === 'rs_release_operation_invalid' );
+check_release_case( 'source retains a byte backup and exposes signed rollback', str_contains( $release_source, 'backup_plugin' ) && str_contains( $release_source, 'rollback_release' ) && str_contains( $release_source, "'rolledBack'" ) );
+$operation_id = '123e4567-e89b-42d3-a456-426614174000';
+$backup_dir = WP_CONTENT_DIR . '/upgrade/ratesight-rollback-' . $operation_id;
+mkdir( RATESIGHT_PLUGIN_DIR, 0777, true );
+mkdir( $backup_dir, 0777, true );
+file_put_contents( RATESIGHT_PLUGIN_DIR . 'ratesight.php', "<?php\n/**\n * Plugin Name: Ratesight\n * Version: 3.10.1\n */\n" );
+file_put_contents( $backup_dir . '/ratesight.php', "<?php\n/**\n * Plugin Name: Ratesight\n * Version: 3.10.0\n */\n" );
+$release_options['ratesight_plugin_update_receipt'] = array( 'operation_id' => $operation_id, 'from_version' => '3.10.0', 'to_version' => '3.10.1' );
+$rolled_back = Ratesight_Release_Update::handle( release_request( array(), 'rollback', true ) );
+check_release_case( 'signed rollback restores and verifies the prior plugin bytes', $rolled_back instanceof WP_REST_Response && $rolled_back->status === 200 && $rolled_back->data['restoredVersion'] === '3.10.0' && get_plugin_data( RATESIGHT_PLUGIN_DIR . 'ratesight.php' )['Version'] === '3.10.0' );
 check_release_case( 'confirmed apply bypasses background-update eligibility policy', $explicit_updater->should_update( 'plugin', (object) array(), '' ) === true );
 check_release_case( 'explicit updater remains scoped to plugin updates', $explicit_updater->should_update( 'theme', (object) array(), '' ) === false );
 check_release_case( 'confirmed apply no longer depends on the auto-update preference filter', ! str_contains( $release_source, "add_filter( 'auto_update_plugin'" ) );
@@ -130,4 +170,6 @@ $linked = Ratesight_Release_Update::validate_extracted_package( $package, '3.10.
 check_release_case( 'symbolic link is refused', ! $link_created || ( $linked instanceof WP_Error && $linked->get_error_code() === 'rs_release_archive_layout_invalid' ) );
 
 echo $failures ? "{$failures} RELEASE CHECKS FAILED\n" : "ALL RELEASE CHECKS PASSED\n";
+$cleanup = new Release_Test_Filesystem();
+$cleanup->delete( $release_test_root, true );
 exit( $failures ? 1 : 0 );

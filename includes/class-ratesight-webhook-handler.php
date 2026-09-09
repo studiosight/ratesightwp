@@ -1179,7 +1179,9 @@ class Ratesight_Webhook_Handler {
 		return new \WP_REST_Response( array(
 			'contract' => 'ratesight-connection-status-v1',
 			'plugin'   => array(
-				'version' => defined( 'RATESIGHT_RELEASE_VERSION' ) ? RATESIGHT_RELEASE_VERSION : null,
+				'version'          => defined( 'RATESIGHT_RELEASE_VERSION' ) ? RATESIGHT_RELEASE_VERSION : null,
+				'wordpressVersion' => function_exists( 'get_bloginfo' ) ? get_bloginfo( 'version' ) : null,
+				'phpVersion'       => PHP_VERSION,
 			),
 			'site'     => array(
 				'ratesightIdConfigured' => trim( (string) Ratesight_Options::get( 'code_id' ) ) !== '',
@@ -1191,6 +1193,7 @@ class Ratesight_Webhook_Handler {
 				'readinessExpires' => $auth['readiness_expires'],
 			),
 			'pairing' => Ratesight_Pairing::status(),
+			'enrollment' => class_exists( 'Ratesight_Enrollment' ) ? Ratesight_Enrollment::status() : array( 'supported' => false, 'accepted' => false, 'code' => null, 'httpStatus' => null, 'attemptedAt' => null ),
 			'publicationEvents' => class_exists( 'Ratesight_Publication_Events' ) ? Ratesight_Publication_Events::status() : array( 'pending' => 0, 'oldestQueuedAt' => null ),
 			'legacyProviderResidue' => array(
 				'gsc' => array(
