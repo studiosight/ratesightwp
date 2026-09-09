@@ -5,7 +5,7 @@ AI-generated SEO pages, review widgets, and local-search performance tracking �
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](LICENSE)
 ![WordPress](https://img.shields.io/badge/WordPress-5.9%2B-21759b.svg)
 ![PHP](https://img.shields.io/badge/PHP-8.0%2B-777bb4.svg)
-![Version](https://img.shields.io/badge/version-3.11.0-brightgreen.svg)
+![Version](https://img.shields.io/badge/version-3.11.1-brightgreen.svg)
 
 Ratesight unifies review generation and search visibility in one place. It publishes AI-generated, SEO-optimized pages through a secure webhook, embeds review widgets anywhere on your site, and surfaces local-search performance from Google Search Console and Business Profile — without loading any third-party dependencies in your admin.
 
@@ -31,10 +31,12 @@ Ratesight unifies review generation and search visibility in one place. It publi
 
 ## Configuration
 
-The client-facing menu has four destinations:
+The client-facing menu has six destinations:
 
 - **Overview** — positive search, local visibility, and completed-work results.
 - **SEO Content** — published search-focused service and location content.
+- **Publishing** — exact site-specific webhook URLs and publishing defaults.
+- **Activity Log** — webhook successes, warnings, failures, payload diagnostics, and retries.
 - **Reviews & Widgets** — reviews-page selection, a live style preview, appearance controls, and copy-ready review shortcodes.
 - **Support** — a plain-English service summary, connection status, and contact details.
 
