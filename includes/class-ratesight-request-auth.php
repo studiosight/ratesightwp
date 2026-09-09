@@ -202,8 +202,9 @@ class Ratesight_Request_Auth {
 			self::record_audit( $request, $policy, 'legacy_signature_accepted' );
 			return true;
 		}
-		if ( $mode === 'legacy' ) {
-			self::record_audit( $request, $policy, 'legacy_unsigned_accepted' );
+		$legacy_error = is_wp_error( $legacy ) ? $legacy->get_error_code() : '';
+		if ( $mode === 'legacy' || ( $mode === 'observe_v2' && $legacy_error === 'rs_signature_required' ) ) {
+			self::record_audit( $request, $policy, $mode === 'observe_v2' ? 'legacy_unsigned_observed' : 'legacy_unsigned_accepted' );
 			return true;
 		}
 		if ( $mode === 'observe_v2' && is_wp_error( $legacy ) ) {

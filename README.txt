@@ -3,7 +3,7 @@ Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.0
-Stable tag: 3.11.1
+Stable tag: 3.11.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -66,6 +66,12 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.11.2 - Preserve CRM publishing during signed-auth observation
+
+  - Keeps unsigned legacy CRM publishing operational while a paired site observes signed-auth adoption.
+  - Continues rejecting invalid supplied signatures and keeps strict enforcement unchanged.
+  - Adds sanitized request-arrival and authentication evidence to Activity Log.
 
 3.11.1 - Restore publishing diagnostics
 
