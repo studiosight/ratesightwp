@@ -10,7 +10,7 @@ defined( 'ABSPATH' ) || die;
 
 class Ratesight_Activator {
 
-	const DB_VERSION = '2.4';
+	const DB_VERSION = '2.5';
 
 	public static function activate() {
 		self::create_or_upgrade_tables();
@@ -195,6 +195,18 @@ class Ratesight_Activator {
 			UNIQUE KEY  uniq_post_id (post_id),
 			KEY idx_inbound (inbound_count),
 			KEY idx_broken (broken_count)
+		) {$charset_collate};" );
+
+		$publication_table = $wpdb->prefix . 'ratesight_publication_events';
+		dbDelta( "CREATE TABLE {$publication_table} (
+			event_id        VARCHAR(100) NOT NULL,
+			body            LONGTEXT     NOT NULL,
+			attempts        INT UNSIGNED NOT NULL DEFAULT 0,
+			last_error      VARCHAR(100)          DEFAULT NULL,
+			queued_at       DATETIME     NOT NULL,
+			next_attempt_at DATETIME     NOT NULL,
+			PRIMARY KEY (event_id),
+			KEY idx_next_attempt (next_attempt_at, queued_at)
 		) {$charset_collate};" );
 
 		update_option( 'ratesight_db_version', self::DB_VERSION );

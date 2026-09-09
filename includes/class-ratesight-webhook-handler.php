@@ -1191,6 +1191,7 @@ class Ratesight_Webhook_Handler {
 				'readinessExpires' => $auth['readiness_expires'],
 			),
 			'pairing' => Ratesight_Pairing::status(),
+			'publicationEvents' => class_exists( 'Ratesight_Publication_Events' ) ? Ratesight_Publication_Events::status() : array( 'pending' => 0, 'oldestQueuedAt' => null ),
 			'legacyProviderResidue' => array(
 				'gsc' => array(
 					'credentialConfigured' => Ratesight_OAuth_Client::is_connected( 'gsc' ),
