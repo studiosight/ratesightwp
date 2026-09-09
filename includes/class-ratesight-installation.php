@@ -113,9 +113,9 @@ class Ratesight_Installation {
 		return array(
 			'options'           => $options,
 			'optionPrefixes'    => array( 'ratesight_auth_nonce_', 'ratesight_pairing_nonce_' ),
-			'tables'            => array( 'ratesight_logs', 'ratesight_performance', 'ratesight_keywords', 'ratesight_gbp_performance', 'ratesight_bing_performance', 'ratesight_bing_keywords', 'ratesight_link_cache' ),
+			'tables'            => array( 'ratesight_logs', 'ratesight_performance', 'ratesight_keywords', 'ratesight_gbp_performance', 'ratesight_bing_performance', 'ratesight_bing_keywords', 'ratesight_link_cache', 'ratesight_publication_events' ),
 			'postTypes'         => array( 'ratesight_page' ),
-			'postMeta'          => array( '_ratesight_layout', '_ratesight_meta_description', '_ratesight_meta_title', '_ratesight_related_links', '_ratesight_show_title', '_rs_content_hash', '_rs_created', '_rs_custom_css_url', '_rs_layout', '_rs_manual_links', '_rs_meta_description', '_rs_meta_title', '_rs_pre_update_snapshot', '_rs_schema', '_rs_show_title' ),
+			'postMeta'          => array( '_ratesight_layout', '_ratesight_meta_description', '_ratesight_meta_title', '_ratesight_related_links', '_ratesight_show_title', '_ratesight_publication_event_sequence', '_rs_content_hash', '_rs_created', '_rs_custom_css_url', '_rs_layout', '_rs_manual_links', '_rs_meta_description', '_rs_meta_title', '_rs_pre_update_snapshot', '_rs_schema', '_rs_show_title' ),
 			'userMeta'          => array( 'ratesight_wizard_dismissed' ),
 			'transientPrefixes' => array( 'rs_', 'ratesight_' ),
 			'cronHooks'         => array( 'ratesight_prune_logs', 'ratesight_sync_gsc', 'ratesight_sync_gbp_performance', 'ratesight_sync_bing', 'ratesight_retry_pending', 'ratesight_check_broken_links', 'ratesight_redirect_health', 'ratesight_prune_auth_nonces', 'ratesight_daily_digest', 'ratesight_process_bulk_queue', 'ratesight_bulk_publish_batch', 'ratesight_deferred_publish' ),

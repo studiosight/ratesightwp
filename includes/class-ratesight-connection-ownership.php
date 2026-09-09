@@ -236,6 +236,7 @@ class Ratesight_Connection_Ownership {
 			'includes/class-ratesight-link-manager.php::head_url:wp_remote_head#1' => 'external_http_read',
 			'includes/class-ratesight-oauth-client.php::handle_token_return:wp_remote_post#1' => 'provider_write',
 			'includes/class-ratesight-oauth-client.php::refresh_via_worker:wp_remote_post#1' => 'external_worker_write',
+			'includes/class-ratesight-publication-events.php::send:wp_remote_post#1' => 'dashboard_event_write',
 			'includes/class-ratesight-publisher.php::auto_submit_to_bing:wp_remote_post#1' => 'external_worker_write',
 			'includes/class-ratesight-redirect-health.php::check_url:wp_remote_head#1' => 'external_http_read',
 			'includes/class-ratesight-redirect-health.php::check_url:wp_remote_head#2' => 'external_http_read',

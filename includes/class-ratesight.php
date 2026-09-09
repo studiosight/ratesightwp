@@ -143,6 +143,7 @@ class Ratesight {
 		add_action( 'wp_head',           array( 'Ratesight_Schema',          'inject'          ), 5 );
 		add_action( 'template_redirect', array( 'Ratesight_IndexNow',        'maybe_serve_key' ), 1 );
 		add_action( 'post_updated',      array( 'Ratesight_Update_Detector', 'on_post_updated' ), 10, 3 );
+		add_action( 'transition_post_status', array( 'Ratesight_Publication_Events', 'on_transition' ), 20, 3 );
 		// Fallback SEO rendering — only activates when no SEO plugin is detected.
 		add_action( 'init', array( 'Ratesight_Public', 'register_fallback_seo_hooks' ), 20 );
 
@@ -230,6 +231,7 @@ class Ratesight {
 		// Retry stuck pending posts — runs hourly, catches any deferred_publish
 		// cron events that never fired (common when WP-Cron loopback fails).
 		add_action( 'ratesight_retry_pending', array( $this, 'retry_pending_posts' ) );
+		add_action( 'ratesight_retry_pending', array( 'Ratesight_Publication_Events', 'drain' ), 20 );
 
 		add_action( 'plugins_loaded', array( 'Ratesight_Activator', 'maybe_upgrade' ), 5 );
 	}
