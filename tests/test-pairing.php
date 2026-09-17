@@ -106,5 +106,43 @@ $mode_failure = Ratesight_Pairing::handle( pairing_request( array( 'oid' => '2' 
 $fail_mode_update = false;
 check_pairing_case( 'authentication setup completes before a blank identity is stored', $mode_failure instanceof WP_Error && $mode_failure->get_error_code() === 'rs_auth_mode_failed' && get_option( 'wp_ratesight_code_id', '' ) === '' && get_option( 'ratesight_webhook_secret' ) === $before );
 
+// --- Control-plane key pinning -------------------------------------------------
+
+function pairing_signature( string $body, $signing_key ): string {
+	openssl_sign( $body, $signature, $signing_key, OPENSSL_ALGO_SHA256 );
+	return base64_encode( $signature );
+}
+
+function new_pairing_key(): array {
+	$key = openssl_pkey_new( array( 'private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1' ) );
+	openssl_pkey_export( $key, $private );
+	return array( $key, $private, openssl_pkey_get_details( $key )['key'] );
+}
+
+$pin_body = '{"contract":"ratesight-wordpress-pairing-v1"}';
+list( $primary_key, $primary_private, $primary_public ) = new_pairing_key();
+list( $backup_key, $backup_private, $backup_public ) = new_pairing_key();
+list( $stranger_key, $stranger_private, $stranger_public ) = new_pairing_key();
+
+$constants = ( new ReflectionClass( Ratesight_Pairing::class ) )->getConstants();
+$shipped = $constants['PUBLIC_KEYS'] ?? null;
+check_pairing_case( 'the shipped pins are a list of PEM public keys', is_array( $shipped ) && count( $shipped ) >= 1 && str_contains( (string) $shipped[0], '-----BEGIN PUBLIC KEY-----' ) );
+$shipped_details = is_array( $shipped ) ? openssl_pkey_get_details( openssl_pkey_get_public( $shipped[0] ) ) : false;
+check_pairing_case( 'the shipped primary pin is EC P-256', is_array( $shipped_details ) && 'prime256v1' === ( $shipped_details['ec']['curve_name'] ?? null ) );
+
+$public_key = array( $primary_public, $backup_public );
+check_pairing_case( 'a signature from the primary pin verifies', Ratesight_Pairing::verify_control_plane_signature( $pin_body, pairing_signature( $pin_body, $primary_key ) ) );
+check_pairing_case( 'a signature from the backup pin verifies', Ratesight_Pairing::verify_control_plane_signature( $pin_body, pairing_signature( $pin_body, $backup_key ) ) );
+check_pairing_case( 'a signature from an unpinned key is refused', ! Ratesight_Pairing::verify_control_plane_signature( $pin_body, pairing_signature( $pin_body, $stranger_key ) ) );
+check_pairing_case( 'a signature over different bytes is refused', ! Ratesight_Pairing::verify_control_plane_signature( $pin_body . ' ', pairing_signature( $pin_body, $primary_key ) ) );
+check_pairing_case( 'a malformed base64 signature is refused', ! Ratesight_Pairing::verify_control_plane_signature( $pin_body, '!!!not-base64!!!' ) );
+
+$public_key = $primary_public;
+check_pairing_case( 'a single-string pin still verifies', Ratesight_Pairing::verify_control_plane_signature( $pin_body, pairing_signature( $pin_body, $primary_key ) ) );
+check_pairing_case( 'a single-string pin still refuses an unpinned key', ! Ratesight_Pairing::verify_control_plane_signature( $pin_body, pairing_signature( $pin_body, $backup_key ) ) );
+
+$public_key = array( 'not-a-key', $backup_public );
+check_pairing_case( 'an unparsable pin is skipped, not fatal', Ratesight_Pairing::verify_control_plane_signature( $pin_body, pairing_signature( $pin_body, $backup_key ) ) );
+
 echo $failures ? "{$failures} PAIRING CHECKS FAILED\n" : "ALL PAIRING CHECKS PASSED\n";
 exit( $failures ? 1 : 0 );

@@ -2,8 +2,9 @@
 Contributors: ratesight
 Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
-Tested up to: 7.0
-Stable tag: 3.12.0
+Tested up to: 7.1
+Requires PHP: 8.0
+Stable tag: 3.12.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -66,6 +67,12 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.12.1 - Multiple pinned control-plane keys
+
+  - Accepts a list of pinned control-plane public keys and accepts a signature that verifies against any of them, so a replacement signing key can reach the fleet before the current signing key is retired.
+  - Keeps the existing primary key byte-identical: a site verifying today's signatures is unaffected.
+  - Adds the Update URI header, so WordPress cannot treat "ratesight" as a wordpress.org slug.
 
 3.12.0 - Approval-first dashboard enrollment
 
