@@ -13,12 +13,20 @@ class Ratesight_Pairing {
 	public const MAX_CLOCK_SKEW = 300;
 	public const PREVIOUS_GRACE = 7 * DAY_IN_SECONDS;
 
-	private const PUBLIC_KEY = <<<'PEM'
+	/**
+	 * Pinned control-plane signing keys, in priority order. A signature is accepted
+	 * when any pinned key verifies, so a replacement key can be published to the
+	 * fleet before the current signing key is retired.
+	 */
+	private const PUBLIC_KEYS = array(
+		// Primary control-plane key (EC P-256).
+		<<<'PEM'
 -----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8VSHroJ2Cvkg3lc/6GVQousa2mro
 HES1pH1qobHjIZFUlMF20ZUZvupGrr/yjiedRN7e/eGlwVKJeDDM+8HVrw==
 -----END PUBLIC KEY-----
-PEM;
+PEM,
+	);
 
 	public static function register_route(): void {
 		register_rest_route( 'ratesight/v1', '/pair', array(
@@ -135,12 +143,51 @@ PEM;
 
 	public static function verify_control_plane_signature( string $body, string $signature ): bool {
 		$decoded_signature = base64_decode( $signature, true );
-		$public_key        = openssl_pkey_get_public( self::public_key() );
-		return false !== $decoded_signature && false !== $public_key && 1 === openssl_verify( $body, $decoded_signature, $public_key, OPENSSL_ALGO_SHA256 );
+		if ( false === $decoded_signature ) {
+			return false;
+		}
+
+		// Check every pinned key instead of returning on the first match, so the
+		// number of pins does not change how long a rejection takes.
+		$verified = false;
+		foreach ( self::public_keys() as $pin ) {
+			$public_key = openssl_pkey_get_public( $pin );
+			if ( false === $public_key ) {
+				continue;
+			}
+			if ( 1 === openssl_verify( $body, $decoded_signature, $public_key, OPENSSL_ALGO_SHA256 ) ) {
+				$verified = true;
+			}
+		}
+
+		return $verified;
 	}
 
-	private static function public_key(): string {
-		return (string) apply_filters( 'ratesight_pairing_public_key', self::PUBLIC_KEY );
+	/**
+	 * Pinned keys to accept, in priority order.
+	 *
+	 * The `ratesight_pairing_public_key` filter may return a single PEM string
+	 * (the historical shape) or a list of them.
+	 *
+	 * @return string[]
+	 */
+	private static function public_keys(): array {
+		$pins = apply_filters( 'ratesight_pairing_public_key', self::PUBLIC_KEYS );
+		if ( is_string( $pins ) ) {
+			$pins = array( $pins );
+		}
+		if ( ! is_array( $pins ) ) {
+			return array();
+		}
+
+		$keys = array();
+		foreach ( $pins as $pin ) {
+			if ( is_string( $pin ) && '' !== trim( $pin ) ) {
+				$keys[] = $pin;
+			}
+		}
+
+		return $keys;
 	}
 
 	private static function normalize_origin( string $value ): ?string {
