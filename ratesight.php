@@ -189,6 +189,9 @@ add_action( 'rest_api_init', array( Ratesight_Enrollment::class, 'register_route
 add_action( Ratesight_Enrollment::RETRY_HOOK, array( Ratesight_Enrollment::class, 'send' ) );
 add_action( 'updated_option', array( Ratesight_Enrollment::class, 'option_updated' ), 10, 3 );
 
+// Already-installed sites upgrade in place, which never re-fires the activation hook.
+add_action( 'init', array( Ratesight_Enrollment::class, 'maybe_recover' ) );
+
 // ---------------------------------------------------------------------------
 // License gate — if enforcement is on and the license is invalid, the plugin
 // registers only a minimal admin notice and stops. Nothing else loads.

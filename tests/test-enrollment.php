@@ -5,6 +5,7 @@ define( 'RATESIGHT_RELEASE_VERSION', '3.12.0' );
 $options       = array( 'wp_ratesight_code_id' => '2' );
 $scheduled     = array();
 $requests      = array();
+$scripted      = array();
 $uuid_sequence = 0;
 $paired        = false;
 
@@ -51,8 +52,11 @@ function wp_remote_retrieve_body( $response ) { return $response['body'] ?? ''; 
 function register_rest_route() {}
 
 function wp_remote_post( $url, $args ) {
-	global $requests;
+	global $requests, $scripted;
 	$requests[] = array( 'url' => $url, 'args' => $args );
+	if ( $scripted ) {
+		return array_shift( $scripted );
+	}
 	$payload    = json_decode( $args['body'], true );
 	$challenge  = rtrim( strtr( base64_encode( str_repeat( 'c', 32 ) ), '+/', '-_' ), '=' );
 	$request    = new WP_REST_Request( json_encode( array(
@@ -110,6 +114,81 @@ check_enrollment_case( 'OID changes clear acceptance and enqueue a near-term ret
 $paired = true;
 Ratesight_Enrollment::send();
 check_enrollment_case( 'already paired installations never announce again', count( $requests ) === 1 );
+
+
+// --- Bounded retries, terminal blocks, and upgrade recovery for installed sites ---
+
+function script_response( int $status, string $code ): array {
+	return array(
+		'response' => array( 'code' => $status ),
+		'body'     => json_encode( array( 'ok' => $status < 400, 'code' => $code ), JSON_UNESCAPED_SLASHES ),
+	);
+}
+
+$paired = false;
+
+// A rejection the plugin cannot fix stops announcing instead of retrying forever.
+delete_option( 'ratesight_enrollment_receipt' );
+$scheduled = array();
+$scripted[] = script_response( 403, 'wordpress_enrollment_inactive_oid' );
+$before     = count( $requests );
+Ratesight_Enrollment::send();
+$status = Ratesight_Enrollment::status();
+check_enrollment_case( 'an unactionable rejection is recorded as permanently blocked', $status['outcome'] === 'blocked' && $status['blocked'] === true && $status['accepted'] === false && count( $requests ) === $before + 1 );
+check_enrollment_case( 'a blocked site is not rescheduled', $scheduled === array() );
+Ratesight_Enrollment::send();
+check_enrollment_case( 'a blocked site suppresses further announcements for the same identity', count( $requests ) === $before + 1 );
+Ratesight_Enrollment::maybe_recover();
+Ratesight_Enrollment::send();
+check_enrollment_case( 'an upgrade keeps a blocked site blocked and silent', Ratesight_Enrollment::status()['blocked'] === true && count( $requests ) === $before + 1 );
+
+// Our own outages stay in the bounded ladder and never block on the first failure.
+delete_option( 'ratesight_enrollment_receipt' );
+delete_option( Ratesight_Enrollment::VERSION_OPTION );
+$scheduled = array();
+$scripted[] = script_response( 503, 'wordpress_enrollment_store_unavailable' );
+Ratesight_Enrollment::send();
+$status = Ratesight_Enrollment::status();
+check_enrollment_case( 'a transient outage retries with the first bounded delay', $status['outcome'] === 'retrying' && $status['attempts'] === 1 && isset( $scheduled[ Ratesight_Enrollment::RETRY_HOOK ] ) );
+
+// The budget is bounded: the attempt cap converts retrying into a terminal block.
+$options['ratesight_enrollment_receipt'] = array_merge( (array) get_option( 'ratesight_enrollment_receipt', array() ), array( 'attempts' => 7 ) );
+$scheduled = array();
+$scripted[] = script_response( 503, 'wordpress_enrollment_store_unavailable' );
+Ratesight_Enrollment::send();
+$status = Ratesight_Enrollment::status();
+check_enrollment_case( 'the bounded budget blocks a site instead of retrying forever', $status['blocked'] === true && $status['attempts'] === 8 && $scheduled === array() );
+
+// A stored-but-unreviewed enrollment is acknowledged and does not spin.
+delete_option( 'ratesight_enrollment_receipt' );
+$scheduled = array();
+$scripted[] = script_response( 200, 'wordpress_enrollment_review_required' );
+$before     = count( $requests );
+Ratesight_Enrollment::send();
+$status = Ratesight_Enrollment::status();
+check_enrollment_case( 'a review-required enrollment is acknowledged without retrying', $status['outcome'] === 'awaiting_review' && $status['accepted'] === true && $status['blocked'] === false && $scheduled === array() && count( $requests ) === $before + 1 );
+Ratesight_Enrollment::send();
+check_enrollment_case( 'a review-required enrollment suppresses duplicate announcements', count( $requests ) === $before + 1 );
+
+// An already-installed site with no stored marker recovers exactly once per version.
+delete_option( 'ratesight_enrollment_receipt' );
+delete_option( Ratesight_Enrollment::VERSION_OPTION );
+$scheduled = array();
+$identity_before = get_option( 'ratesight_enrollment_installation_id' );
+Ratesight_Enrollment::maybe_recover();
+check_enrollment_case(
+	'an installed site schedules one bounded recovery on upgrade',
+	get_option( Ratesight_Enrollment::VERSION_OPTION ) === RATESIGHT_RELEASE_VERSION && isset( $scheduled[ Ratesight_Enrollment::RETRY_HOOK ] )
+);
+$first_delay = $scheduled[ Ratesight_Enrollment::RETRY_HOOK ];
+Ratesight_Enrollment::maybe_recover();
+check_enrollment_case( 'recovery is idempotent for the same plugin version', ( $scheduled[ Ratesight_Enrollment::RETRY_HOOK ] ?? null ) === $first_delay );
+check_enrollment_case( 'recovery preserves the installation identity and private key', get_option( 'ratesight_enrollment_installation_id' ) === $identity_before && get_option( 'ratesight_enrollment_private_key' ) !== '' );
+
+// Only an operator changing the OID re-arms a site.
+$scheduled = array();
+Ratesight_Enrollment::option_updated( 'wp_ratesight_code_id', '2', '3' );
+check_enrollment_case( 'an operator OID change clears the receipt and re-arms the site', get_option( 'ratesight_enrollment_receipt', null ) === null && isset( $scheduled[ Ratesight_Enrollment::RETRY_HOOK ] ) );
 
 echo $failures ? "{$failures} ENROLLMENT CHECKS FAILED\n" : "ALL ENROLLMENT CHECKS PASSED\n";
 exit( $failures ? 1 : 0 );
