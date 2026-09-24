@@ -190,5 +190,13 @@ $scheduled = array();
 Ratesight_Enrollment::option_updated( 'wp_ratesight_code_id', '2', '3' );
 check_enrollment_case( 'an operator OID change clears the receipt and re-arms the site', get_option( 'ratesight_enrollment_receipt', null ) === null && isset( $scheduled[ Ratesight_Enrollment::RETRY_HOOK ] ) );
 
+$paired = true;
+$scheduled = array();
+$paired_receipt = array( 'accepted' => true, 'outcome' => 'accepted', 'attempts' => 1 );
+update_option( 'ratesight_enrollment_receipt', $paired_receipt );
+delete_option( Ratesight_Enrollment::VERSION_OPTION );
+Ratesight_Enrollment::maybe_recover();
+check_enrollment_case( 'upgrade preserves an already paired site receipt without scheduling', get_option( 'ratesight_enrollment_receipt' ) === $paired_receipt && $scheduled === array() );
+
 echo $failures ? "{$failures} ENROLLMENT CHECKS FAILED\n" : "ALL ENROLLMENT CHECKS PASSED\n";
 exit( $failures ? 1 : 0 );

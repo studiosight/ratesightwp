@@ -212,6 +212,12 @@ class Ratesight_Enrollment {
 		}
 		update_option( self::VERSION_OPTION, $version, false );
 
+		// An upgrade must not erase the durable receipt of an already paired site.
+		// send() would return early for this site, leaving a deleted receipt empty.
+		if ( Ratesight_Pairing::is_connected() ) {
+			return;
+		}
+
 		$receipt = get_option( self::RECEIPT_OPTION, array() );
 		if ( is_array( $receipt ) && 'blocked' === ( $receipt['outcome'] ?? '' ) ) {
 			return;
