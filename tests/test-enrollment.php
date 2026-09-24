@@ -151,13 +151,18 @@ Ratesight_Enrollment::send();
 $status = Ratesight_Enrollment::status();
 check_enrollment_case( 'a transient outage retries with the first bounded delay', $status['outcome'] === 'retrying' && $status['attempts'] === 1 && isset( $scheduled[ Ratesight_Enrollment::RETRY_HOOK ] ) );
 
-// The budget is bounded: the attempt cap converts retrying into a terminal block.
+// The budget is bounded, but an outage is not an operator block.
 $options['ratesight_enrollment_receipt'] = array_merge( (array) get_option( 'ratesight_enrollment_receipt', array() ), array( 'attempts' => 7 ) );
 $scheduled = array();
 $scripted[] = script_response( 503, 'wordpress_enrollment_store_unavailable' );
 Ratesight_Enrollment::send();
 $status = Ratesight_Enrollment::status();
-check_enrollment_case( 'the bounded budget blocks a site instead of retrying forever', $status['blocked'] === true && $status['attempts'] === 8 && $scheduled === array() );
+check_enrollment_case( 'the bounded budget stops without falsely recording an operator block', $status['outcome'] === 'retry_exhausted' && $status['blocked'] === false && $status['attempts'] === 8 && $scheduled === array() );
+$before = count( $requests );
+Ratesight_Enrollment::send();
+check_enrollment_case( 'exhausted retry budget stays quiet within the same version', count( $requests ) === $before );
+Ratesight_Enrollment::maybe_recover();
+check_enrollment_case( 'a version recovery can re-arm exhausted transient failures', get_option( 'ratesight_enrollment_receipt', null ) === null && isset( $scheduled[ Ratesight_Enrollment::RETRY_HOOK ] ) );
 
 // A stored-but-unreviewed enrollment is acknowledged and does not spin.
 delete_option( 'ratesight_enrollment_receipt' );

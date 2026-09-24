@@ -25,7 +25,7 @@ class Ratesight_Enrollment {
 	 * dashboard stored it but an operator must resolve the authoritative origin)
 	 * and `blocked` (a rejection only an operator can change).
 	 */
-	private const TERMINAL_OUTCOMES = array( 'accepted', 'awaiting_review', 'blocked' );
+	private const TERMINAL_OUTCOMES = array( 'accepted', 'awaiting_review', 'blocked', 'retry_exhausted' );
 
 	/** Transient retry budget: backoff ladder and the attempt cap that blocks a site. */
 	private const TRANSIENT_DELAYS = array( 900, 1800, 3600, 7200, 14400, 21600 );
@@ -147,7 +147,7 @@ class Ratesight_Enrollment {
 		if ( 'retrying' === $outcome && $attempts >= self::MAX_ATTEMPTS ) {
 			// The bounded budget is spent: stop announcing until an operator changes the
 			// OID or a shipped plugin version grants a fresh budget.
-			$outcome = 'blocked';
+			$outcome = 'retry_exhausted';
 		}
 		$accepted      = in_array( $outcome, array( 'accepted', 'awaiting_review' ), true );
 		self::store_receipt( $oid, $site_origin, '' !== $code ? $code : 'unexpected_response', $status, $accepted, $fingerprint, $outcome, $attempts, self::blocked_reason( $outcome, $code ) );
