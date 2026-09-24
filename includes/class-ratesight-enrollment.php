@@ -219,7 +219,12 @@ class Ratesight_Enrollment {
 		}
 
 		$receipt = get_option( self::RECEIPT_OPTION, array() );
-		if ( is_array( $receipt ) && 'blocked' === ( $receipt['outcome'] ?? '' ) ) {
+		// Older versions mistook an HTML Access/WAF denial for a dashboard block.
+		// Recover only that precise transport-only receipt; explicit rejections stay put.
+		$legacy_transport_denial = is_array( $receipt )
+			&& 'unexpected_response' === ( $receipt['code'] ?? '' )
+			&& in_array( (int) ( $receipt['http_status'] ?? 0 ), array( 401, 403 ), true );
+		if ( is_array( $receipt ) && 'blocked' === ( $receipt['outcome'] ?? '' ) && ! $legacy_transport_denial ) {
 			return;
 		}
 
@@ -250,6 +255,11 @@ class Ratesight_Enrollment {
 			return 'retrying';
 		}
 		if ( 0 === $status || 408 === $status || 429 === $status || $status >= 500 ) {
+			return 'retrying';
+		}
+		// An authentication proxy may return HTML rather than our JSON contract.
+		// That is not an operator decision and must not permanently poison enrollment.
+		if ( in_array( $status, array( 401, 403 ), true ) && '' === $code ) {
 			return 'retrying';
 		}
 		return 'blocked';

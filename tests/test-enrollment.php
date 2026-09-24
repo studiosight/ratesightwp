@@ -111,9 +111,41 @@ check_enrollment_case( 'challenge refuses a different installation identity', $i
 Ratesight_Enrollment::option_updated( 'wp_ratesight_code_id', '2', '3' );
 check_enrollment_case( 'OID changes clear acceptance and enqueue a near-term retry', get_option( 'ratesight_enrollment_receipt', null ) === null && isset( $scheduled[ Ratesight_Enrollment::RETRY_HOOK ] ) );
 
-$paired = true;
+foreach ( array( 401, 403 ) as $transport_status ) {
+	delete_option( 'ratesight_enrollment_receipt' );
+	$scheduled = array();
+	$scripted[] = array( 'response' => array( 'code' => $transport_status ), 'body' => '<html>Access denied</html>' );
+	Ratesight_Enrollment::send();
+	$status = Ratesight_Enrollment::status();
+	check_enrollment_case( "HTML {$transport_status} remains bounded retry, not an operator block", $status['outcome'] === 'retrying' && ! $status['blocked'] && ! $status['accepted'] && isset( $scheduled[ Ratesight_Enrollment::RETRY_HOOK ] ) );
+	$options['ratesight_enrollment_receipt']['attempts'] = 7;
+	$scheduled = array();
+	$scripted[] = array( 'response' => array( 'code' => $transport_status ), 'body' => '<html>Access denied</html>' );
+	Ratesight_Enrollment::send();
+	check_enrollment_case( "HTML {$transport_status} stops at retry exhaustion without a block", Ratesight_Enrollment::status()['outcome'] === 'retry_exhausted' && $scheduled === array() );
+}
+foreach ( array( 401, 403 ) as $legacy_status ) {
+	update_option( Ratesight_Enrollment::VERSION_OPTION, RATESIGHT_RELEASE_VERSION );
+	update_option( 'ratesight_enrollment_receipt', array( 'outcome' => 'blocked', 'code' => 'unexpected_response', 'http_status' => $legacy_status ) );
+	$scheduled = array();
+	Ratesight_Enrollment::maybe_recover();
+	check_enrollment_case( "same-version legacy {$legacy_status} receipt remains unchanged", Ratesight_Enrollment::status()['blocked'] && $scheduled === array() );
+	update_option( Ratesight_Enrollment::VERSION_OPTION, '3.11.9' );
+	Ratesight_Enrollment::maybe_recover();
+	check_enrollment_case( "real version advance repairs legacy {$legacy_status} transport block", get_option( 'ratesight_enrollment_receipt', null ) === null && isset( $scheduled[ Ratesight_Enrollment::RETRY_HOOK ] ) );
+}
+delete_option( 'ratesight_enrollment_receipt' );
+$scheduled = array();
+$scripted[] = script_response( 403, 'wordpress_enrollment_operator_blocked' );
 Ratesight_Enrollment::send();
-check_enrollment_case( 'already paired installations never announce again', count( $requests ) === 1 );
+delete_option( Ratesight_Enrollment::VERSION_OPTION );
+Ratesight_Enrollment::maybe_recover();
+check_enrollment_case( 'explicit operator block remains terminal across upgrades', Ratesight_Enrollment::status()['blocked'] && Ratesight_Enrollment::status()['code'] === 'wordpress_enrollment_operator_blocked' && $scheduled === array() );
+
+$paired = true;
+$before_paired_send = count( $requests );
+Ratesight_Enrollment::send();
+check_enrollment_case( 'already paired installations never announce again', count( $requests ) === $before_paired_send );
 
 
 // --- Bounded retries, terminal blocks, and upgrade recovery for installed sites ---
