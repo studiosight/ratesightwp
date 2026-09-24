@@ -13,7 +13,6 @@ $o   = Ratesight_Options::get_all();
 $url        = rest_url( 'ratesight/v1/create-page' );
 $update_url = rest_url( 'ratesight/v1/update-page' );
 
-$ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
 ?>
 <form method="post" action="options.php">
 <?php settings_fields( 'ratesight_options_seo_pages' ); ?>
@@ -41,13 +40,7 @@ $ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
 	<tr>
 		<th scope="row">Ratesight Connection</th>
 		<td>
-			<?php if ( $ratesight_id !== '' ) : ?>
-				<strong style="color:#00a32a;">Connected</strong>
-				<p class="description">Ratesight is managing this site's services. There is nothing you need to connect here.</p>
-			<?php else : ?>
-				<strong>Setup in progress</strong>
-				<p class="description">Your Ratesight team can finish connecting this site. No action is needed here.</p>
-			<?php endif; ?>
+			<?php require __DIR__ . '/publishing-connection-status.php'; ?>
 		</td>
 	</tr>
 </table>

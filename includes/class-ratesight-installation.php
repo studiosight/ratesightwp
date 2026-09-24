@@ -104,6 +104,7 @@ class Ratesight_Installation {
 			'ratesight_enrollment_installation_id',
 			'ratesight_enrollment_private_key',
 			'ratesight_enrollment_receipt',
+			'ratesight_enrollment_emitter_version',
 		) );
 		foreach ( array( 'gbp', 'gsc' ) as $service ) {
 			foreach ( array( 'oauth', 'selection', 'locked', 'revoked', 'disconnect_reason', 'refresh_error', 'scope_error' ) as $suffix ) {
