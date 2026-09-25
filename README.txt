@@ -4,7 +4,7 @@ Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 3.12.1
+Stable tag: 3.13.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,13 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.13.0 - Sites appear in the dashboard without a client id
+
+  - Sites without a Ratesight client id now report the installation to the dashboard on activation and once a day (site address, site name, plugin version and installation key; no secrets).
+  - Adds a signed /claim route so the dashboard can set the client id for this installation; the enrollment is sent right after a successful claim.
+  - A claim never replaces a different client id unless the signed request asks for it, and never on a site that is already paired.
+  - Sites that already have a client id keep the existing enrollment behaviour.
 
 3.12.1 - Multiple pinned control-plane keys
 

@@ -17,6 +17,9 @@ class Ratesight_Deactivator {
 				wp_unschedule_event( $ts, $event );
 			}
 		}
+		if ( class_exists( 'Ratesight_Enrollment' ) ) {
+			Ratesight_Enrollment::unschedule();
+		}
 		delete_transient( Ratesight_License::TRANSIENT_KEY );
 	}
 }

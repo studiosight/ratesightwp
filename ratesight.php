@@ -4,7 +4,7 @@
  * Plugin URI:        https://ratesight.com
  * Update URI:        https://ratesight.com
  * Description:       Review widgets, shortcodes, and AI-powered SEO page creation via webhook.
- * Version:           3.12.1
+ * Version:           3.13.0
  * Requires at least: 5.9
  * Requires PHP:      8.0
  * Author:            Ratesight
@@ -19,7 +19,7 @@
 
 defined( 'WPINC' ) || die;
 
-define( 'RATESIGHT_RELEASE_VERSION', '3.12.1' );
+define( 'RATESIGHT_RELEASE_VERSION', '3.13.0' );
 define( 'RATESIGHT_VERSION', RATESIGHT_RELEASE_VERSION . '.' . filemtime( __FILE__ ) );
 define( 'RATESIGHT_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'RATESIGHT_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -187,6 +187,8 @@ unset( $_rs_sitemap );
 // Enrollment must remain available before pairing and regardless of license state.
 add_action( 'rest_api_init', array( Ratesight_Enrollment::class, 'register_route' ) );
 add_action( Ratesight_Enrollment::RETRY_HOOK, array( Ratesight_Enrollment::class, 'send' ) );
+add_action( Ratesight_Enrollment::DAILY_HOOK, array( Ratesight_Enrollment::class, 'send' ) );
+add_action( 'init', array( Ratesight_Enrollment::class, 'ensure_schedule' ) );
 add_action( 'updated_option', array( Ratesight_Enrollment::class, 'option_updated' ), 10, 3 );
 
 // ---------------------------------------------------------------------------
