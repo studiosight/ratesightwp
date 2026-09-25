@@ -1334,7 +1334,7 @@ class Ratesight_Webhook_Handler {
 			// nested one alone kept the capability permanently switched off for them.
 			'indexnow'             => true,
 			'provider_ownership'   => array(
-				'gbp_auto_post'   => (bool) Ratesight_Options::get( 'gbp_post_enabled' ),
+				'gbp_auto_post'   => false, // Retired in 3.13.0: the dashboard owns blog to GBP posts.
 				'bing_submission' => (string) Ratesight_Options::get( 'bing_api_key' ) !== '',
 				'indexnow'        => true,
 			),

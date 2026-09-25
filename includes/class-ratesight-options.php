@@ -56,7 +56,7 @@ class Ratesight_Options {
 
 			// ── GBP CTA / posting settings ────────────────────────────────────
 			'gbp_cta_type'     => array( 'name' => 'ratesight_gbp_cta_type',     'default' => 'LEARN_MORE', 'type' => 'text', 'group' => 'connections' ),
-			'gbp_post_enabled' => array( 'name' => 'ratesight_gbp_post_enabled', 'default' => 1,            'type' => 'bool', 'group' => 'connections' ),
+			'gbp_post_enabled' => array( 'name' => 'ratesight_gbp_post_enabled', 'default' => 0,            'type' => 'bool', 'group' => 'connections' ),
 
 			// ── Bing Webmaster Tools ──────────────────────────────────────────────
 			'bing_api_key'     => array( 'name' => 'ratesight_bing_api_key',      'default' => '', 'type' => 'secret', 'group' => 'connections' ),

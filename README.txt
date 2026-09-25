@@ -74,6 +74,7 @@ are never sent in URLs or displayed in the client-facing plugin.
   - Adds a signed /claim route so the dashboard can set the client id for this installation; the enrollment is sent right after a successful claim.
   - A claim never replaces a different client id unless the signed request asks for it, and never on a site that is already paired.
   - Sites that already have a client id keep the existing enrollment behaviour.
+  - Retires plugin-side Google Business Profile auto-posting of blog posts (moved to the dashboard); capabilities report gbp_auto_post false.
 
 3.12.1 - Multiple pinned control-plane keys
 
