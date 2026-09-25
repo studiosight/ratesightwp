@@ -127,17 +127,10 @@ class Ratesight_Publisher {
 			return;
 		}
 
-		// ── 3. Post to GBP if enabled, connected, locked, and this is a post ──
-		if ( $final_status === 'publish'
-			&& Ratesight_Options::get( 'gbp_post_enabled' )
-			&& Ratesight_GBP_Client::is_locked()
-			&& get_post_type( $post_id ) === 'post'
-		) {
-			$gbp_result = self::post_to_gbp( $post_id );
-			if ( is_wp_error( $gbp_result ) ) {
-				$warnings[] = 'GBP post failed: ' . $gbp_result->get_error_message();
-			}
-		}
+		// Google Business Profile posts for new blog articles are owned by the
+		// Ratesight dashboard (per-client option with approval). The plugin never
+		// posts to Google Business Profile on publish, whatever the legacy
+		// ratesight_gbp_post_enabled option says.
 
 		// ── 4. Auto-submit to Bing — silent, non-blocking ────────────────────
 		if ( $final_status === 'publish' ) {
@@ -225,31 +218,13 @@ class Ratesight_Publisher {
 	}
 
 	/**
-	 * Create a GBP "What's New" post for the published post.
-	 * Uses the post excerpt as the summary and the featured image URL if set.
+	 * Retired in 3.12.2. Google Business Profile posts for blog articles moved
+	 * to the Ratesight dashboard, which drafts them for approval and publishes
+	 * them centrally. Kept as a stub so the legacy retry button gets a clear
+	 * message instead of a fatal error.
 	 */
 	public static function post_to_gbp( int $post_id ): bool|WP_Error {
-		$selection = Ratesight_GBP_Client::get_selection();
-		$location  = $selection['id'] ?? '';
-		if ( $location === '' ) {
-			return new \WP_Error( 'rs_gbp_no_location', 'No GBP location selected.' );
-		}
-
-		$post    = get_post( $post_id );
-		// Use the excerpt as the GBP summary. Strip HTML/entities here so the
-		// GBP client receives plain UTF-8 text and doesn't double-encode anything.
-		$summary = $post ? wp_strip_all_tags( html_entity_decode( get_the_excerpt( $post ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ) ) : '';
-		$url     = get_permalink( $post_id );
-
-		// Fall back to post title if excerpt is empty.
-		if ( empty( $summary ) && $post ) {
-			$summary = html_entity_decode( $post->post_title, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
-		}
-
-		$image_url = (string) get_the_post_thumbnail_url( $post_id, 'large' );
-
-		$result = Ratesight_GBP_Client::create_post( $location, $summary, $url, $image_url );
-
-		return is_wp_error( $result ) ? $result : true;
+		unset( $post_id );
+		return new \WP_Error( 'rs_gbp_post_retired', 'Google Business Profile posts for blog articles are now managed in the Ratesight dashboard.' );
 	}
 }

@@ -268,10 +268,10 @@ if ( empty( Ratesight_Options::get( 'code_id' ) ) ) : ?>
 		<th scope="row">Post to GBP</th>
 		<td>
 			<label>
-				<input type="checkbox" name="ratesight_gbp_post_enabled" value="1" <?php checked( 1, $o['gbp_post_enabled'] ); ?>>
+				<input type="checkbox" name="ratesight_gbp_post_enabled" value="1" disabled>
 				Automatically create a GBP "What's New" post when a blog post is published
 			</label>
-			<p class="description">Requires a connected and locked GBP location. Uncheck to publish posts without pushing to Google Business Profile.</p>
+			<p class="description">Moved to the Ratesight dashboard. New blog articles are posted to Google Business Profile from there, with approval. This plugin no longer posts to Google Business Profile.</p>
 		</td>
 	</tr>
 </table>
