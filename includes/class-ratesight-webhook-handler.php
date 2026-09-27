@@ -1324,6 +1324,9 @@ class Ratesight_Webhook_Handler {
 			'delete_page_dry_run'  => true,
 			'related_links'        => true,
 			'runtime_404_routing'  => true,
+			// Since 3.14.0: the effective fuzzy 404 mode and whether an admin chose it.
+			// An unset option now resolves to 'off' (explicit: false).
+			'fuzzy_404'            => Ratesight_Runtime_404_Router::mode_state(),
 			// Since 3.4.0: POST /update-page honours dry_run instead of writing regardless.
 			'update_page_dry_run'  => true,
 			// Since 3.4.0: POST /media-alt can correct alt text on an existing attachment. Before

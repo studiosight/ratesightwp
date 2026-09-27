@@ -254,11 +254,11 @@ $ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
 		<th scope="row">404 Fuzzy Router Mode</th>
 		<td>
 			<select name="ratesight_fuzzy_mode">
-				<option value="legacy" <?php selected( 'legacy', $o['fuzzy_mode'] ); ?>>Legacy — unconstrained slug similarity (default)</option>
-				<option value="same-city-or-hub" <?php selected( 'same-city-or-hub', $o['fuzzy_mode'] ); ?>>Same-city or hub — never redirect one city's URL to another city's page</option>
-				<option value="off" <?php selected( 'off', $o['fuzzy_mode'] ); ?>>Off — no fuzzy 404 redirects</option>
+				<option value="off" <?php selected( 'off', Ratesight_Runtime_404_Router::current_mode() ); ?>>Off: missing pages return 404 (default)</option>
+				<option value="same-city-or-hub" <?php selected( 'same-city-or-hub', Ratesight_Runtime_404_Router::current_mode() ); ?>>Same-city or hub: never redirect one city's URL to another city's page</option>
+				<option value="legacy" <?php selected( 'legacy', Ratesight_Runtime_404_Router::current_mode() ); ?>>Legacy: unconstrained slug similarity</option>
 			</select>
-			<p class="description">Constrains the runtime 404 smart-router. "Same-city or hub" blocks cross-city fuzzy matches (e.g. a San Bruno URL landing on a San Ramon page) and falls back to the base service hub for commercial/office city pages. Explicit redirects are never affected.</p>
+			<p class="description">Controls the runtime 404 smart-router. Off (the default since 3.14.0) never guesses: a missing page stays a 404. "Same-city or hub" blocks cross-city fuzzy matches (e.g. a San Bruno URL landing on a San Ramon page) and falls back to the base service hub for commercial/office city pages. "Legacy" redirects to the most similar slug. Explicit redirects are never affected.</p>
 		</td>
 	</tr>
 	<tr>

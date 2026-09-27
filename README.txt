@@ -4,7 +4,7 @@ Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 3.13.0
+Stable tag: 3.14.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,16 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.14.0 - Signed requests only; fuzzy 404 redirects off by default
+
+  - Security: protected REST routes (every page, redirect, related-links, media alt, IndexNow, performance snapshot and plugin-update write, plus the protected reads) now reject requests that carry no signature or an invalid one, in every authentication mode. Earlier versions accepted unsigned requests in legacy mode, and in observe_v2 when no signature header was sent.
+  - legacy mode accepts a valid legacy body signature; observe_v2 accepts a valid rs-hmac-v2 or legacy signature; enforce_v2 is unchanged (rs-hmac-v2 only).
+  - capabilities.auth reports unsigned_accepted: false.
+  - The runtime 404 fuzzy router is Off unless a site has an explicitly stored mode: a missing page stays a 404 instead of being redirected to the most similar slug. Sites with a stored mode (legacy, same-city-or-hub or off) keep it.
+  - Saving another settings form no longer pins an unset fuzzy mode to a value nobody chose.
+  - capabilities.fuzzy_404 reports the effective mode, whether it was explicitly stored, and the default.
+  - Settings: the 404 Fuzzy Router select lists Off (default) first.
 
 3.13.0 - Sites appear in the dashboard without a client id
 
