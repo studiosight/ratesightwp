@@ -199,20 +199,19 @@ class Ratesight_Request_Auth {
 			return self::verify_v2( $request, $policy );
 		}
 
+		if ( $mode === 'enforce_v2' ) {
+			return self::failure( 'rs_auth_version_required', 403, $request, $policy );
+		}
+
+		// legacy and observe_v2 accept only a VALID legacy body HMAC. Since 3.14.0 a
+		// request with no signature, or with an invalid one, is rejected in every mode
+		// for both reads and mutations: nothing here is authorized by being unsigned.
 		$legacy = self::verify_legacy( $request, $secret );
-		if ( true === $legacy && $mode !== 'enforce_v2' ) {
+		if ( true === $legacy ) {
 			self::record_audit( $request, $policy, 'legacy_signature_accepted' );
 			return true;
 		}
-		$legacy_error = is_wp_error( $legacy ) ? $legacy->get_error_code() : '';
-		if ( $mode === 'legacy' || ( $mode === 'observe_v2' && $legacy_error === 'rs_signature_required' ) ) {
-			self::record_audit( $request, $policy, $mode === 'observe_v2' ? 'legacy_unsigned_observed' : 'legacy_unsigned_accepted' );
-			return true;
-		}
-		if ( $mode === 'observe_v2' && is_wp_error( $legacy ) ) {
-			return $legacy;
-		}
-		return self::failure( 'rs_auth_version_required', 403, $request, $policy );
+		return self::failure( is_wp_error( $legacy ) ? $legacy->get_error_code() : 'rs_signature_required', 403, $request, $policy );
 	}
 
 	private static function verify_legacy( $request, string $secret ) {
@@ -339,6 +338,10 @@ class Ratesight_Request_Auth {
 		return array(
 			'supported'              => array( self::VERSION, 'legacy-body-hmac' ),
 			'mode'                   => self::mode(),
+			// Since 3.14.0: unsigned (or invalidly signed) requests to protected routes are
+			// rejected in every mode; legacy and observe_v2 differ only in accepting a valid
+			// legacy body HMAC.
+			'unsigned_accepted'      => false,
 			'configured'             => $primary !== '',
 			'current_key_id'         => $primary !== '' ? self::key_id( $primary ) : null,
 			'previous_key_id'        => $previous !== '' && $expires >= time() ? self::key_id( $previous ) : null,
