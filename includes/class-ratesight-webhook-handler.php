@@ -758,6 +758,11 @@ class Ratesight_Webhook_Handler {
 			'seo_plugin'        => $seo['source'],
 			'meta_title'        => $seo['meta_title'],
 			'meta_description'  => $seo['meta_description'],
+			// Since 3.14.1: every active SEO plugin, and Squirrly's per-field store
+			// and output switches (null when Squirrly is not active).
+			'seo_plugins'       => Ratesight_SEO_Writer::detected_plugin_ids(),
+			'squirrly'          => Ratesight_Squirrly::is_active() ? Ratesight_Squirrly::describe( $post_id ) : null,
+			'seo_write_mode'    => 'field_preserving',
 			'layout'            => get_post_meta( $post_id, '_rs_layout', true ) ?: '',
 			'show_title'        => (bool) get_post_meta( $post_id, '_rs_show_title', true ),
 			'custom_css_url'    => get_post_meta( $post_id, '_rs_custom_css_url', true ) ?: '',
@@ -913,17 +918,17 @@ class Ratesight_Webhook_Handler {
 			wp_update_post( $post_data );
 		}
 
-		// SEO fields — only if sent. write() returns what was actually stored.
+		// SEO fields, only if sent. write() returns what was actually stored.
+		// Since 3.14.1 an omitted field is passed as null and left untouched in every
+		// SEO plugin's store. Before, it was rewritten from $seo_title_before /
+		// $seo_desc_before (Yoast, then Rank Math, else empty), which blanked the title
+		// on Squirrly-only and SEOPress sites whenever only the description was sent.
 		$seo_written = null;
-		$meta_title       = array_key_exists( 'meta_title', $data )       ? sanitize_text_field( $data['meta_title'] ) : null;
-		$meta_description = array_key_exists( 'meta_description', $data ) ? sanitize_textarea_field( $data['meta_description'] ) : null;
+		$meta_title       = array_key_exists( 'meta_title', $data )       ? sanitize_text_field( (string) $data['meta_title'] ) : null;
+		$meta_description = array_key_exists( 'meta_description', $data ) ? sanitize_textarea_field( (string) $data['meta_description'] ) : null;
 		if ( $meta_title !== null || $meta_description !== null ) {
 			$writer = new Ratesight_SEO_Writer();
-			$seo_written = $writer->write(
-				$post_id,
-				$meta_title       ?? $seo_title_before,
-				$meta_description ?? $seo_desc_before
-			);
+			$seo_written = $writer->write( $post_id, $meta_title, $meta_description );
 		}
 
 		// Layout / display — only if sent.

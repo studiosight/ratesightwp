@@ -1,6 +1,6 @@
 <?php
 /**
- * Squirrly SEO storage adapter — write the value Squirrly actually SERVES.
+ * Squirrly SEO storage adapter: write the value Squirrly actually SERVES.
  *
  * WHY THIS FILE EXISTS
  * --------------------
@@ -13,24 +13,30 @@
  * posts, 0/6 served; /coolsculpting-chula-vista/ served a post_title-derived
  * snippet while the plugin reported our stored value back to us.
  *
- * WHAT SQUIRRLY 14.x ACTUALLY READS (source-verified against 14.2.3)
- * -----------------------------------------------------------------
- * 1. `{$wpdb->prefix}qss` — Squirrly's own table (`_SQ_DB_` = 'qss'), one row
- *    per URL hash, column `seo` holding a serialised SQ_Models_Domain_Sq.
- *    SQ_Models_Domain_Post::getSq() loads it via SQ_Models_Qss::getSqSeo().
- *    THIS IS THE VALUE THE FRONT END SERVES: SQ_Models_Services_Title's
- *    `sq_title` filter emits `$post->sq->title`, and SQ_Models_Frontend
- *    output-buffers the page, strips the theme's <title>, and injects it.
- * 2. `_sq_title` / `_sq_description` post meta — SQ_Models_Domain_Sq::getTitle()
- *    and ::getDescription() fall back to these ("custom values" import path),
- *    but ONLY while the domain's own title is still empty.
+ * WHAT SQUIRRLY 14.x ACTUALLY READS (source-verified against 14.2.3 and 14.2.6)
+ * ----------------------------------------------------------------------------
+ * 1. `{$wpdb->prefix}qss`: Squirrly's own table (`_SQ_DB_` = 'qss'), one row
+ *    per URL hash (md5(ID) for posts and pages, md5(post_type . ID) for custom
+ *    types), column `seo` holding a PHP-serialised array of
+ *    SQ_Models_Domain_Sq::toArray(). SQ_Models_Domain_Post::getSq() loads it
+ *    via SQ_Models_Qss::getSqSeo(). The Title and Description services emit
+ *    `$post->sq->title` / `$post->sq->description`, escaped at render time.
+ * 2. `_sq_title` / `_sq_description` post meta: SQ_Models_Domain_Sq::getTitle()
+ *    and ::getDescription() fall back to these while the row's own value is
+ *    empty. getSq() sets post_id BEFORE it calls toArray(), so this fallback is
+ *    consulted before any Automation pattern.
+ * 3. Only when both are empty does Squirrly fill the field from the post-type
+ *    Automation pattern (sq_auto_pattern on) or from post_title/post_excerpt.
  *
- * The order matters: when the qss row's title is empty AND Squirrly's
- * `sq_auto_pattern` option is on, getSq() fills the title from the post-type
- * PATTERN before anything can consult `_sq_title`. That is exactly the
- * post_title-derived snippet we observed. So post meta ALONE is not enough —
- * the qss row is the authoritative write, and post meta is the fallback for
- * installs where the qss write is unavailable.
+ * FIELD-PRESERVING WRITES (3.14.1)
+ * --------------------------------
+ * write() takes null for a field the caller did not send and then leaves that
+ * field alone in both layers. A field whose value already equals the stored
+ * effective value (compared after HTML entity decoding, because Squirrly's own
+ * editor stores esc_html + ent2ncr output) is also left alone. Before 3.14.1
+ * update-page rewrote an omitted title from `_yoast_wpseo_title ?: rank_math_title`,
+ * which on a Squirrly-only site is '' and BLANKED the Squirrly title, handing
+ * the page to its Automation pattern.
  *
  * WHAT THIS ADAPTER DOES NOT DO
  * -----------------------------
@@ -71,7 +77,7 @@ class Ratesight_Squirrly {
 
 	/**
 	 * Are Squirrly's own models reachable, i.e. can we write the row the front
-	 * end reads? False on a Squirrly build whose internals moved — callers then
+	 * end reads? False on a Squirrly build whose internals moved: callers then
 	 * still get the post-meta write, and honestly report that the canonical
 	 * store was not reached.
 	 */
@@ -83,103 +89,210 @@ class Ratesight_Squirrly {
 	}
 
 	/**
+	 * The stored value of each field and the layer it comes from, per field:
+	 * 'qss' (the row), 'postmeta' (_sq_* fallback) or 'none' (Squirrly serves
+	 * its Automation pattern or the post's own title/excerpt).
+	 *
+	 * @return array{title:array{value:string,store:string},description:array{value:string,store:string},native_read:bool}
+	 */
+	public static function fields( int $post_id ): array {
+		$out = array(
+			'title'       => array( 'value' => '', 'store' => 'none' ),
+			'description' => array( 'value' => '', 'store' => 'none' ),
+			'native_read' => false,
+		);
+		if ( $post_id < 1 ) return $out;
+
+		$row = array( 'title' => '', 'description' => '' );
+		if ( self::has_native_store() ) {
+			try {
+				$sq = self::stored_sq( $post_id );
+				if ( $sq !== null ) {
+					$row['title']       = (string) ( $sq->title ?? '' );
+					$row['description'] = (string) ( $sq->description ?? '' );
+					$out['native_read'] = true;
+				}
+			} catch ( \Throwable $e ) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch
+				// Squirrly internals moved: fall through to post meta.
+			}
+		}
+
+		$meta = array(
+			'title'       => (string) get_post_meta( $post_id, self::META_TITLE, true ),
+			'description' => (string) get_post_meta( $post_id, self::META_DESC, true ),
+		);
+		foreach ( array( 'title', 'description' ) as $field ) {
+			if ( $row[ $field ] !== '' ) {
+				$out[ $field ] = array( 'value' => $row[ $field ], 'store' => 'qss' );
+			} elseif ( $meta[ $field ] !== '' ) {
+				$out[ $field ] = array( 'value' => $meta[ $field ], 'store' => 'postmeta' );
+			}
+		}
+		return $out;
+	}
+
+	/**
 	 * Read the SEO title + description Squirrly would serve for a post.
 	 *
 	 * qss row first (what the front end reads), post meta second (what Squirrly
-	 * falls back to). Returns raw stored values — no pattern expansion, because
+	 * falls back to). Returns raw stored values, no pattern expansion, because
 	 * a pattern is not a value anyone wrote.
 	 *
 	 * @return array{meta_title:string,meta_description:string,store:string}
 	 *         store: 'qss' | 'postmeta' | 'none'
 	 */
 	public static function read( int $post_id ): array {
-		$title = '';
-		$desc  = '';
+		$f     = self::fields( $post_id );
 		$store = 'none';
-
-		if ( $post_id > 0 && self::has_native_store() ) {
-			try {
-				$sq = self::stored_sq( $post_id );
-				if ( $sq !== null ) {
-					$t = (string) ( $sq->title ?? '' );
-					$d = (string) ( $sq->description ?? '' );
-					if ( $t !== '' || $d !== '' ) {
-						$title = $t;
-						$desc  = $d;
-						$store = 'qss';
-					}
-				}
-			} catch ( \Throwable $e ) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch
-				// Squirrly internals moved — fall through to post meta.
-			}
+		if ( $f['title']['store'] === 'qss' || $f['description']['store'] === 'qss' ) {
+			$store = 'qss';
+		} elseif ( $f['title']['store'] === 'postmeta' || $f['description']['store'] === 'postmeta' ) {
+			$store = 'postmeta';
 		}
-
-		if ( $post_id > 0 && ( $title === '' || $desc === '' ) ) {
-			$meta_title = (string) get_post_meta( $post_id, self::META_TITLE, true );
-			$meta_desc  = (string) get_post_meta( $post_id, self::META_DESC,  true );
-			if ( $title === '' && $meta_title !== '' ) {
-				$title = $meta_title;
-				if ( $store === 'none' ) $store = 'postmeta';
-			}
-			if ( $desc === '' && $meta_desc !== '' ) {
-				$desc = $meta_desc;
-				if ( $store === 'none' ) $store = 'postmeta';
-			}
-		}
-
 		return array(
-			'meta_title'       => $title,
-			'meta_description' => $desc,
+			'meta_title'       => $f['title']['value'],
+			'meta_description' => $f['description']['value'],
 			'store'            => $store,
 		);
 	}
 
 	/**
-	 * Write the SEO title + description into the store Squirrly serves.
+	 * What change control needs to know before it writes through Squirrly
+	 * (GET /update-page `squirrly` block, since 3.14.1). Values are raw stored
+	 * bytes; the dashboard decodes HTML entities before comparing with the page.
 	 *
-	 * Both layers are attempted; the return value says exactly which landed, so
-	 * a caller never has to assume. `qss` false with `postmeta` true means the
-	 * write is only as good as Squirrly's fallback path (it will be overridden
-	 * by a post-type pattern if one is configured) — report it, do not round it
-	 * up to success.
-	 *
-	 * @return array{qss:bool,postmeta:bool,native:bool,note:string}
+	 * emits_title / emits_description: Squirrly prints this field on this page
+	 * (options sq_auto_metas and sq_auto_title / sq_auto_description, and the
+	 * page's own doseo / do_metas). null when it cannot be determined.
 	 */
-	public static function write( int $post_id, string $meta_title, string $meta_description ): array {
+	public static function describe( int $post_id ): array {
+		$fields = self::fields( $post_id );
+		$out    = array(
+			'active'             => self::is_active(),
+			'version'            => defined( 'SQ_VERSION' ) ? (string) constant( 'SQ_VERSION' ) : null,
+			'native_store'       => self::has_native_store(),
+			'native_read'        => $fields['native_read'],
+			'title'              => $fields['title'],
+			'description'        => $fields['description'],
+			'auto_pattern'       => null,
+			'emits_title'        => null,
+			'emits_description'  => null,
+			'legacy_key_present' => $post_id > 0 && get_post_meta( $post_id, '_squirrly_seo', true ) !== '',
+			'field_preserving'   => true,
+		);
+
+		$opt = static function ( string $key ) {
+			if ( ! class_exists( 'SQ_Classes_Helpers_Tools' ) || ! method_exists( 'SQ_Classes_Helpers_Tools', 'getOption' ) ) return null;
+			try {
+				return SQ_Classes_Helpers_Tools::getOption( $key );
+			} catch ( \Throwable $e ) {
+				return null;
+			}
+		};
+		$metas = $opt( 'sq_auto_metas' );
+		$title = $opt( 'sq_auto_title' );
+		$desc  = $opt( 'sq_auto_description' );
+		$auto  = $opt( 'sq_auto_pattern' );
+		$out['auto_pattern'] = $auto === null ? null : (bool) $auto;
+
+		$page_on = null;
+		if ( $post_id > 0 && self::has_native_store() ) {
+			try {
+				$post = self::post_domain( $post_id );
+				$sq   = ( is_object( $post ) && method_exists( $post, 'getSq' ) ) ? $post->getSq() : null;
+				if ( $sq ) {
+					$page_on = (bool) $sq->doseo && (bool) $sq->do_metas;
+				}
+			} catch ( \Throwable $e ) {
+				$page_on = null;
+			}
+		}
+		if ( $metas !== null && $title !== null && $desc !== null ) {
+			$global_title = (bool) $metas && (bool) $title;
+			$global_desc  = (bool) $metas && (bool) $desc;
+			$out['emits_title']       = $page_on === null ? ( $global_title ? null : false ) : ( $global_title && $page_on );
+			$out['emits_description'] = $page_on === null ? ( $global_desc ? null : false ) : ( $global_desc && $page_on );
+		}
+		return $out;
+	}
+
+	/**
+	 * Write the SEO title and/or description into the store Squirrly serves.
+	 * null leaves that field untouched in both layers; a value equal to the
+	 * stored effective value is not rewritten.
+	 *
+	 * Both layers are attempted for a changed field; the return value says
+	 * exactly which landed, so a caller never has to assume. `qss` false with
+	 * `postmeta` true means a changed field reached only Squirrly's fallback
+	 * layer: report it, do not round it up to success.
+	 *
+	 * @return array{qss:bool,postmeta:bool,native:bool,note:string,fields:array<string,string>}
+	 */
+	public static function write( int $post_id, ?string $meta_title, ?string $meta_description ): array {
 		$result = array(
 			'qss'      => false,
 			'postmeta' => false,
 			'native'   => self::has_native_store(),
 			'note'     => '',
+			'fields'   => array(),
 		);
 
 		if ( $post_id < 1 || ! self::is_active() ) {
-			$result['note'] = 'squirrly not active — nothing written';
+			$result['note'] = 'squirrly not active, nothing written';
+			return $result;
+		}
+
+		$current = self::fields( $post_id );
+		$changes = array();
+		foreach ( array( 'title' => $meta_title, 'description' => $meta_description ) as $field => $value ) {
+			if ( $value === null ) {
+				$result['fields'][ $field ] = 'omitted';
+			} elseif ( self::same( $current[ $field ]['value'], $value ) ) {
+				$result['fields'][ $field ] = 'unchanged';
+			} else {
+				$changes[ $field ]          = $value;
+				$result['fields'][ $field ] = 'written';
+			}
+		}
+
+		if ( ! $changes ) {
+			// Nothing to change: the stored effective values already are the requested ones.
+			$result['qss']      = true;
+			$result['postmeta'] = true;
+			$result['note']     = 'squirrly values unchanged, nothing written';
 			return $result;
 		}
 
 		// Layer 2 first: post meta is unconditional and cannot fail on a
 		// Squirrly internals change, so the value is at least recorded where
 		// Squirrly's own fallback reads it.
-		update_post_meta( $post_id, self::META_TITLE, $meta_title );
-		update_post_meta( $post_id, self::META_DESC,  $meta_description );
+		if ( array_key_exists( 'title', $changes ) ) update_post_meta( $post_id, self::META_TITLE, $changes['title'] );
+		if ( array_key_exists( 'description', $changes ) ) update_post_meta( $post_id, self::META_DESC, $changes['description'] );
 		$result['postmeta'] = true;
 
 		// Layer 1: the row the front end actually reads.
 		if ( $result['native'] ) {
 			try {
-				$result['qss'] = self::write_qss( $post_id, $meta_title, $meta_description );
+				$result['qss']  = self::write_qss( $post_id, $changes );
 				$result['note'] = $result['qss']
-					? 'wrote squirrly qss row (served store) + _sq_title/_sq_description'
-					: 'squirrly qss row write did not verify — only _sq_title/_sq_description were stored';
+					? 'wrote squirrly qss row (served store) + _sq_* post meta for: ' . implode( ', ', array_keys( $changes ) )
+					: 'squirrly qss row write did not verify, only _sq_* post meta was stored';
 			} catch ( \Throwable $e ) {
-				$result['note'] = 'squirrly qss row unavailable (' . $e->getMessage() . ') — only _sq_title/_sq_description were stored';
+				$result['note'] = 'squirrly qss row unavailable (' . $e->getMessage() . '), only _sq_* post meta was stored';
 			}
 		} else {
-			$result['note'] = 'squirrly models not reachable — only _sq_title/_sq_description were stored';
+			$result['note'] = 'squirrly models not reachable, only _sq_* post meta was stored';
 		}
 
 		return $result;
+	}
+
+	/** Equal as text: Squirrly's editor stores esc_html( ent2ncr() ) output, we store plain text. */
+	public static function same( string $a, string $b ): bool {
+		$decode = static function ( string $v ): string {
+			return trim( html_entity_decode( $v, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) );
+		};
+		return $decode( $a ) === $decode( $b );
 	}
 
 	// ── Squirrly internals (all guarded) ──────────────────────────────────────
@@ -208,7 +321,7 @@ class Ratesight_Squirrly {
 
 	/**
 	 * The SEO domain currently STORED for this post (no pattern expansion, no
-	 * post-meta fallback) — i.e. the row as saved, which is what we must edit
+	 * post-meta fallback), i.e. the row as saved, which is what we must edit
 	 * in place so nothing else in it is lost.
 	 *
 	 * @return object|null
@@ -225,11 +338,14 @@ class Ratesight_Squirrly {
 	}
 
 	/**
-	 * Update (or insert) the qss row for this post, preserving every other
-	 * field in it, then RE-READ to confirm the value is really in the store.
-	 * An unverified write returns false — the caller must not report it as one.
+	 * Update (or insert) the qss row for this post, changing only the fields in
+	 * $changes and preserving every other field in it, then RE-READ to confirm
+	 * the values are really in the store. An unverified write returns false:
+	 * the caller must not report it as one.
+	 *
+	 * @param array<string,string> $changes 'title' and/or 'description'.
 	 */
-	private static function write_qss( int $post_id, string $meta_title, string $meta_description ): bool {
+	private static function write_qss( int $post_id, array $changes ): bool {
 		$post = self::post_domain( $post_id );
 		if ( $post === null ) return false;
 
@@ -239,10 +355,12 @@ class Ratesight_Squirrly {
 		$sq = $qss->getSqSeo( $post->hash );
 		if ( ! $sq ) return false;
 
-		// Edit in place. Everything we do not touch (noindex, canonical, og:*,
-		// jsonld, innerlinks…) is written back exactly as Squirrly stored it.
-		$sq->title       = $meta_title;
-		$sq->description = $meta_description;
+		// Edit in place. Everything we do not touch (the other text field,
+		// noindex, canonical, og:*, jsonld, innerlinks) is written back exactly
+		// as Squirrly stored it.
+		foreach ( $changes as $field => $value ) {
+			$sq->$field = $value;
+		}
 
 		$qss->updateSqSeo( $post, $sq );
 
@@ -250,7 +368,9 @@ class Ratesight_Squirrly {
 		$after = $qss->getSqSeo( $post->hash );
 		if ( ! $after ) return false;
 
-		return (string) ( $after->title ?? '' ) === $meta_title
-			&& (string) ( $after->description ?? '' ) === $meta_description;
+		foreach ( $changes as $field => $value ) {
+			if ( (string) ( $after->$field ?? '' ) !== $value ) return false;
+		}
+		return true;
 	}
 }

@@ -136,30 +136,34 @@ class Ratesight_SEO_Writer {
 	// ── Write ─────────────────────────────────────────────────────────────────
 
 	/**
-	 * Write SEO title + description to all active SEO plugins.
+	 * Write SEO title and/or description to all active SEO plugins.
 	 * Returns array of what was actually stored, for echoing back in POST response.
+	 *
+	 * Since 3.14.1 a null field is left untouched in every store. Before, update-page
+	 * rewrote an omitted field from `_yoast_wpseo_* ?: rank_math_*`, which blanked the
+	 * Squirrly and SEOPress values and could copy a leftover key into the served one.
 	 */
-	public function write( int $post_id, string $meta_title, string $meta_description ): array {
+	public function write( int $post_id, ?string $meta_title, ?string $meta_description ): array {
 		if ( $post_id < 1 ) return array( 'written' => false );
 
-		$meta_title       = sanitize_text_field( $meta_title );
-		$meta_description = sanitize_textarea_field( $meta_description );
+		$meta_title       = $meta_title === null ? null : sanitize_text_field( $meta_title );
+		$meta_description = $meta_description === null ? null : sanitize_textarea_field( $meta_description );
 		$wrote            = false;
 		$squirrly         = null; // per-layer detail, echoed back so a caller never has to assume
 
 		if ( self::is_yoast_active() ) {
-			update_post_meta( $post_id, '_yoast_wpseo_title',    $meta_title );
-			update_post_meta( $post_id, '_yoast_wpseo_metadesc', $meta_description );
+			self::put( $post_id, '_yoast_wpseo_title',    $meta_title );
+			self::put( $post_id, '_yoast_wpseo_metadesc', $meta_description );
 			$wrote = true;
 		}
 		if ( self::is_rank_math_active() ) {
-			update_post_meta( $post_id, 'rank_math_title',       $meta_title );
-			update_post_meta( $post_id, 'rank_math_description', $meta_description );
+			self::put( $post_id, 'rank_math_title',       $meta_title );
+			self::put( $post_id, 'rank_math_description', $meta_description );
 			$wrote = true;
 		}
 		if ( self::is_aioseo_active() ) {
-			update_post_meta( $post_id, '_aioseo_title',       $meta_title );
-			update_post_meta( $post_id, '_aioseo_description', $meta_description );
+			self::put( $post_id, '_aioseo_title',       $meta_title );
+			self::put( $post_id, '_aioseo_description', $meta_description );
 			$wrote = true;
 		}
 		// Squirrly: write the store Squirrly SERVES (its qss row), plus its
@@ -171,16 +175,16 @@ class Ratesight_SEO_Writer {
 			$wrote    = true;
 		}
 		if ( self::is_seopress_active() ) {
-			update_post_meta( $post_id, '_seopress_titles_title', $meta_title );
-			update_post_meta( $post_id, '_seopress_titles_desc',  $meta_description );
+			self::put( $post_id, '_seopress_titles_title', $meta_title );
+			self::put( $post_id, '_seopress_titles_desc',  $meta_description );
 			$wrote = true;
 		}
 
 		// Fallback: store in generic meta. Rendered via pre_get_document_title
 		// filter registered in Ratesight_Public when no SEO plugin is active.
 		if ( ! $wrote ) {
-			update_post_meta( $post_id, '_ratesight_meta_title',       $meta_title );
-			update_post_meta( $post_id, '_ratesight_meta_description',  $meta_description );
+			self::put( $post_id, '_ratesight_meta_title',       $meta_title );
+			self::put( $post_id, '_ratesight_meta_description',  $meta_description );
 		}
 
 		// Read back what was just stored — caller uses this to verify without a second GET.
@@ -191,5 +195,27 @@ class Ratesight_SEO_Writer {
 			$stored['squirrly'] = $squirrly;
 		}
 		return $stored;
+	}
+
+	/** update_post_meta, except that null means the caller did not send this field. */
+	private static function put( int $post_id, string $key, ?string $value ): void {
+		if ( $value !== null ) {
+			update_post_meta( $post_id, $key, $value );
+		}
+	}
+
+	/**
+	 * Machine ids of every active SEO plugin (GET /update-page `seo_plugins`, since
+	 * 3.14.1). `seo_plugin` names only the one that wins the served snippet; a caller
+	 * that must know whether a write reaches more than one store reads this list.
+	 */
+	public static function detected_plugin_ids(): array {
+		$ids = array();
+		if ( self::is_squirrly_active() )  $ids[] = 'squirrly';
+		if ( self::is_yoast_active() )     $ids[] = 'yoast';
+		if ( self::is_rank_math_active() ) $ids[] = 'rankmath';
+		if ( self::is_aioseo_active() )    $ids[] = 'aioseo';
+		if ( self::is_seopress_active() )  $ids[] = 'seopress';
+		return $ids;
 	}
 }
