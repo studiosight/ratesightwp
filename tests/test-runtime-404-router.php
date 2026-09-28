@@ -13,11 +13,9 @@
 
 define( 'ABSPATH', sys_get_temp_dir() . '/' ); // satisfies the include guard only
 
-/** Stub of the real options registry so current_mode() is testable without WP. */
-class Ratesight_Options {
-	public static $fuzzy_mode = 'legacy';
-	public static function get( string $key ) { return $key === 'fuzzy_mode' ? self::$fuzzy_mode : null; }
-}
+/** Stub of get_option() so current_mode()/mode_state() read the real option path without WP. */
+$wp_options = array();
+function get_option( $name, $default = false ) { global $wp_options; return array_key_exists( $name, $wp_options ) ? $wp_options[ $name ] : $default; }
 
 require __DIR__ . '/../includes/class-ratesight-runtime-404-router.php';
 
@@ -118,7 +116,7 @@ check( 'exact slug match still wins in constrained mode', $d['action'] === 'redi
 
 // ── Off mode: maybe_route() returns before scoring; the decision core is never
 //    called. current_mode() validation is the testable seam without WP:
-check( 'mode whitelist: bogus option value falls back to legacy', in_array( 'weird-value', Ratesight_Runtime_404_Router::MODES, true ) === false );
+check( 'mode whitelist: bogus option value is not a mode', in_array( 'weird-value', Ratesight_Runtime_404_Router::MODES, true ) === false );
 check( "mode whitelist: 'off' is a valid mode", in_array( 'off', Ratesight_Runtime_404_Router::MODES, true ) );
 
 // ── Review-panel regressions (2026-07-07 adversarial review) ─────────────────
@@ -137,14 +135,29 @@ check( 'review: service-word divergence still same city', ! Ratesight_Runtime_40
 check( 'review: dedup suffix -2 keeps the city', Ratesight_Runtime_404_Router::city_of_slug( 'movers-san-ramon-ca-2' ) === 'ramon' );
 check( 'review: dedup suffix cross-city still blocked', Ratesight_Runtime_404_Router::cities_differ( 'movers-san-bruno-ca', 'movers-san-ramon-ca-2' ) );
 
-// current_mode(): whitelist enforced through the REAL read path (stubbed options).
-Ratesight_Options::$fuzzy_mode = 'weird-value';
-check( 'review: current_mode() falls back to legacy on bogus stored value', Ratesight_Runtime_404_Router::current_mode() === 'legacy' );
-Ratesight_Options::$fuzzy_mode = 'off';
-check( "review: current_mode() honours 'off'", Ratesight_Runtime_404_Router::current_mode() === 'off' );
-Ratesight_Options::$fuzzy_mode = 'same-city-or-hub';
-check( "review: current_mode() honours 'same-city-or-hub'", Ratesight_Runtime_404_Router::current_mode() === 'same-city-or-hub' );
-Ratesight_Options::$fuzzy_mode = 'legacy';
+// current_mode()/mode_state(): 3.14.0 default-off semantics through the real read path.
+$wp_options = array();
+$state = Ratesight_Runtime_404_Router::mode_state();
+check( '3.14.0: unset option resolves to off', Ratesight_Runtime_404_Router::current_mode() === 'off' && $state['mode'] === 'off' );
+check( '3.14.0: unset option is reported as not explicit', $state['explicit'] === false && $state['source'] === 'default' && $state['default'] === 'off' );
+$wp_options['ratesight_fuzzy_mode'] = false;
+check( '3.14.0: a false option (nothing stored) resolves to off', Ratesight_Runtime_404_Router::current_mode() === 'off' && Ratesight_Runtime_404_Router::mode_state()['explicit'] === false );
+$wp_options['ratesight_fuzzy_mode'] = '';
+check( '3.14.0: an empty option resolves to off', Ratesight_Runtime_404_Router::current_mode() === 'off' && Ratesight_Runtime_404_Router::mode_state()['explicit'] === false );
+$wp_options['ratesight_fuzzy_mode'] = 'weird-value';
+$state = Ratesight_Runtime_404_Router::mode_state();
+check( 'review: bogus stored value fails safe to off, not legacy', $state['mode'] === 'off' && $state['explicit'] === false && $state['source'] === 'invalid_stored_value' );
+foreach ( array( 'legacy', 'same-city-or-hub', 'off' ) as $explicit_mode ) {
+	$wp_options['ratesight_fuzzy_mode'] = $explicit_mode;
+	$state = Ratesight_Runtime_404_Router::mode_state();
+	check( "3.14.0: explicitly stored '{$explicit_mode}' is honored and reported explicit", Ratesight_Runtime_404_Router::current_mode() === $explicit_mode && $state['explicit'] === true && $state['source'] === 'stored' );
+}
+$handler_source = file_get_contents( __DIR__ . '/../includes/class-ratesight-webhook-handler.php' );
+check( '3.14.0: capabilities expose the fuzzy 404 mode state', strpos( $handler_source, "'fuzzy_404'            => Ratesight_Runtime_404_Router::mode_state()" ) !== false );
+$admin_source = file_get_contents( __DIR__ . '/../admin/partials/tab-seo-pages.php' );
+check( '3.14.0: admin select labels Off as the default and selects the effective mode', strpos( $admin_source, 'Off: missing pages return 404 (default)' ) !== false && strpos( $admin_source, '(default)</option>' ) === strpos( $admin_source, 'Off: missing pages return 404 (default)</option>' ) + strlen( 'Off: missing pages return 404 ' ) && strpos( $admin_source, "selected( 'off', Ratesight_Runtime_404_Router::current_mode() )" ) !== false );
+$options_source = file_get_contents( __DIR__ . '/../includes/class-ratesight-options.php' );
+check( '3.14.0: options schema default is off', strpos( $options_source, "'ratesight_fuzzy_mode',            'default' => 'off'" ) !== false );
 
 echo PHP_EOL . ( $failures === 0 ? "ALL {$checks} CHECKS PASSED" : "{$failures} of {$checks} CHECKS FAILED" ) . PHP_EOL;
 exit( $failures === 0 ? 0 : 1 );

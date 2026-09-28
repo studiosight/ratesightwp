@@ -13,7 +13,14 @@ class Ratesight_Request_Auth {
 	public const MAX_BODY_BYTES = 1048576;
 	public const READINESS_TTL  = 86400;
 	public const MODES          = array( 'legacy', 'observe_v2', 'enforce_v2' );
+	/** Unsigned draft creations accepted per site per window (legacy and observe_v2 only). */
+	public const UNSIGNED_DRAFT_LIMIT  = 30;
+	public const UNSIGNED_DRAFT_WINDOW = 86400;
+	public const UNSIGNED_DRAFT_ROUTE  = '/ratesight/v1/create-page';
+	private const UNSIGNED_DRAFT_OPTION = 'ratesight_unsigned_draft_window';
 	private static $operational_candidates = array();
+	/** @var WeakMap|null Request object => audit request id for admitted unsigned drafts. */
+	private static $unsigned_drafts = null;
 	public const ROUTE_POLICIES = array(
 		'GET /ratesight/v1/capabilities' => 'public_bootstrap',
 		'POST /ratesight/v1/pair' => 'public_signed_bootstrap',
@@ -199,20 +206,63 @@ class Ratesight_Request_Auth {
 			return self::verify_v2( $request, $policy );
 		}
 
+		if ( $mode === 'enforce_v2' ) {
+			return self::failure( 'rs_auth_version_required', 403, $request, $policy );
+		}
+
+		// legacy and observe_v2 accept a VALID legacy body HMAC. Since 3.14.0 a request
+		// with an invalid signature is rejected in every mode, and a request with no
+		// signature is rejected everywhere except one narrow case: POST /create-page may
+		// create a NEW DRAFT (never publish, never update an existing post), rate
+		// limited and audited. The handler enforces the draft-only restrictions.
 		$legacy = self::verify_legacy( $request, $secret );
-		if ( true === $legacy && $mode !== 'enforce_v2' ) {
+		if ( true === $legacy ) {
 			self::record_audit( $request, $policy, 'legacy_signature_accepted' );
 			return true;
 		}
-		$legacy_error = is_wp_error( $legacy ) ? $legacy->get_error_code() : '';
-		if ( $mode === 'legacy' || ( $mode === 'observe_v2' && $legacy_error === 'rs_signature_required' ) ) {
-			self::record_audit( $request, $policy, $mode === 'observe_v2' ? 'legacy_unsigned_observed' : 'legacy_unsigned_accepted' );
-			return true;
+		$legacy_error = is_wp_error( $legacy ) ? $legacy->get_error_code() : 'rs_signature_required';
+		if ( $legacy_error === 'rs_signature_required' && self::is_unsigned_draft_candidate( $request, $policy ) ) {
+			return self::accept_unsigned_draft( $request, $policy );
 		}
-		if ( $mode === 'observe_v2' && is_wp_error( $legacy ) ) {
-			return $legacy;
+		return self::failure( $legacy_error, 403, $request, $policy );
+	}
+
+	private static function is_unsigned_draft_candidate( $request, string $policy ): bool {
+		return $policy === 'signed_mutation'
+			&& strtoupper( (string) $request->get_method() ) === 'POST'
+			&& self::normalize_route( (string) $request->get_route() ) === self::UNSIGNED_DRAFT_ROUTE
+			&& (string) $request->get_header( 'x_ratesight_auth_version' ) === ''
+			&& (string) $request->get_header( 'x_ratesight_signature' ) === '';
+	}
+
+	private static function accept_unsigned_draft( $request, string $policy ) {
+		$now    = time();
+		$window = get_option( self::UNSIGNED_DRAFT_OPTION, array() );
+		$window = array_values( array_filter( is_array( $window ) ? $window : array(), static function ( $stamp ) use ( $now ): bool {
+			return is_int( $stamp ) && $stamp > $now - self::UNSIGNED_DRAFT_WINDOW && $stamp <= $now + self::MAX_CLOCK_SKEW;
+		} ) );
+		if ( count( $window ) >= self::UNSIGNED_DRAFT_LIMIT ) {
+			update_option( self::UNSIGNED_DRAFT_OPTION, $window, false );
+			return self::failure( 'rs_unsigned_draft_rate_limited', 429, $request, $policy );
 		}
-		return self::failure( 'rs_auth_version_required', 403, $request, $policy );
+		$window[] = $now;
+		update_option( self::UNSIGNED_DRAFT_OPTION, $window, false );
+		$request_id = self::record_audit( $request, $policy, 'unsigned_draft_accepted' );
+		self::$unsigned_drafts ??= new WeakMap();
+		self::$unsigned_drafts[ $request ] = $request_id;
+		return true;
+	}
+
+	/**
+	 * The audit request id when this request was admitted as an unsigned draft
+	 * creation, else null. The create-page handler MUST apply the draft-only
+	 * restrictions whenever this is non-null.
+	 */
+	public static function unsigned_draft_request_id( $request ): ?string {
+		if ( self::$unsigned_drafts === null || ! is_object( $request ) || ! isset( self::$unsigned_drafts[ $request ] ) ) {
+			return null;
+		}
+		return self::$unsigned_drafts[ $request ];
 	}
 
 	private static function verify_legacy( $request, string $secret ) {
@@ -339,6 +389,13 @@ class Ratesight_Request_Auth {
 		return array(
 			'supported'              => array( self::VERSION, 'legacy-body-hmac' ),
 			'mode'                   => self::mode(),
+			// Since 3.14.0: unsigned (or invalidly signed) requests to protected routes are
+			// rejected in every mode; legacy and observe_v2 differ only in accepting a valid
+			// legacy body HMAC.
+			'unsigned_accepted'      => false,
+			// Since 3.14.0: the single unsigned exception. legacy/observe_v2 only.
+			'unsigned_draft_create'  => self::mode() !== 'enforce_v2',
+			'unsigned_draft_limit'   => array( 'max' => self::UNSIGNED_DRAFT_LIMIT, 'window_seconds' => self::UNSIGNED_DRAFT_WINDOW, 'route' => 'POST ' . self::UNSIGNED_DRAFT_ROUTE, 'status' => 'draft', 'updates_existing' => false ),
 			'configured'             => $primary !== '',
 			'current_key_id'         => $primary !== '' ? self::key_id( $primary ) : null,
 			'previous_key_id'        => $previous !== '' && $expires >= time() ? self::key_id( $previous ) : null,
@@ -353,12 +410,17 @@ class Ratesight_Request_Auth {
 		return new WP_Error( $code, 'Request authentication failed.', array( 'status' => $status ) );
 	}
 
-	private static function record_audit( $request, string $policy, string $result, string $key_id = '' ): void {
+	private static function record_audit( $request, string $policy, string $result, string $key_id = '' ): string {
 		$rows = get_option( 'ratesight_auth_audit', array() );
 		$rows = is_array( $rows ) ? $rows : array();
+		$request_id = substr( hash( 'sha256', (string) $request->get_header( 'x_ratesight_nonce' ) . microtime( true ) . random_int( 0, PHP_INT_MAX ) ), 0, 20 );
+		// Since 3.14.0: the connecting address. REMOTE_ADDR only; forwarding headers are
+		// caller-controlled and never trusted here.
+		$remote = (string) ( $_SERVER['REMOTE_ADDR'] ?? '' );
 		$rows[] = array(
 			'time'       => gmdate( 'c' ),
-			'request_id' => substr( hash( 'sha256', (string) $request->get_header( 'x_ratesight_nonce' ) . microtime( true ) ), 0, 20 ),
+			'request_id' => $request_id,
+			'ip'         => filter_var( $remote, FILTER_VALIDATE_IP ) !== false ? $remote : null,
 			'method'     => strtoupper( (string) $request->get_method() ),
 			'route'      => self::normalize_route( (string) $request->get_route() ),
 			'policy'     => $policy,
@@ -366,5 +428,6 @@ class Ratesight_Request_Auth {
 			'result'     => $result,
 		);
 		update_option( 'ratesight_auth_audit', array_slice( $rows, -100 ), false );
+		return $request_id;
 	}
 }

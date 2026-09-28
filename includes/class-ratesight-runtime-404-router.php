@@ -107,15 +107,36 @@ class Ratesight_Runtime_404_Router {
 		exit;
 	}
 
+	/** Stored option that holds an explicit per-site fuzzy mode. */
+	const OPTION = 'ratesight_fuzzy_mode';
+
+	/** Effective mode when nothing valid is stored (since 3.14.0; was 'legacy'). */
+	const DEFAULT_MODE = 'off';
+
 	/**
-	 * The per-site fuzzy mode. Reads the Ratesight_Options schema entry when the
-	 * options class is loaded (always, in the plugin); unknown/empty values fall
-	 * back to 'legacy' so this PR changes nothing until a site is explicitly
-	 * flipped.
+	 * The per-site fuzzy mode.
 	 */
 	public static function current_mode(): string {
-		$mode = class_exists( 'Ratesight_Options' ) ? (string) Ratesight_Options::get( 'fuzzy_mode' ) : 'legacy';
-		return in_array( $mode, self::MODES, true ) ? $mode : 'legacy';
+		return self::mode_state()['mode'];
+	}
+
+	/**
+	 * Effective fuzzy mode plus where it came from, for capabilities reporting.
+	 *
+	 * A valid stored value ('legacy', 'same-city-or-hub', 'off') is honored as an
+	 * explicit site choice. An unset option resolves to 'off' (a 404 stays a 404,
+	 * no speculative redirect). An unrecognized stored value also fails safe to
+	 * 'off' and is reported as not explicit.
+	 *
+	 * @return array{mode: string, explicit: bool, source: string, default: string}
+	 */
+	public static function mode_state(): array {
+		$stored = function_exists( 'get_option' ) ? get_option( self::OPTION, null ) : null;
+		if ( is_string( $stored ) && in_array( $stored, self::MODES, true ) ) {
+			return array( 'mode' => $stored, 'explicit' => true, 'source' => 'stored', 'default' => self::DEFAULT_MODE );
+		}
+		$source = ( $stored === null || $stored === false || $stored === '' ) ? 'default' : 'invalid_stored_value';
+		return array( 'mode' => self::DEFAULT_MODE, 'explicit' => false, 'source' => $source, 'default' => self::DEFAULT_MODE );
 	}
 
 	// ── Decision core (pure — no WordPress calls; unit-testable) ─────────────
