@@ -44,7 +44,9 @@ $cstart = strpos( $handler, 'private function do_handle_request' );
 $create = substr( $handler, $cstart, strpos( $handler, '// end do_handle_request' ) - $cstart );
 check( 'create-page update branch writes only the SEO fields that were sent', str_contains( $create, '( new Ratesight_SEO_Writer() )->write( $post_id, $meta_title_sent, $meta_description_sent );' ) );
 check( 'create-page new-post path keeps the title/summary defaults', str_contains( $create, '( new Ratesight_SEO_Writer() )->write( $post_id, $meta_title, $meta_description );' ) );
-check( 'plugin version is 3.14.1', str_contains( $plugin, "define( 'RATESIGHT_RELEASE_VERSION', '3.14.1' );" ) && str_contains( $plugin, 'Version:           3.14.1' ) );
+preg_match( "/define\\( 'RATESIGHT_RELEASE_VERSION', '([0-9.]+)' \\);/", $plugin, $release_match );
+preg_match( '/Version:\\s+([0-9.]+)/', $plugin, $header_match );
+check( 'plugin version is at least 3.14.1 and header matches', isset( $release_match[1], $header_match[1] ) && version_compare( $release_match[1], '3.14.1', '>=' ) && $release_match[1] === $header_match[1] );
 
 echo PHP_EOL . "{$checks} checks, {$failures} failure(s)" . PHP_EOL;
 exit( $failures > 0 ? 1 : 0 );
