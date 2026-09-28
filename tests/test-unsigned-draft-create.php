@@ -77,7 +77,7 @@ class Ratesight_Post_Creator {
 		return $id;
 	}
 }
-class Ratesight_SEO_Writer { public function write( $id ) { global $writes; $writes[] = array( 'seo', $id ); } }
+class Ratesight_SEO_Writer { public function write( $id, $title = null, $desc = null ) { global $writes; $writes[] = array( 'seo', $id, $title, $desc ); } }
 class Ratesight_Layout_Writer { public function write( $id ) { global $writes; $writes[] = array( 'layout', $id ); } }
 class Ratesight_Title_Writer { public function write( $id ) { global $writes; $writes[] = array( 'title', $id ); } }
 class Ratesight_Link_Manager { public static function reapply_manual_links() {} }
@@ -155,6 +155,28 @@ foreach ( array( 'legacy', 'observe_v2' ) as $mode ) {
 	[ $auth, $response ] = signed_create( array( 'title' => 'Existing', 'slug' => 'existing-service', 'article' => '<p>signed update</p>', 'status' => 'publish' ) );
 	check_draft_case( "{$mode}: a signed create-page keeps upsert and status behavior", $auth === true && $response->data['updated'] === true && $posts[101]['post_content'] === '<p>signed update</p>' && last_event_status() === 'publish' );
 	$posts[101]['post_content'] = 'original';
+
+	// 3.14.1: a content re-upsert of an existing slug leaves the SEO fields it did not send alone.
+	$seo_for = static function ( int $id ) { global $writes; return array_values( array_filter( $writes, static fn( $w ) => $w[0] === 'seo' && $w[1] === $id ) ); };
+	$writes = array();
+	signed_create( array( 'title' => 'Existing', 'slug' => 'existing-service', 'article' => '<p>content only</p>', 'summary' => 'A summary' ) );
+	check_draft_case( "{$mode}: update branch without meta fields writes no SEO field", $seo_for( 101 ) === array() );
+	$writes = array();
+	signed_create( array( 'title' => 'Existing', 'slug' => 'existing-service', 'article' => '<p>x</p>', 'meta_description' => 'Only the description' ) );
+	check_draft_case( "{$mode}: update branch with only meta_description leaves the title null (untouched)", $seo_for( 101 ) === array( array( 'seo', 101, null, 'Only the description' ) ) );
+	$writes = array();
+	signed_create( array( 'title' => 'Existing', 'slug' => 'existing-service', 'article' => '<p>x</p>', 'meta_title' => 'Only the title' ) );
+	check_draft_case( "{$mode}: update branch with only meta_title leaves the description null (untouched)", $seo_for( 101 ) === array( array( 'seo', 101, 'Only the title', null ) ) );
+	$posts[101]['post_content'] = 'original';
+
+	// New posts keep the creation defaults: SEO title = post title, description = summary ('' when absent).
+	$writes = array();
+	[ , $response ] = signed_create( array( 'title' => "Brand New {$mode}", 'slug' => "brand-new-{$mode}", 'article' => 'x', 'summary' => 'Short summary' ) );
+	check_draft_case( "{$mode}: a new post keeps the title and summary SEO defaults", $seo_for( (int) $response->data['id'] ) === array( array( 'seo', (int) $response->data['id'], "Brand New {$mode}", 'Short summary' ) ) );
+	$writes = array();
+	[ , $response ] = unsigned_create( array( 'title' => 'Unsigned Draft', 'article' => 'x' ) );
+	check_draft_case( "{$mode}: an unsigned draft keeps the creation defaults (title, empty description)", $seo_for( (int) $response->data['id'] ) === array( array( 'seo', (int) $response->data['id'], 'Unsigned Draft', '' ) ) );
+	Ratesight_Recovery_Log::$calls = 0; // signed creates above may log; the next mode checks unsigned drafts alone
 }
 
 $options['ratesight_auth_mode'] = 'enforce_v2';

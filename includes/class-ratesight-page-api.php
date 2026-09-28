@@ -275,12 +275,11 @@ class Ratesight_Page_API {
 	}
 
 	private function write_squirrly( int $post_id, string $field, string $value ): bool {
-		// Squirrly's store is per-URL and holds title AND description together,
-		// so a single-field write has to carry the other field through
-		// unchanged. Read current, replace one, write both.
-		$current = Ratesight_Squirrly::read( $post_id );
-		$title   = $field === 'seo_title' ? $value : $current['meta_title'];
-		$desc    = $field === 'seo_title' ? $current['meta_description'] : $value;
+		// Squirrly's store is per-URL and holds title AND description together.
+		// Since 3.14.1 write() edits only the field it is given (null leaves the
+		// other one exactly as stored, in the qss row and in post meta).
+		$title   = $field === 'seo_title' ? $value : null;
+		$desc    = $field === 'seo_title' ? null : $value;
 
 		$written = Ratesight_Squirrly::write( $post_id, $title, $desc );
 

@@ -329,6 +329,12 @@ class Ratesight_Webhook_Handler {
 		$summary             = ! empty( $data['summary'] )            ? sanitize_textarea_field( $data['summary'] )          : '';
 		$meta_title          = ! empty( $data['meta_title'] )         ? sanitize_text_field( $data['meta_title'] )           : $title;
 		$meta_description    = ! empty( $data['meta_description'] )   ? sanitize_textarea_field( $data['meta_description'] ) : $summary;
+		// Since 3.14.1: what the caller actually sent. The title/summary defaults above are for a NEW
+		// post only; on the existing-slug update branch an absent (or empty) field is null and left
+		// untouched in every SEO plugin's store, so a content re-upsert no longer overwrites the SEO
+		// title with the post title or blanks the description.
+		$meta_title_sent       = ! empty( $data['meta_title'] )       ? $meta_title       : null;
+		$meta_description_sent = ! empty( $data['meta_description'] ) ? $meta_description : null;
 		$featured_image_url  = ! empty( $data['featured_image_url'] ) ? esc_url_raw( $data['featured_image_url'] )           : '';
 		$featured_image_name = ! empty( $data['featured_image_name'] )? sanitize_file_name( $data['featured_image_name'] )  : '';
 		$custom_css_url      = ! empty( $data['custom_css_url'] )     ? esc_url_raw( $data['custom_css_url'] )               : '';
@@ -417,7 +423,9 @@ class Ratesight_Webhook_Handler {
 				'post_excerpt' => $summary,
 			) );
 
-			( new Ratesight_SEO_Writer() )->write( $post_id, $meta_title, $meta_description );
+			if ( $meta_title_sent !== null || $meta_description_sent !== null ) {
+				( new Ratesight_SEO_Writer() )->write( $post_id, $meta_title_sent, $meta_description_sent );
+			}
 			( new Ratesight_Layout_Writer() )->write( $post_id, $layout );
 			( new Ratesight_Title_Writer() )->write( $post_id, $show_title );
 			if ( $custom_css_url !== '' ) {
@@ -758,6 +766,11 @@ class Ratesight_Webhook_Handler {
 			'seo_plugin'        => $seo['source'],
 			'meta_title'        => $seo['meta_title'],
 			'meta_description'  => $seo['meta_description'],
+			// Since 3.14.1: every active SEO plugin, and Squirrly's per-field store
+			// and output switches (null when Squirrly is not active).
+			'seo_plugins'       => Ratesight_SEO_Writer::detected_plugin_ids(),
+			'squirrly'          => Ratesight_Squirrly::is_active() ? Ratesight_Squirrly::describe( $post_id ) : null,
+			'seo_write_mode'    => 'field_preserving',
 			'layout'            => get_post_meta( $post_id, '_rs_layout', true ) ?: '',
 			'show_title'        => (bool) get_post_meta( $post_id, '_rs_show_title', true ),
 			'custom_css_url'    => get_post_meta( $post_id, '_rs_custom_css_url', true ) ?: '',
@@ -913,17 +926,17 @@ class Ratesight_Webhook_Handler {
 			wp_update_post( $post_data );
 		}
 
-		// SEO fields — only if sent. write() returns what was actually stored.
+		// SEO fields, only if sent. write() returns what was actually stored.
+		// Since 3.14.1 an omitted field is passed as null and left untouched in every
+		// SEO plugin's store. Before, it was rewritten from $seo_title_before /
+		// $seo_desc_before (Yoast, then Rank Math, else empty), which blanked the title
+		// on Squirrly-only and SEOPress sites whenever only the description was sent.
 		$seo_written = null;
-		$meta_title       = array_key_exists( 'meta_title', $data )       ? sanitize_text_field( $data['meta_title'] ) : null;
-		$meta_description = array_key_exists( 'meta_description', $data ) ? sanitize_textarea_field( $data['meta_description'] ) : null;
+		$meta_title       = array_key_exists( 'meta_title', $data )       ? sanitize_text_field( (string) $data['meta_title'] ) : null;
+		$meta_description = array_key_exists( 'meta_description', $data ) ? sanitize_textarea_field( (string) $data['meta_description'] ) : null;
 		if ( $meta_title !== null || $meta_description !== null ) {
 			$writer = new Ratesight_SEO_Writer();
-			$seo_written = $writer->write(
-				$post_id,
-				$meta_title       ?? $seo_title_before,
-				$meta_description ?? $seo_desc_before
-			);
+			$seo_written = $writer->write( $post_id, $meta_title, $meta_description );
 		}
 
 		// Layout / display — only if sent.

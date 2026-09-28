@@ -18,7 +18,7 @@ $scenario = $argv[1] ?? '';
 
 // ── Parent: run every scenario in its own process ────────────────────────────
 if ( $scenario === '' ) {
-	$scenarios = array( 'absent', 'native', 'degraded', 'throwing' );
+	$scenarios = array( 'absent', 'native', 'degraded', 'throwing', 'preserve' );
 	$failed    = 0;
 	foreach ( $scenarios as $s ) {
 		$cmd = escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __FILE__ ) . ' ' . escapeshellarg( $s );
@@ -73,13 +73,21 @@ class RS_Test_Qss {
 	}
 }
 
+/** Stand-in for SQ_Models_Domain_Post: getSq() is the page's effective automation. */
+class RS_Test_PostDomain {
+	public $ID; public $post_type; public $term_id = 0; public $taxonomy = ''; public $hash; public $url = 'https://example.test/x/';
+	public static array $automation = array( 'doseo' => 1, 'do_metas' => 1 );
+	public function getSq() { return (object) self::$automation; }
+}
+
 class RS_Test_Frontend {
 	public function getPostDetails( $post ) {
 		// Mirrors Squirrly's own rule for post/page: hash = md5( ID ).
-		return (object) array(
-			'ID' => $post->ID, 'post_type' => $post->post_type, 'term_id' => 0,
-			'taxonomy' => '', 'hash' => md5( (string) $post->ID ), 'url' => 'https://example.test/x/',
-		);
+		$d            = new RS_Test_PostDomain();
+		$d->ID        = $post->ID;
+		$d->post_type = $post->post_type;
+		$d->hash      = md5( (string) $post->ID );
+		return $d;
 	}
 }
 
@@ -92,7 +100,7 @@ if ( $scenario !== 'absent' ) {
 	define( 'SQ_VERSION', '14.2.3' );
 }
 
-if ( $scenario === 'native' || $scenario === 'throwing' ) {
+if ( $scenario === 'native' || $scenario === 'throwing' || $scenario === 'preserve' ) {
 	class_alias( 'RS_Test_Frontend', 'SQ_Models_Frontend' );
 	class_alias( $scenario === 'throwing' ? 'RS_Test_ThrowingQss' : 'RS_Test_Qss', 'SQ_Models_Qss' );
 
@@ -104,8 +112,16 @@ if ( $scenario === 'native' || $scenario === 'throwing' ) {
 }
 
 // Yoast is "installed" in the native scenario too — Squirrly must still win.
-if ( $scenario === 'native' ) {
+if ( $scenario === 'native' || $scenario === 'preserve' ) {
 	define( 'WPSEO_VERSION', '28.3' );
+}
+
+// Squirrly's options accessor, for describe().
+if ( $scenario === 'preserve' ) {
+	class SQ_Classes_Helpers_Tools {
+		public static array $options = array( 'sq_auto_metas' => 1, 'sq_auto_title' => 1, 'sq_auto_description' => 1, 'sq_auto_pattern' => 1 );
+		public static function getOption( $key ) { return self::$options[ $key ] ?? false; }
+	}
 }
 
 require_once __DIR__ . '/../includes/class-ratesight-squirrly.php';
@@ -143,6 +159,11 @@ switch ( $scenario ) {
 		check( 'SEO writer used the generic fallback keys',
 			get_post_meta( 42, '_ratesight_meta_title', true ) === T
 			&& get_post_meta( 42, '_ratesight_meta_description', true ) === D );
+		// 3.14.1: an omitted field is left alone in the fallback store too.
+		( new Ratesight_SEO_Writer() )->write( 42, null, 'Only the description changes.' );
+		check( 'SEO writer with a null title keeps the fallback title',
+			get_post_meta( 42, '_ratesight_meta_title', true ) === T
+			&& get_post_meta( 42, '_ratesight_meta_description', true ) === 'Only the description changes.' );
 		check( 'SEO writer wrote no squirrly keys',
 			get_post_meta( 42, '_sq_title', true ) === ''
 			&& get_post_meta( 42, '_squirrly_seo', true ) === '' );
@@ -213,10 +234,15 @@ switch ( $scenario ) {
 		check( 'write() reports the served store was NOT written', $r['qss'] === false );
 		check( 'write() still stored the post-meta fallback', $r['postmeta'] === true
 			&& get_post_meta( 42, '_sq_title', true ) === T );
-		check( 'write() says so in the note', str_contains( $r['note'], 'only _sq_title' ) );
+		check( 'write() says so in the note', str_contains( $r['note'], 'only _sq_* post meta' ) );
 
 		$read = Ratesight_Squirrly::read( 42 );
 		check( 'read() falls back to post meta', $read['meta_title'] === T && $read['store'] === 'postmeta' );
+
+		// 3.14.1: an unchanged write with the models unreachable must not claim the served store.
+		$r = Ratesight_Squirrly::write( 42, T, D );
+		check( 'unchanged write without native models: qss not claimed', $r['qss'] === false && $r['postmeta'] === true && $r['fields']['title'] === 'unchanged' );
+		check( 'unchanged write without native models: the note says so', str_contains( $r['note'], 'served store not confirmed' ) );
 		break;
 
 	// ── Squirrly internals throw: catch, report, never take the site down ─────
@@ -227,6 +253,68 @@ switch ( $scenario ) {
 
 		$read = Ratesight_Squirrly::read( 42 );
 		check( 'read() survives and falls back to post meta', $read['meta_title'] === T && $read['store'] === 'postmeta' );
+		break;
+
+	// ── 3.14.1: writes change only the fields they are sent ───────────────────
+	case 'preserve':
+		$h   = md5( '42' );
+		$row = new RS_Test_Sq();
+		$row->title       = 'Custom Squirrly Title | Silva MD';
+		$row->description = 'Old description.';
+		$row->noindex     = '1';
+		RS_Test_Qss::$rows[ $h ] = $row;
+		$GLOBALS['rs_meta'][42]['_yoast_wpseo_title'] = 'A leftover Yoast title';
+
+		// Description only, title omitted (the pre-3.14.1 blanking bug).
+		$r = Ratesight_Squirrly::write( 42, null, D );
+		check( 'omitted title: reported as omitted', $r['fields']['title'] === 'omitted' && $r['fields']['description'] === 'written' );
+		check( 'omitted title: qss title untouched', RS_Test_Qss::$rows[ $h ]->title === 'Custom Squirrly Title | Silva MD' );
+		check( 'omitted title: qss description written', RS_Test_Qss::$rows[ $h ]->description === D && $r['qss'] === true );
+		check( 'omitted title: other row fields kept', RS_Test_Qss::$rows[ $h ]->noindex === '1' );
+		check( 'omitted title: no _sq_title post meta created', ! isset( $GLOBALS['rs_meta'][42]['_sq_title'] ) );
+		check( 'omitted title: _sq_description written', get_post_meta( 42, '_sq_description', true ) === D );
+
+		// Title sent explicitly as stored: nothing is rewritten.
+		$writes = RS_Test_Qss::$writes;
+		$r      = Ratesight_Squirrly::write( 42, 'Custom Squirrly Title | Silva MD', D );
+		check( 'unchanged values: no qss save', RS_Test_Qss::$writes === $writes );
+		check( 'unchanged values: reported unchanged', $r['fields']['title'] === 'unchanged' && $r['fields']['description'] === 'unchanged' && $r['qss'] === true );
+
+		// Squirrly's editor stores esc_html( ent2ncr() ) text; the plain text is the same value.
+		RS_Test_Qss::$rows[ $h ]->title = 'Demo &amp; Co &#124; GEO';
+		$r = Ratesight_Squirrly::write( 42, 'Demo & Co | GEO', 'New description two.' );
+		check( 'entity-escaped stored title counts as unchanged', $r['fields']['title'] === 'unchanged' && RS_Test_Qss::$rows[ $h ]->title === 'Demo &amp; Co &#124; GEO' );
+		check( 'description still written', RS_Test_Qss::$rows[ $h ]->description === 'New description two.' );
+
+		// A pattern-driven title (nothing stored) sent back as empty stays pattern-driven.
+		RS_Test_Qss::$rows[ $h ]->title = '';
+		unset( $GLOBALS['rs_meta'][42]['_sq_title'] );
+		$r = Ratesight_Squirrly::write( 42, '', 'Description three.' );
+		check( 'empty title stays empty (Automation keeps the title)', $r['fields']['title'] === 'unchanged' && RS_Test_Qss::$rows[ $h ]->title === '' && ! isset( $GLOBALS['rs_meta'][42]['_sq_title'] ) );
+
+		// The SEO writer passes null through, so Yoast's leftover key and Squirrly's title stay put.
+		RS_Test_Qss::$rows[ $h ]->title = 'Custom Squirrly Title | Silva MD';
+		$stored = ( new Ratesight_SEO_Writer() )->write( 42, null, 'Description four.' );
+		check( 'SEO writer null title: squirrly title untouched', RS_Test_Qss::$rows[ $h ]->title === 'Custom Squirrly Title | Silva MD' );
+		check( 'SEO writer null title: yoast title untouched', get_post_meta( 42, '_yoast_wpseo_title', true ) === 'A leftover Yoast title' );
+		check( 'SEO writer null title: description in both stores', RS_Test_Qss::$rows[ $h ]->description === 'Description four.' && get_post_meta( 42, '_yoast_wpseo_metadesc', true ) === 'Description four.' );
+		check( 'SEO writer read-back is the squirrly title', $stored['meta_title'] === 'Custom Squirrly Title | Silva MD' );
+
+		// fields() and describe(): per-field store and output switches.
+		RS_Test_Qss::$rows[ $h ]->title = '';
+		$GLOBALS['rs_meta'][42]['_sq_title'] = 'Meta title';
+		$f = Ratesight_Squirrly::fields( 42 );
+		check( 'fields(): title from post meta, description from the row', $f['title'] === array( 'value' => 'Meta title', 'store' => 'postmeta' ) && $f['description']['store'] === 'qss' );
+		$d = Ratesight_Squirrly::describe( 42 );
+		check( 'describe(): version and stores', $d['version'] === '14.2.3' && $d['native_store'] === true && $d['title']['store'] === 'postmeta' && $d['field_preserving'] === true );
+		check( 'describe(): emits both fields with default options', $d['emits_title'] === true && $d['emits_description'] === true && $d['auto_pattern'] === true );
+		SQ_Classes_Helpers_Tools::$options['sq_auto_description'] = 0;
+		check( 'describe(): description output switched off', Ratesight_Squirrly::describe( 42 )['emits_description'] === false );
+		SQ_Classes_Helpers_Tools::$options['sq_auto_description'] = 1;
+		RS_Test_PostDomain::$automation = array( 'doseo' => 0, 'do_metas' => 1 );
+		check( 'describe(): SEO off for this page', Ratesight_Squirrly::describe( 42 )['emits_description'] === false );
+		check( 'describe(): no legacy key', $d['legacy_key_present'] === false );
+		check( 'detected_plugin_ids(): squirrly and yoast', Ratesight_SEO_Writer::detected_plugin_ids() === array( 'squirrly', 'yoast' ) );
 		break;
 }
 
