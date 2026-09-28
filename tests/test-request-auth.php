@@ -40,6 +40,7 @@ class Auth_Request {
 }
 
 require __DIR__ . '/../includes/class-ratesight-request-auth.php';
+$_SERVER['REMOTE_ADDR'] = '203.0.113.7';
 
 $failures = 0;
 $checks = 0;
@@ -195,6 +196,12 @@ foreach ( array( 'legacy', 'observe_v2', 'enforce_v2' ) as $matrix_mode ) {
 	$invalid_mutations_rejected  = true;
 	foreach ( $mutation_routes as [ $route_method, $route_path ] ) {
 		$body = $route_method === 'DELETE' ? '' : '{"url":"https://example.com/"}';
+		if ( $route_method === 'POST' && $route_path === '/ratesight/v1/create-page' ) {
+			// The single unsigned exception (new draft only) is covered separately below.
+			$invalid = Ratesight_Request_Auth::authorize_mutation( bad_legacy_request( $route_method, $route_path, $body ) );
+			if ( error_code( $invalid ) !== ( $matrix_mode === 'enforce_v2' ? 'rs_auth_version_required' : 'rs_bad_signature' ) ) $invalid_mutations_rejected = false;
+			continue;
+		}
 		$unsigned = Ratesight_Request_Auth::authorize_mutation( unsigned_request( $route_method, $route_path, $body ) );
 		$expected_unsigned = $matrix_mode === 'enforce_v2' ? 'rs_auth_version_required' : 'rs_signature_required';
 		if ( error_code( $unsigned ) !== $expected_unsigned || last_auth_result() !== $expected_unsigned ) $unsigned_mutations_rejected = false;
@@ -202,7 +209,33 @@ foreach ( array( 'legacy', 'observe_v2', 'enforce_v2' ) as $matrix_mode ) {
 		$expected_invalid = $matrix_mode === 'enforce_v2' ? 'rs_auth_version_required' : 'rs_bad_signature';
 		if ( error_code( $invalid ) !== $expected_invalid ) $invalid_mutations_rejected = false;
 	}
-	check_auth_case( "{$matrix_mode}: every unsigned mutation route is rejected and audited", $unsigned_mutations_rejected );
+	check_auth_case( "{$matrix_mode}: every unsigned mutation route other than POST create-page is rejected and audited", $unsigned_mutations_rejected );
+	$options['ratesight_unsigned_draft_window'] = array();
+	$draft_request = unsigned_request( 'POST', '/ratesight/v1/create-page', '{"title":"t","article":"a"}' );
+	$draft_result  = Ratesight_Request_Auth::authorize_mutation( $draft_request );
+	if ( $matrix_mode === 'enforce_v2' ) {
+		check_auth_case( 'enforce_v2: unsigned POST create-page rejected', error_code( $draft_result ) === 'rs_auth_version_required' && Ratesight_Request_Auth::unsigned_draft_request_id( $draft_request ) === null );
+	} else {
+		$draft_row = $options['ratesight_auth_audit'][ array_key_last( $options['ratesight_auth_audit'] ) ];
+		check_auth_case( "{$matrix_mode}: unsigned POST create-page admitted only as an unsigned draft", $draft_result === true && Ratesight_Request_Auth::unsigned_draft_request_id( $draft_request ) === $draft_row['request_id'] );
+		check_auth_case( "{$matrix_mode}: unsigned draft audited as unsigned_draft_accepted with request id and REMOTE_ADDR", $draft_row['result'] === 'unsigned_draft_accepted' && preg_match( '/^[a-f0-9]{20}$/', $draft_row['request_id'] ) === 1 && $draft_row['ip'] === '203.0.113.7' );
+		$delete_draft = unsigned_request( 'DELETE', '/ratesight/v1/create-page', '' );
+		check_auth_case( "{$matrix_mode}: unsigned DELETE create-page still rejected", error_code( Ratesight_Request_Auth::authorize_mutation( $delete_draft ) ) === 'rs_signature_required' && Ratesight_Request_Auth::unsigned_draft_request_id( $delete_draft ) === null );
+		$bad_draft = bad_legacy_request( 'POST', '/ratesight/v1/create-page', '{}' );
+		check_auth_case( "{$matrix_mode}: invalidly signed POST create-page is rejected, not downgraded to a draft", error_code( Ratesight_Request_Auth::authorize_mutation( $bad_draft ) ) === 'rs_bad_signature' && Ratesight_Request_Auth::unsigned_draft_request_id( $bad_draft ) === null );
+		$signed_draft = good_legacy_request( $fixture['secret'], 'POST', '/ratesight/v1/create-page', '{"title":"t"}' );
+		check_auth_case( "{$matrix_mode}: a signed create-page is not restricted to draft", Ratesight_Request_Auth::authorize_mutation( $signed_draft ) === true && Ratesight_Request_Auth::unsigned_draft_request_id( $signed_draft ) === null );
+		$ok_until_limit = true;
+		for ( $n = 1; $n < Ratesight_Request_Auth::UNSIGNED_DRAFT_LIMIT; $n++ ) {
+			if ( Ratesight_Request_Auth::authorize_mutation( unsigned_request( 'POST', '/ratesight/v1/create-page', '{}' ) ) !== true ) $ok_until_limit = false;
+		}
+		check_auth_case( "{$matrix_mode}: unsigned drafts accepted up to the limit", $ok_until_limit && count( $options['ratesight_unsigned_draft_window'] ) === Ratesight_Request_Auth::UNSIGNED_DRAFT_LIMIT );
+		$over = unsigned_request( 'POST', '/ratesight/v1/create-page', '{}' );
+		check_auth_case( "{$matrix_mode}: unsigned draft over the limit returns 429 and is audited", error_code( Ratesight_Request_Auth::authorize_mutation( $over ) ) === 'rs_unsigned_draft_rate_limited' && last_auth_result() === 'rs_unsigned_draft_rate_limited' && Ratesight_Request_Auth::unsigned_draft_request_id( $over ) === null );
+		$options['ratesight_unsigned_draft_window'] = array_fill( 0, Ratesight_Request_Auth::UNSIGNED_DRAFT_LIMIT, time() - Ratesight_Request_Auth::UNSIGNED_DRAFT_WINDOW - 1 );
+		check_auth_case( "{$matrix_mode}: the limit window expires after 24h", Ratesight_Request_Auth::authorize_mutation( unsigned_request( 'POST', '/ratesight/v1/create-page', '{}' ) ) === true );
+		check_auth_case( "{$matrix_mode}: capabilities report unsigned draft creation and its limit", Ratesight_Request_Auth::capability_auth()['unsigned_draft_create'] === true && Ratesight_Request_Auth::capability_auth()['unsigned_draft_limit']['max'] === 30 && Ratesight_Request_Auth::capability_auth()['unsigned_draft_limit']['window_seconds'] === 86400 );
+	}
 	check_auth_case( "{$matrix_mode}: every invalidly signed mutation route is rejected", $invalid_mutations_rejected );
 	$unsigned_reads_rejected = true;
 	foreach ( $read_routes as [ $route_method, $route_path ] ) {
@@ -226,6 +259,13 @@ foreach ( array( 'legacy', 'observe_v2', 'enforce_v2' ) as $matrix_mode ) {
 $audit_results = array_column( $options['ratesight_auth_audit'] ?? array(), 'result' );
 check_auth_case( 'no request is ever recorded as unsigned accepted or observed', ! in_array( 'legacy_unsigned_observed', $audit_results, true ) && ! in_array( 'legacy_unsigned_accepted', $audit_results, true ) );
 check_auth_case( 'capabilities report unsigned requests are not accepted', Ratesight_Request_Auth::capability_auth()['unsigned_accepted'] === false );
+check_auth_case( 'enforce_v2 capabilities report no unsigned draft creation', Ratesight_Request_Auth::capability_auth()['unsigned_draft_create'] === false );
+check_auth_case( 'unsigned draft limit is a named constant of 30 per 24h', Ratesight_Request_Auth::UNSIGNED_DRAFT_LIMIT === 30 && Ratesight_Request_Auth::UNSIGNED_DRAFT_WINDOW === 86400 );
+$_SERVER['REMOTE_ADDR'] = 'not-an-ip';
+Ratesight_Request_Auth::authorize_mutation( unsigned_request( 'POST', '/ratesight/v1/redirect', '{}' ) );
+$ip_row = $options['ratesight_auth_audit'][ array_key_last( $options['ratesight_auth_audit'] ) ];
+check_auth_case( 'audit ip is null when REMOTE_ADDR is not an address, and forwarding headers are ignored', $ip_row['ip'] === null && strpos( file_get_contents( __DIR__ . '/../includes/class-ratesight-request-auth.php' ), 'X_FORWARDED' ) === false );
+$_SERVER['REMOTE_ADDR'] = '203.0.113.7';
 unset( $options['ratesight_auth_ever_enforced'] );
 $options['ratesight_auth_mode'] = 'legacy';
 unset( $options['ratesight_webhook_secret'] );

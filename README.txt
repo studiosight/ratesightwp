@@ -70,9 +70,11 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 3.14.0 - Signed requests only; fuzzy 404 redirects off by default
 
-  - Security: protected REST routes (every page, redirect, related-links, media alt, IndexNow, performance snapshot and plugin-update write, plus the protected reads) now reject requests that carry no signature or an invalid one, in every authentication mode. Earlier versions accepted unsigned requests in legacy mode, and in observe_v2 when no signature header was sent.
+  - Security: protected REST routes (every page, redirect, related-links, media alt, IndexNow, performance snapshot and plugin-update write, plus the protected reads) now reject requests that carry an invalid signature, and requests that carry none (with the draft-only exception below), in every authentication mode. Earlier versions accepted unsigned requests in legacy mode, and in observe_v2 when no signature header was sent.
   - legacy mode accepts a valid legacy body signature; observe_v2 accepts a valid rs-hmac-v2 or legacy signature; enforce_v2 is unchanged (rs-hmac-v2 only).
-  - capabilities.auth reports unsigned_accepted: false.
+  - One compatibility exception in legacy and observe_v2: an unsigned POST /create-page may create a NEW DRAFT only. Any requested status is downgraded to draft, an existing post is never updated (a unique slug is used instead), a payload naming an explicit post id is refused, no external stylesheet is attached, and at most 30 such drafts are accepted per site per 24 hours (then 429). Each one is audited as unsigned_draft_accepted.
+  - The auth audit now records the connecting address (REMOTE_ADDR only).
+  - capabilities.auth reports unsigned_accepted: false, unsigned_draft_create and unsigned_draft_limit.
   - The runtime 404 fuzzy router is Off unless a site has an explicitly stored mode: a missing page stays a 404 instead of being redirected to the most similar slug. Sites with a stored mode (legacy, same-city-or-hub or off) keep it.
   - Saving another settings form no longer pins an unset fuzzy mode to a value nobody chose.
   - capabilities.fuzzy_404 reports the effective mode, whether it was explicitly stored, and the default.

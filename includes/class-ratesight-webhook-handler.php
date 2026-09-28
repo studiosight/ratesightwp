@@ -307,6 +307,21 @@ class Ratesight_Webhook_Handler {
 			return new \WP_REST_Response( array( 'ok' => false, 'message' => $validation->get_error_message() ), 422 );
 		}
 
+		// 1b. Unsigned draft creation (3.14.0). The auth layer admitted this request
+		//     without a signature only for a NEW DRAFT: refuse anything that names an
+		//     existing post, and below force draft status, force creation under a
+		//     unique slug, and skip writes that reach beyond the new draft.
+		$unsigned_request_id = class_exists( 'Ratesight_Request_Auth' ) ? Ratesight_Request_Auth::unsigned_draft_request_id( $request ) : null;
+		$unsigned_draft      = $unsigned_request_id !== null;
+		if ( $unsigned_draft ) {
+			foreach ( array( 'id', 'ID', 'post_id', 'target_id', 'target_post_id' ) as $target_key ) {
+				if ( isset( $data[ $target_key ] ) && $data[ $target_key ] !== '' && $data[ $target_key ] !== 0 && $data[ $target_key ] !== '0' ) {
+					Ratesight_Logger::log_error( 'Unsigned create-page refused: payload targets an existing post id.', null, '', $raw_payload );
+					return new \WP_REST_Response( array( 'ok' => false, 'code' => 'rs_unsigned_target_refused', 'message' => 'An unsigned request can only create a new draft; it cannot target an existing post.', 'request_id' => $unsigned_request_id ), 403 );
+				}
+			}
+		}
+
 		// 2. Sanitise all incoming fields.
 		// Accept content_html (tool contract) OR article (legacy field name).
 		$title               = sanitize_text_field( $data['title'] );
@@ -361,10 +376,20 @@ class Ratesight_Webhook_Handler {
 		$request_status      = ! empty( $data['status'] ) && in_array( $data['status'], $valid_statuses, true ) ? $data['status'] : '';
 		$dry_run             = filter_var( $data['dry_run'] ?? false, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE ) ?? false;
 
+		// Unsigned draft: any requested status (publish, future, private, pending) is
+		// downgraded to draft rather than refused, the post is always NEW (never an
+		// upsert) under a slug no existing post uses, and no external stylesheet is
+		// attached.
+		if ( $unsigned_draft ) {
+			$request_status = 'draft';
+			$custom_css_url = '';
+			$slug           = self::unique_unsigned_slug( $slug !== '' ? $slug : 'ratesight-draft' );
+		}
+
 		// 3. Duplicate slug — update the existing post instead of rejecting.
 		// Pass "update": false in the payload to force-create a new post instead.
-		$force_create = isset( $data['update'] ) && $data['update'] === false;
-		$existing     = get_page_by_path( $slug, OBJECT, $post_type );
+		$force_create = $unsigned_draft || ( isset( $data['update'] ) && $data['update'] === false );
+		$existing     = $unsigned_draft ? null : get_page_by_path( $slug, OBJECT, $post_type );
 
 		if ( $existing && ! $force_create ) {
 			$post_id = $existing->ID;
@@ -532,6 +557,21 @@ class Ratesight_Webhook_Handler {
 		$new_post     = get_post( $post_id );
 		$content_hash = md5( $new_post->post_content . $new_post->post_title . $new_post->post_excerpt );
 
+		if ( $unsigned_draft ) {
+			Ratesight_Logger::log_update( $log_id, $post_id, Ratesight_Logger::STATUS_PENDING, 'Unsigned request: created as a new draft only (request ' . $unsigned_request_id . ').' );
+			return new \WP_REST_Response( array(
+				'ok'             => true,
+				'created'        => true,
+				'updated'        => false,
+				'id'             => $post_id,
+				'url'            => $expected_url,
+				'content_hash'   => $content_hash,
+				'status'         => 'draft',
+				'unsigned_draft' => true,
+				'request_id'     => $unsigned_request_id,
+			), 200 );
+		}
+
 		Ratesight_Recovery_Log::log( 'recreate', home_url( '/' . $slug . '/' ), $expected_url, [ 'post_id' => $post_id, 'title' => $title ] );
 
 		return new \WP_REST_Response( array(
@@ -543,6 +583,22 @@ class Ratesight_Webhook_Handler {
 			'content_hash' => $content_hash,
 		), 200 );
 	} // end do_handle_request
+
+	/**
+	 * A slug no existing post, page or Ratesight page uses (any status), so an
+	 * unsigned draft can never shadow or collide with existing content.
+	 */
+	private static function unique_unsigned_slug( string $slug ): string {
+		$types     = array( 'post', 'page', 'ratesight_page' );
+		$candidate = $slug;
+		for ( $n = 2; $n <= 50 && get_page_by_path( $candidate, OBJECT, $types ); $n++ ) {
+			$candidate = $slug . '-' . $n;
+		}
+		if ( get_page_by_path( $candidate, OBJECT, $types ) ) {
+			$candidate = $slug . '-' . strtolower( wp_generate_password( 8, false, false ) );
+		}
+		return $candidate;
+	}
 
 	// -------------------------------------------------------------------------
 	// Shared: resolve URL → post ID
