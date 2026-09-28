@@ -4,7 +4,7 @@ Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 3.14.1
+Stable tag: 3.14.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,14 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.14.2 - Ratesight REST responses are never cached
+
+  - Every response in the ratesight/v1 REST namespace (capabilities, signed reads, writes, and every error including failed signature or permission checks and unknown routes) is now sent with Cache-Control: no-store, no-cache, must-revalidate, max-age=0, private; Pragma: no-cache; Expires: 0; CDN-Cache-Control: no-store; Cloudflare-CDN-Cache-Control: no-store; Surrogate-Control: no-store. Earlier versions left caching to the site, so a CDN could keep the capabilities document (and report an old plugin_version) for hours after an update, or serve a stored signed read to a later request.
+  - Vary lists Authorization, Origin and the X-Ratesight signature headers.
+  - Caching headers already set on these responses by a theme or caching plugin (for example Cache-Control: public, max-age=86400) are replaced, and ETag and Last-Modified are removed. The headers are applied on rest_post_dispatch and sent again just before the body is written.
+  - Page caches are told to skip these requests: DONOTCACHEPAGE (WP Super Cache, W3 Total Cache, WP Rocket and others), LiteSpeed Cache (LSCACHE_NO_CACHE, litespeed_control_set_nocache and X-LiteSpeed-Cache-Control: no-cache), WP Rocket (do_rocket_generate_caching_files) and nginx fastcgi caches (X-Accel-Expires: 0).
+  - Other REST namespaces are not changed.
 
 3.14.1 - SEO writes change only the fields they are sent
 
