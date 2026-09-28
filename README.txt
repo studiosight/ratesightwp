@@ -72,6 +72,8 @@ are never sent in URLs or displayed in the client-facing plugin.
 
   - POST /update-page with only meta_description (or only meta_title) now leaves the other field untouched in every SEO plugin's store. Earlier versions rewrote the omitted field from the Yoast or Rank Math value, which blanked the Squirrly SEO and SEOPress title whenever only the description was sent.
   - Squirrly SEO: a field whose stored value already equals the value sent (compared as text, so Squirrly's HTML-escaped storage matches) is not rewritten, and the Squirrly table row is saved only when a field changes.
+  - POST /create-page on an existing slug (content re-upsert) now writes only the SEO fields it is sent. Earlier versions set the SEO title to the post title and the description to the summary (empty when absent) on every SEO plugin, overwriting a hand-written title and blanking the description. New posts keep those defaults.
+  - Squirrly SEO: a write whose values are already stored reports the Squirrly table as confirmed only when its row was read through Squirrly's own models.
   - GET /update-page reports every active SEO plugin (seo_plugins), a squirrly block with the stored value and the store of each field (Squirrly table row, _sq_* post meta, or none), Squirrly's output switches for this page, and seo_write_mode field_preserving.
 
 3.14.0 - Signed requests only; fuzzy 404 redirects off by default

@@ -256,10 +256,14 @@ class Ratesight_Squirrly {
 		}
 
 		if ( ! $changes ) {
-			// Nothing to change: the stored effective values already are the requested ones.
-			$result['qss']      = true;
+			// Nothing to change: the stored effective values already are the requested ones. qss is
+			// true only when those values were read from Squirrly's own row through its models; with
+			// the models unreachable only the post-meta layer is known to hold them.
+			$result['qss']      = $current['native_read'];
 			$result['postmeta'] = true;
-			$result['note']     = 'squirrly values unchanged, nothing written';
+			$result['note']     = $current['native_read']
+				? 'squirrly values unchanged, nothing written'
+				: 'squirrly values unchanged in _sq_* post meta; squirrly models not reachable, served store not confirmed';
 			return $result;
 		}
 

@@ -238,6 +238,11 @@ switch ( $scenario ) {
 
 		$read = Ratesight_Squirrly::read( 42 );
 		check( 'read() falls back to post meta', $read['meta_title'] === T && $read['store'] === 'postmeta' );
+
+		// 3.14.1: an unchanged write with the models unreachable must not claim the served store.
+		$r = Ratesight_Squirrly::write( 42, T, D );
+		check( 'unchanged write without native models: qss not claimed', $r['qss'] === false && $r['postmeta'] === true && $r['fields']['title'] === 'unchanged' );
+		check( 'unchanged write without native models: the note says so', str_contains( $r['note'], 'served store not confirmed' ) );
 		break;
 
 	// ── Squirrly internals throw: catch, report, never take the site down ─────

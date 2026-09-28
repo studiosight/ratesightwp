@@ -40,6 +40,10 @@ check( 'GET update-page states the write mode', str_contains( $read, "'seo_write
 
 check( 'SEO writer accepts null for an omitted field', (bool) preg_match( '/public function write\( int \$post_id, \?string \$meta_title, \?string \$meta_description \)/', $writer ) );
 check( 'page API single-field squirrly write passes null for the other field', str_contains( $pageapi, "\$title   = \$field === 'seo_title' ? \$value : null;" ) && str_contains( $pageapi, "\$desc    = \$field === 'seo_title' ? null : \$value;" ) );
+$cstart = strpos( $handler, 'private function do_handle_request' );
+$create = substr( $handler, $cstart, strpos( $handler, '// end do_handle_request' ) - $cstart );
+check( 'create-page update branch writes only the SEO fields that were sent', str_contains( $create, '( new Ratesight_SEO_Writer() )->write( $post_id, $meta_title_sent, $meta_description_sent );' ) );
+check( 'create-page new-post path keeps the title/summary defaults', str_contains( $create, '( new Ratesight_SEO_Writer() )->write( $post_id, $meta_title, $meta_description );' ) );
 check( 'plugin version is 3.14.1', str_contains( $plugin, "define( 'RATESIGHT_RELEASE_VERSION', '3.14.1' );" ) && str_contains( $plugin, 'Version:           3.14.1' ) );
 
 echo PHP_EOL . "{$checks} checks, {$failures} failure(s)" . PHP_EOL;
