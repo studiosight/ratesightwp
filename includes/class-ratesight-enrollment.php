@@ -31,6 +31,7 @@ class Ratesight_Enrollment {
 	private const RECEIPT_OPTION              = 'ratesight_enrollment_receipt';
 	private const INSTALLATION_RECEIPT_OPTION = 'ratesight_installation_report_receipt';
 	private const CLAIM_RECEIPT_OPTION        = 'ratesight_claim_receipt';
+	private const CHECKED_VERSION_OPTION      = 'ratesight_enrollment_checked_version';
 	private const UUID_PATTERN                = '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/';
 
 	public static function register_route(): void {
@@ -53,6 +54,12 @@ class Ratesight_Enrollment {
 	public static function ensure_schedule(): void {
 		if ( ! wp_next_scheduled( self::DAILY_HOOK ) ) {
 			wp_schedule_event( time() + 300, 'daily', self::DAILY_HOOK );
+		}
+		// After a plugin update, report once within a minute instead of waiting up to a day.
+		// The marker is autoloaded, so this adds no query to normal page loads.
+		if ( get_option( self::CHECKED_VERSION_OPTION, '' ) !== self::plugin_version() ) {
+			update_option( self::CHECKED_VERSION_OPTION, self::plugin_version(), true );
+			self::schedule_retry( 60 );
 		}
 	}
 
@@ -205,13 +212,23 @@ class Ratesight_Enrollment {
 	}
 
 	public static function send(): void {
-		if ( Ratesight_Pairing::is_connected() ) {
-			return;
+		// A paired site that was never accepted into managed updates (paired before
+		// enrollment existed) announces itself so an operator can approve it. A paired
+		// site whose enrollment was accepted never announces again, even after a plugin
+		// update changes the fingerprint.
+		$paired = Ratesight_Pairing::is_connected();
+		if ( $paired ) {
+			$prior = get_option( self::RECEIPT_OPTION, array() );
+			if ( is_array( $prior ) && true === ( $prior['accepted'] ?? false ) ) {
+				return;
+			}
 		}
 
 		$oid = trim( (string) Ratesight_Options::get( 'code_id' ) );
 		if ( ! preg_match( '/^[0-9]{1,20}$/', $oid ) ) {
-			self::report_installation();
+			if ( ! $paired ) {
+				self::report_installation();
+			}
 			return;
 		}
 
@@ -219,7 +236,9 @@ class Ratesight_Enrollment {
 		$identity    = self::identity();
 		if ( null === $site_origin || is_wp_error( $identity ) ) {
 			self::store_receipt( $oid, $site_origin, 'identity_unavailable', 0, false );
-			self::schedule_retry();
+			if ( ! $paired ) {
+				self::schedule_retry();
+			}
 			return;
 		}
 
@@ -249,7 +268,8 @@ class Ratesight_Enrollment {
 		$result   = self::post_to_dashboard( $payload );
 		$accepted = $result['status'] >= 200 && $result['status'] < 300 && in_array( $result['code'], array( 'wordpress_enrollment_pending_approval', 'wordpress_enrollment_duplicate' ), true );
 		self::store_receipt( $oid, $site_origin, $result['code'], $result['status'], $accepted, $fingerprint );
-		if ( ! $accepted ) {
+		// Paired sites keep working without enrollment, so they retry only on the daily report.
+		if ( ! $accepted && ! $paired ) {
 			self::schedule_retry();
 		}
 	}

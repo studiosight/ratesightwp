@@ -49,6 +49,8 @@ function wp_schedule_single_event( $timestamp, $hook ) { global $scheduled; $sch
 function wp_remote_retrieve_response_code( $response ) { return $response['response']['code'] ?? 0; }
 function wp_remote_retrieve_body( $response ) { return $response['body'] ?? ''; }
 function register_rest_route() {}
+function wp_schedule_event( $timestamp, $recurrence, $hook ) { global $scheduled; $scheduled[ $hook ] = $timestamp; return true; }
+$reject_next = false;
 
 function wp_remote_post( $url, $args ) {
 	global $requests;
@@ -68,6 +70,10 @@ function wp_remote_post( $url, $args ) {
 	$signature  = base64_decode( strtr( $proof->data['signature'], '-_', '+/' ), true );
 	if ( ! ( $proof instanceof WP_REST_Response ) || 1 !== openssl_verify( $message, $signature, $public_pem, OPENSSL_ALGO_SHA256 ) ) {
 		return new WP_Error( 'challenge_verification_failed' );
+	}
+	global $reject_next;
+	if ( ! empty( $reject_next ) ) {
+		return array( 'response' => array( 'code' => 429 ), 'body' => json_encode( array( 'ok' => false, 'code' => 'wordpress_enrollment_rate_limited' ) ) );
 	}
 	return array(
 		'response' => array( 'code' => 200 ),
@@ -108,8 +114,34 @@ Ratesight_Enrollment::option_updated( 'wp_ratesight_code_id', '2', '3' );
 check_enrollment_case( 'OID changes clear acceptance and enqueue a near-term retry', get_option( 'ratesight_enrollment_receipt', null ) === null && isset( $scheduled[ Ratesight_Enrollment::RETRY_HOOK ] ) );
 
 $paired = true;
+update_option( 'ratesight_enrollment_receipt', array( 'accepted' => true, 'fingerprint' => 'from-an-older-plugin-version' ) );
 Ratesight_Enrollment::send();
-check_enrollment_case( 'already paired installations never announce again', count( $requests ) === 1 );
+check_enrollment_case( 'paired installation with an accepted enrollment never announces again, even after an update', count( $requests ) === 1 );
+
+delete_option( 'ratesight_enrollment_receipt' );
+$scheduled = array();
+Ratesight_Enrollment::send();
+check_enrollment_case( 'paired installation that never enrolled announces once for managed updates', count( $requests ) === 2 && Ratesight_Enrollment::status()['accepted'] === true );
+Ratesight_Enrollment::send();
+check_enrollment_case( 'paired installation stays quiet once its enrollment is accepted', count( $requests ) === 2 );
+
+delete_option( 'ratesight_enrollment_receipt' );
+$reject_next = true;
+Ratesight_Enrollment::send();
+check_enrollment_case( 'paired installation does not queue a 15 minute retry after a refusal', count( $requests ) === 3 && ! isset( $scheduled[ Ratesight_Enrollment::RETRY_HOOK ] ) && Ratesight_Enrollment::status()['accepted'] === false );
+$reject_next = false;
+
+$options['wp_ratesight_code_id'] = '';
+Ratesight_Enrollment::send();
+check_enrollment_case( 'paired installation without a client id sends no installation report', count( $requests ) === 3 );
+$options['wp_ratesight_code_id'] = '2';
+
+$paired = false;
+Ratesight_Enrollment::ensure_schedule();
+check_enrollment_case( 'a new plugin version schedules one near-term report', isset( $scheduled[ Ratesight_Enrollment::RETRY_HOOK ] ) && get_option( 'ratesight_enrollment_checked_version' ) === '3.12.0' );
+$scheduled = array( Ratesight_Enrollment::DAILY_HOOK => 1 );
+Ratesight_Enrollment::ensure_schedule();
+check_enrollment_case( 'the same plugin version does not schedule another report', ! isset( $scheduled[ Ratesight_Enrollment::RETRY_HOOK ] ) );
 
 echo $failures ? "{$failures} ENROLLMENT CHECKS FAILED\n" : "ALL ENROLLMENT CHECKS PASSED\n";
 exit( $failures ? 1 : 0 );
