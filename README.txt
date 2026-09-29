@@ -4,7 +4,7 @@ Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 3.14.2
+Stable tag: 3.14.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,13 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.14.3 - Paired sites can join managed plugin updates
+
+  - A site that was paired with the dashboard before plugin enrollment existed now sends its enrollment request once, so an operator can approve it into managed plugin updates. Before, a paired site never sent one, so it could only be updated by hand.
+  - A paired site whose enrollment was already accepted never sends it again, including after a plugin update. A paired site that is refused retries only with the daily report, not every 15 minutes, and never sends an installation report.
+  - After any plugin update the site reports within about a minute instead of waiting up to a day.
+  - Enrollment still carries no secret; the dashboard verifies the installation key and an operator approves every site.
 
 3.14.2 - Ratesight REST responses are never cached
 
