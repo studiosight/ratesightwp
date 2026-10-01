@@ -4,7 +4,7 @@ Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 3.15.3
+Stable tag: 3.15.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,15 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.15.4 - Ratesight CRM posts publish by default; no per-site setting
+
+  - A post that arrives from the Ratesight CRM's address (REMOTE_ADDR only) now gets the Final Post Status on every site by default. 3.15.1 to 3.15.3 needed a per-site switch, and 3.15.2 also a per-site key in the CRM webhook URL, which meant editing every site and every CRM webhook.
+  - The setting is now an opt-out: AI SEO Pages > Ratesight CRM posts > "Hold posts sent by the Ratesight CRM as drafts" (option ratesight_crm_posts_hold). The old opt-in option ratesight_crm_publisher_trust is no longer read.
+  - The CRM key is optional. A site can require it (signed POST /crm-publish { require_key: true }); then a CRM post without the key is a draft. A key that is sent must be right on every site: a wrong key is a draft, and a key from any other address is never accepted.
+  - Publish limit back to 500 per site per 24 hours (3.15.2 set 10; the CRM sends a busy site more than that). Past it the post is still created, as a draft.
+  - Unchanged: new posts only (never an update, explicit post id refused, no external stylesheet), every auto-publish is logged, unsigned requests from any other address are drafts, enforce_v2 rejects every unsigned request.
+  - POST /crm-publish { enabled } now writes the opt-out; GET reports key_required. capabilities.auth.trusted_publisher reports requires_key from the site setting and default on.
 
 3.15.3 - Missing pages are handled automatically by default
 

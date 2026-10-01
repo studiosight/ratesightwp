@@ -12,7 +12,7 @@
  *
  * Endpoint (namespace ratesight/v1):
  *   GET  /crm-publish  signed read: switch state, key fingerprint, limits, recent auto-publishes
- *   POST /crm-publish  signed mutation: { enabled?: bool, rotate_key?: bool, dry_run?: bool }
+ *   POST /crm-publish  signed mutation: { enabled?: bool, require_key?: bool, rotate_key?: bool, dry_run?: bool }
  *                      Returns the CRM webhook URL (with the key) while the switch is on.
  *
  * @package    Ratesight
@@ -124,7 +124,8 @@ class Ratesight_CRM_Publish {
 		$rows = get_option( self::LOG_OPTION, array() );
 		return array(
 			'enabled'          => Ratesight_Request_Auth::trusted_publisher_enabled(),
-			'effective'        => Ratesight_Request_Auth::mode() !== 'enforce_v2' && Ratesight_Request_Auth::trusted_publisher_enabled() && self::key() !== '',
+			'effective'        => Ratesight_Request_Auth::mode() !== 'enforce_v2' && Ratesight_Request_Auth::trusted_publisher_enabled() && ( ! Ratesight_Request_Auth::trusted_publisher_key_required() || self::key() !== '' ),
+			'key_required'     => Ratesight_Request_Auth::trusted_publisher_key_required(),
 			'key_configured'   => self::key() !== '',
 			'key_id'           => self::key_fingerprint(),
 			'key_transport'    => array( 'query' => self::QUERY_PARAM, 'header' => 'X-Ratesight-CRM-Key' ),
@@ -152,16 +153,28 @@ class Ratesight_CRM_Publish {
 				return new \WP_REST_Response( array( 'ok' => false, 'code' => 'rs_crm_publish_enabled_invalid', 'message' => '"enabled" must be true or false.' ), 422 );
 			}
 		}
+		$require_key = null;
+		if ( array_key_exists( 'require_key', $data ) ) {
+			$require_key = filter_var( $data['require_key'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE );
+			if ( $require_key === null ) {
+				return new \WP_REST_Response( array( 'ok' => false, 'code' => 'rs_crm_publish_require_key_invalid', 'message' => '"require_key" must be true or false.' ), 422 );
+			}
+		}
 		$before = self::status();
 		unset( $before['recent'] );
 		if ( $dry_run ) {
-			return new \WP_REST_Response( array( 'ok' => true, 'dry_run' => true, 'before' => $before, 'would' => array( 'enabled' => $enabled ?? $before['enabled'], 'rotate_key' => $rotate || ( ( $enabled ?? $before['enabled'] ) && ! $before['key_configured'] ) ) ), 200 );
+			return new \WP_REST_Response( array( 'ok' => true, 'dry_run' => true, 'before' => $before, 'would' => array( 'enabled' => $enabled ?? $before['enabled'], 'require_key' => $require_key ?? $before['key_required'], 'rotate_key' => $rotate || ( ( $enabled ?? $before['enabled'] ) && ( $require_key ?? $before['key_required'] ) && ! $before['key_configured'] ) ) ), 200 );
 		}
 		if ( $enabled !== null ) {
-			update_option( Ratesight_Request_Auth::TRUSTED_PUBLISHER_SETTING, $enabled ? 1 : 0 );
+			// The stored option is the opt-out (3.15.4): enabled:false holds CRM posts as drafts.
+			update_option( Ratesight_Request_Auth::TRUSTED_PUBLISHER_SETTING, $enabled ? 0 : 1 );
+		}
+		if ( $require_key !== null ) {
+			update_option( Ratesight_Request_Auth::TRUSTED_PUBLISHER_KEY_REQUIRED, $require_key ? 1 : 0 );
 		}
 		$on  = Ratesight_Request_Auth::trusted_publisher_enabled();
-		$key = ( $on || $rotate ) ? self::ensure_key( $rotate ) : self::key();
+		// A key is made only when this site requires one (or on rotate_key); the default needs none.
+		$key = ( $rotate || ( $on && Ratesight_Request_Auth::trusted_publisher_key_required() ) ) ? self::ensure_key( $rotate ) : self::key();
 		$after = self::status();
 		unset( $after['recent'] );
 		$response = array( 'ok' => true, 'dry_run' => false, 'before' => $before, 'after' => $after );

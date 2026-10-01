@@ -27,12 +27,21 @@ class Ratesight_Request_Auth {
 	 * other address.
 	 */
 	public const TRUSTED_PUBLISHER_ADDRESSES = array( '67.199.171.44' );
-	public const TRUSTED_PUBLISHER_SETTING   = 'ratesight_crm_publisher_trust';
 	/**
-	 * New posts published for the trusted publisher per site per window. Since 3.15.2
-	 * (was 500): past the limit a CRM post is still created, as a draft.
+	 * Since 3.15.4 publishing CRM posts is the default on every site and this option is
+	 * the opt-out: 1 = hold CRM posts as drafts. (3.15.1 to 3.15.3 used the opt-in
+	 * option ratesight_crm_publisher_trust, which is no longer read: a site should not
+	 * need a per-site setting, and 200+ sites would each have needed one.)
 	 */
-	public const TRUSTED_PUBLISHER_LIMIT     = 10;
+	public const TRUSTED_PUBLISHER_SETTING   = 'ratesight_crm_posts_hold';
+	/** Since 3.15.4 the CRM key is optional; 1 here makes it required on this site. */
+	public const TRUSTED_PUBLISHER_KEY_REQUIRED = 'ratesight_crm_key_required';
+	/**
+	 * New posts published for the trusted publisher per site per window (500; 3.15.2
+	 * and 3.15.3 used 10, below what the CRM sends a busy site). Past the limit a CRM
+	 * post is still created, as a draft.
+	 */
+	public const TRUSTED_PUBLISHER_LIMIT     = 500;
 	public const TRUSTED_PUBLISHER_WINDOW    = 86400;
 	private const TRUSTED_PUBLISHER_OPTION   = 'ratesight_trusted_publisher_window';
 	private static $operational_candidates = array();
@@ -330,8 +339,14 @@ class Ratesight_Request_Auth {
 		return true;
 	}
 
+	/** On unless the site opted out (3.15.4). */
 	public static function trusted_publisher_enabled(): bool {
-		return (bool) get_option( self::TRUSTED_PUBLISHER_SETTING, 0 );
+		return ! (bool) get_option( self::TRUSTED_PUBLISHER_SETTING, 0 );
+	}
+
+	/** Whether this site requires the CRM key as well as the CRM address (off by default). */
+	public static function trusted_publisher_key_required(): bool {
+		return (bool) get_option( self::TRUSTED_PUBLISHER_KEY_REQUIRED, 0 );
 	}
 
 	private static function is_trusted_publisher_source(): bool {
@@ -348,20 +363,18 @@ class Ratesight_Request_Auth {
 		$has_key    = class_exists( 'Ratesight_CRM_Publish' ) && Ratesight_CRM_Publish::provided_key( $request ) !== '';
 		$from_crm   = self::is_trusted_publisher_source();
 		if ( ! self::trusted_publisher_enabled() ) {
-			return $has_key ? 'crm_publish_off' : '';
+			return ( $has_key || $from_crm ) ? 'crm_publish_off' : '';
 		}
 		if ( ! $from_crm ) {
 			// The key is never accepted from any other address.
 			return $has_key ? 'crm_key_wrong_source' : '';
 		}
-		if ( ! class_exists( 'Ratesight_CRM_Publish' ) ) {
-			return 'crm_key_missing';
+		// Since 3.15.4 the CRM address is enough unless this site requires the key.
+		// A key that IS sent must still be right: a wrong one is never waved through.
+		if ( ! $has_key ) {
+			return self::trusted_publisher_key_required() ? 'crm_key_missing' : 'trusted';
 		}
-		$state = Ratesight_CRM_Publish::key_state( $request );
-		if ( $state === 'valid' ) {
-			return 'trusted';
-		}
-		return $state === 'missing' ? 'crm_key_missing' : 'crm_key_invalid';
+		return Ratesight_CRM_Publish::key_state( $request ) === 'valid' ? 'trusted' : 'crm_key_invalid';
 	}
 
 	private static function accept_trusted_publisher( $request, string $policy ) {
@@ -543,7 +556,7 @@ class Ratesight_Request_Auth {
 			// from a listed address creates a new post with the site's Final Post Status.
 			// Since 3.15.2: also requires the site's CRM key (requires_key), and past the
 			// limit a CRM post is created as a draft (over_limit).
-			'trusted_publisher'      => array( 'enabled' => self::mode() !== 'enforce_v2' && self::trusted_publisher_enabled(), 'addresses' => self::TRUSTED_PUBLISHER_ADDRESSES, 'requires_key' => true, 'key_configured' => class_exists( 'Ratesight_CRM_Publish' ) && Ratesight_CRM_Publish::key() !== '', 'max' => self::TRUSTED_PUBLISHER_LIMIT, 'window_seconds' => self::TRUSTED_PUBLISHER_WINDOW, 'over_limit' => 'draft', 'route' => 'POST ' . self::UNSIGNED_DRAFT_ROUTE, 'updates_existing' => false ),
+			'trusted_publisher'      => array( 'enabled' => self::mode() !== 'enforce_v2' && self::trusted_publisher_enabled(), 'addresses' => self::TRUSTED_PUBLISHER_ADDRESSES, 'requires_key' => self::trusted_publisher_key_required(), 'default' => 'on', 'key_configured' => class_exists( 'Ratesight_CRM_Publish' ) && Ratesight_CRM_Publish::key() !== '', 'max' => self::TRUSTED_PUBLISHER_LIMIT, 'window_seconds' => self::TRUSTED_PUBLISHER_WINDOW, 'over_limit' => 'draft', 'route' => 'POST ' . self::UNSIGNED_DRAFT_ROUTE, 'updates_existing' => false ),
 			'configured'             => $primary !== '',
 			'current_key_id'         => $primary !== '' ? self::key_id( $primary ) : null,
 			'previous_key_id'        => $previous !== '' && $expires >= time() ? self::key_id( $previous ) : null,
