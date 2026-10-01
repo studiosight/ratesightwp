@@ -147,7 +147,8 @@ $ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
 				<input type="checkbox" name="ratesight_crm_publisher_trust" value="1" <?php checked( 1, (int) $o['crm_publisher_trust'] ); ?>>
 				Use the status above for posts sent by the Ratesight CRM
 			</label>
-			<p class="description">Off (default): posts the CRM sends are saved as drafts, at most 30 per day, because the CRM does not sign its requests. On: a post that arrives from the Ratesight CRM's address gets the Final Post Status (or Reference Page Status) above. These are always new posts; they never change existing content. Requests from any other address are still saved as drafts.</p>
+			<p class="description">Off (default): posts the CRM sends are saved as drafts, at most 30 per day, because the CRM does not sign its requests. On: a post gets the Final Post Status (or Reference Page Status) above only when it arrives from the Ratesight CRM's address AND carries this site's CRM key, which your Ratesight team sets in the CRM. Up to <?php echo (int) Ratesight_Request_Auth::TRUSTED_PUBLISHER_LIMIT; ?> per day; more are saved as drafts. These are always new posts; they never change existing content. Anything else is still saved as a draft.</p>
+			<p class="description"><?php echo class_exists( 'Ratesight_CRM_Publish' ) && Ratesight_CRM_Publish::key() !== '' ? esc_html( 'CRM key: set (fingerprint ' . Ratesight_CRM_Publish::key_fingerprint() . ').' ) : esc_html( 'CRM key: not set yet. Posts stay drafts until your Ratesight team sets it.' ); ?></p>
 		</td>
 	</tr>
 	<tr>

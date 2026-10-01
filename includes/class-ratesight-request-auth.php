@@ -22,11 +22,17 @@ class Ratesight_Request_Auth {
 	 * Since 3.15.1: connecting addresses of the Ratesight CRM publisher. Compared with
 	 * REMOTE_ADDR only (forwarding headers are caller-controlled and never read). Used
 	 * only when the site turned on "Ratesight CRM posts" (TRUSTED_PUBLISHER_SETTING).
+	 * Since 3.15.2 the address alone is not enough: the request must also carry the
+	 * site's CRM key (Ratesight_CRM_Publish), and the key is never accepted from any
+	 * other address.
 	 */
 	public const TRUSTED_PUBLISHER_ADDRESSES = array( '67.199.171.44' );
 	public const TRUSTED_PUBLISHER_SETTING   = 'ratesight_crm_publisher_trust';
-	/** New posts accepted from the trusted publisher per site per window. */
-	public const TRUSTED_PUBLISHER_LIMIT     = 500;
+	/**
+	 * New posts published for the trusted publisher per site per window. Since 3.15.2
+	 * (was 500): past the limit a CRM post is still created, as a draft.
+	 */
+	public const TRUSTED_PUBLISHER_LIMIT     = 10;
 	public const TRUSTED_PUBLISHER_WINDOW    = 86400;
 	private const TRUSTED_PUBLISHER_OPTION   = 'ratesight_trusted_publisher_window';
 	private static $operational_candidates = array();
@@ -64,6 +70,8 @@ class Ratesight_Request_Auth {
 		'POST /ratesight/v1/restore-page' => 'signed_mutation',
 		'POST /ratesight/v1/media-alt' => 'signed_mutation',
 		'POST /ratesight/v1/indexnow' => 'signed_mutation',
+		'GET /ratesight/v1/crm-publish' => 'signed_read',
+		'POST /ratesight/v1/crm-publish' => 'signed_mutation',
 	);
 
 	public static function mode(): string {
@@ -239,6 +247,8 @@ class Ratesight_Request_Auth {
 			(string) ( $_SERVER['REMOTE_ADDR'] ?? '' ),
 			self::mode(),
 			self::trusted_publisher_enabled() ? '1' : '0',
+			class_exists( 'Ratesight_CRM_Publish' ) ? hash( 'sha256', 'k:' . Ratesight_CRM_Publish::provided_key( $request ) ) : '',
+			(string) $request->get_header( 'x_ratesight_crm_key' ),
 		) ) );
 		self::$decisions ??= new WeakMap();
 		$known = self::$decisions[ $request ] ?? array();
@@ -280,14 +290,16 @@ class Ratesight_Request_Auth {
 		$legacy_error = is_wp_error( $legacy ) ? $legacy->get_error_code() : 'rs_signature_required';
 		if ( $legacy_error === 'rs_signature_required' && self::is_unsigned_draft_candidate( $request, $policy ) ) {
 			// Since 3.15.1: the Ratesight CRM publisher does not sign. When the site
-			// turned on "Ratesight CRM posts" and the request connects from the
-			// publisher's address, the new post follows the site's Final Post Status
-			// instead of being held as a draft. Every other restriction of an unsigned
-			// creation still applies (new post only, never an update).
-			if ( self::is_trusted_publisher_source() ) {
+			// turned on "Ratesight CRM posts", the new post follows the site's Final
+			// Post Status instead of being held as a draft. Since 3.15.2 that needs
+			// BOTH the publisher's address AND the site's CRM key; with either missing
+			// it is a new draft. Every other restriction of an unsigned creation still
+			// applies (new post only, never an update).
+			$trust = self::trusted_publisher_check( $request );
+			if ( $trust === 'trusted' ) {
 				return self::accept_trusted_publisher( $request, $policy );
 			}
-			return self::accept_unsigned_draft( $request, $policy );
+			return self::accept_unsigned_draft( $request, $policy, $trust );
 		}
 		return self::failure( $legacy_error, 403, $request, $policy );
 	}
@@ -300,7 +312,7 @@ class Ratesight_Request_Auth {
 			&& (string) $request->get_header( 'x_ratesight_signature' ) === '';
 	}
 
-	private static function accept_unsigned_draft( $request, string $policy ) {
+	private static function accept_unsigned_draft( $request, string $policy, string $note = '' ) {
 		$now    = time();
 		$window = get_option( self::UNSIGNED_DRAFT_OPTION, array() );
 		$window = array_values( array_filter( is_array( $window ) ? $window : array(), static function ( $stamp ) use ( $now ): bool {
@@ -312,7 +324,7 @@ class Ratesight_Request_Auth {
 		}
 		$window[] = $now;
 		update_option( self::UNSIGNED_DRAFT_OPTION, $window, false );
-		$request_id = self::record_audit( $request, $policy, 'unsigned_draft_accepted' );
+		$request_id = self::record_audit( $request, $policy, 'unsigned_draft_accepted', '', $note );
 		self::$unsigned_drafts ??= new WeakMap();
 		self::$unsigned_drafts[ $request ] = $request_id;
 		return true;
@@ -323,11 +335,33 @@ class Ratesight_Request_Auth {
 	}
 
 	private static function is_trusted_publisher_source(): bool {
-		if ( ! self::trusted_publisher_enabled() ) {
-			return false;
-		}
 		$remote = (string) ( $_SERVER['REMOTE_ADDR'] ?? '' );
 		return $remote !== '' && in_array( $remote, self::TRUSTED_PUBLISHER_ADDRESSES, true );
+	}
+
+	/**
+	 * Since 3.15.2. 'trusted' only when the switch is on, the request connects from the
+	 * CRM publisher's address AND carries this site's CRM key. Otherwise the reason the
+	 * creation stays a draft ('' when the request made no CRM claim at all).
+	 */
+	private static function trusted_publisher_check( $request ): string {
+		$has_key    = class_exists( 'Ratesight_CRM_Publish' ) && Ratesight_CRM_Publish::provided_key( $request ) !== '';
+		$from_crm   = self::is_trusted_publisher_source();
+		if ( ! self::trusted_publisher_enabled() ) {
+			return $has_key ? 'crm_publish_off' : '';
+		}
+		if ( ! $from_crm ) {
+			// The key is never accepted from any other address.
+			return $has_key ? 'crm_key_wrong_source' : '';
+		}
+		if ( ! class_exists( 'Ratesight_CRM_Publish' ) ) {
+			return 'crm_key_missing';
+		}
+		$state = Ratesight_CRM_Publish::key_state( $request );
+		if ( $state === 'valid' ) {
+			return 'trusted';
+		}
+		return $state === 'missing' ? 'crm_key_missing' : 'crm_key_invalid';
 	}
 
 	private static function accept_trusted_publisher( $request, string $policy ) {
@@ -337,8 +371,10 @@ class Ratesight_Request_Auth {
 			return is_int( $stamp ) && $stamp > $now - self::TRUSTED_PUBLISHER_WINDOW && $stamp <= $now + self::MAX_CLOCK_SKEW;
 		} ) );
 		if ( count( $window ) >= self::TRUSTED_PUBLISHER_LIMIT ) {
+			// Since 3.15.2: past the daily publish limit the post is still created, as a
+			// draft (the unsigned draft limit applies), so nothing the CRM sends is lost.
 			update_option( self::TRUSTED_PUBLISHER_OPTION, $window, false );
-			return self::failure( 'rs_trusted_publisher_rate_limited', 429, $request, $policy );
+			return self::accept_unsigned_draft( $request, $policy, 'crm_publish_limit' );
 		}
 		$window[] = $now;
 		update_option( self::TRUSTED_PUBLISHER_OPTION, $window, false );
@@ -505,7 +541,9 @@ class Ratesight_Request_Auth {
 			'unsigned_draft_limit'   => array( 'max' => self::UNSIGNED_DRAFT_LIMIT, 'window_seconds' => self::UNSIGNED_DRAFT_WINDOW, 'route' => 'POST ' . self::UNSIGNED_DRAFT_ROUTE, 'status' => 'draft', 'updates_existing' => false ),
 			// Since 3.15.1: per-site switch. When enabled, an unsigned POST /create-page
 			// from a listed address creates a new post with the site's Final Post Status.
-			'trusted_publisher'      => array( 'enabled' => self::mode() !== 'enforce_v2' && self::trusted_publisher_enabled(), 'addresses' => self::TRUSTED_PUBLISHER_ADDRESSES, 'max' => self::TRUSTED_PUBLISHER_LIMIT, 'window_seconds' => self::TRUSTED_PUBLISHER_WINDOW, 'route' => 'POST ' . self::UNSIGNED_DRAFT_ROUTE, 'updates_existing' => false ),
+			// Since 3.15.2: also requires the site's CRM key (requires_key), and past the
+			// limit a CRM post is created as a draft (over_limit).
+			'trusted_publisher'      => array( 'enabled' => self::mode() !== 'enforce_v2' && self::trusted_publisher_enabled(), 'addresses' => self::TRUSTED_PUBLISHER_ADDRESSES, 'requires_key' => true, 'key_configured' => class_exists( 'Ratesight_CRM_Publish' ) && Ratesight_CRM_Publish::key() !== '', 'max' => self::TRUSTED_PUBLISHER_LIMIT, 'window_seconds' => self::TRUSTED_PUBLISHER_WINDOW, 'over_limit' => 'draft', 'route' => 'POST ' . self::UNSIGNED_DRAFT_ROUTE, 'updates_existing' => false ),
 			'configured'             => $primary !== '',
 			'current_key_id'         => $primary !== '' ? self::key_id( $primary ) : null,
 			'previous_key_id'        => $previous !== '' && $expires >= time() ? self::key_id( $previous ) : null,
@@ -520,7 +558,7 @@ class Ratesight_Request_Auth {
 		return new WP_Error( $code, 'Request authentication failed.', array( 'status' => $status ) );
 	}
 
-	private static function record_audit( $request, string $policy, string $result, string $key_id = '' ): string {
+	private static function record_audit( $request, string $policy, string $result, string $key_id = '', string $note = '' ): string {
 		$rows = get_option( 'ratesight_auth_audit', array() );
 		$rows = is_array( $rows ) ? $rows : array();
 		$request_id = substr( hash( 'sha256', (string) $request->get_header( 'x_ratesight_nonce' ) . microtime( true ) . random_int( 0, PHP_INT_MAX ) ), 0, 20 );
@@ -537,6 +575,9 @@ class Ratesight_Request_Auth {
 			'key_id'     => preg_match( '/^[a-f0-9]{16}$/', $key_id ) ? $key_id : null,
 			'result'     => $result,
 		);
+		if ( $note !== '' ) {
+			$rows[ array_key_last( $rows ) ]['note'] = $note;
+		}
 		update_option( 'ratesight_auth_audit', array_slice( $rows, -100 ), false );
 		return $request_id;
 	}
