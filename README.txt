@@ -4,7 +4,7 @@ Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 3.15.2
+Stable tag: 3.15.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,12 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.15.3 - Missing pages are handled automatically by default
+
+  - The 404 Fuzzy Router default is now Automatic (same-city-or-hub) instead of Off: on a site with no stored mode, a missing page is redirected (301) to the closest matching page when the match is strong, never from one city's page to another city's, with the base service page as the fallback for commercial and office city pages. With no close match the visitor still gets the 404 page. No per-site setting is needed.
+  - A mode an admin stored (Off, Automatic or Legacy) is still honored. A site whose AI SEO Pages tab was saved while the default was Off has Off stored and keeps it until the select is changed.
+  - capabilities.fuzzy_404 reports the new default.
 
 3.15.2 - Ratesight CRM posts need the site's CRM key as well as the CRM's address
 

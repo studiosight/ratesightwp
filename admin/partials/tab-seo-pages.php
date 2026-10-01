@@ -265,11 +265,11 @@ $ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
 		<th scope="row">404 Fuzzy Router Mode</th>
 		<td>
 			<select name="ratesight_fuzzy_mode">
-				<option value="off" <?php selected( 'off', Ratesight_Runtime_404_Router::current_mode() ); ?>>Off: missing pages return 404 (default)</option>
-				<option value="same-city-or-hub" <?php selected( 'same-city-or-hub', Ratesight_Runtime_404_Router::current_mode() ); ?>>Same-city or hub: never redirect one city's URL to another city's page</option>
-				<option value="legacy" <?php selected( 'legacy', Ratesight_Runtime_404_Router::current_mode() ); ?>>Legacy: unconstrained slug similarity</option>
+				<option value="same-city-or-hub" <?php selected( 'same-city-or-hub', Ratesight_Runtime_404_Router::current_mode() ); ?>>Automatic: send a missing page to its closest page, never to another city's page (default)</option>
+				<option value="off" <?php selected( 'off', Ratesight_Runtime_404_Router::current_mode() ); ?>>Off: missing pages return 404</option>
+				<option value="legacy" <?php selected( 'legacy', Ratesight_Runtime_404_Router::current_mode() ); ?>>Legacy: closest page by name, cities not checked</option>
 			</select>
-			<p class="description">Controls the runtime 404 smart-router. Off (the default since 3.14.0) never guesses: a missing page stays a 404. "Same-city or hub" blocks cross-city fuzzy matches (e.g. a San Bruno URL landing on a San Ramon page) and falls back to the base service hub for commercial/office city pages. "Legacy" redirects to the most similar slug. Explicit redirects are never affected.</p>
+			<p class="description">What happens when a visitor opens a page that does not exist. Automatic (the default) redirects to the closest matching page on this site, never from one city's page to another city's (for example a San Bruno URL never lands on a San Ramon page), and falls back to the base service page for commercial and office city pages; with no close match the visitor gets the normal 404 page. Off never redirects. Legacy redirects to the most similar page name without the city check. Redirects you set yourself are never affected.</p>
 		</td>
 	</tr>
 	<tr>
