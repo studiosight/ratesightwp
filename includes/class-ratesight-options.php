@@ -66,6 +66,12 @@ class Ratesight_Options {
 
 			// ── Reference page (ratesight_page CPT) status ──────────────────
 			'page_status'      => array( 'name' => 'ratesight_page_status', 'default' => 'publish', 'type' => 'status', 'group' => 'seo_pages' ),
+
+			// Since 3.15.1: posts the Ratesight CRM sends are not signed. Off (default):
+			// they are saved as drafts (at most 30 per 24 hours). On: a post arriving
+			// from the CRM's address is created with the Final Post Status. The option
+			// name is Ratesight_Request_Auth::TRUSTED_PUBLISHER_SETTING.
+			'crm_publisher_trust' => array( 'name' => 'ratesight_crm_publisher_trust', 'default' => 0, 'type' => 'bool', 'group' => 'seo_pages' ),
 		);
 	}
 

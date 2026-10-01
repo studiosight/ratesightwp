@@ -18,9 +18,24 @@ class Ratesight_Request_Auth {
 	public const UNSIGNED_DRAFT_WINDOW = 86400;
 	public const UNSIGNED_DRAFT_ROUTE  = '/ratesight/v1/create-page';
 	private const UNSIGNED_DRAFT_OPTION = 'ratesight_unsigned_draft_window';
+	/**
+	 * Since 3.15.1: connecting addresses of the Ratesight CRM publisher. Compared with
+	 * REMOTE_ADDR only (forwarding headers are caller-controlled and never read). Used
+	 * only when the site turned on "Ratesight CRM posts" (TRUSTED_PUBLISHER_SETTING).
+	 */
+	public const TRUSTED_PUBLISHER_ADDRESSES = array( '67.199.171.44' );
+	public const TRUSTED_PUBLISHER_SETTING   = 'ratesight_crm_publisher_trust';
+	/** New posts accepted from the trusted publisher per site per window. */
+	public const TRUSTED_PUBLISHER_LIMIT     = 500;
+	public const TRUSTED_PUBLISHER_WINDOW    = 86400;
+	private const TRUSTED_PUBLISHER_OPTION   = 'ratesight_trusted_publisher_window';
 	private static $operational_candidates = array();
 	/** @var WeakMap|null Request object => audit request id for admitted unsigned drafts. */
 	private static $unsigned_drafts = null;
+	/** @var WeakMap|null Request object => true when admitted as the trusted publisher. */
+	private static $trusted_publishers = null;
+	/** @var WeakMap|null Request object => array( fingerprint => decision ) for this PHP request. */
+	private static $decisions = null;
 	public const ROUTE_POLICIES = array(
 		'GET /ratesight/v1/capabilities' => 'public_bootstrap',
 		'POST /ratesight/v1/pair' => 'public_signed_bootstrap',
@@ -194,7 +209,43 @@ class Ratesight_Request_Auth {
 		return self::authorize( $request, 'signed_mutation' );
 	}
 
+	/**
+	 * Since 3.15.1 the decision is made once per request. WordPress calls a route's
+	 * permission callback again for every handler on the matched route when it builds
+	 * the Allow header (rest_send_allow_header), with the same request object. Before
+	 * this, each repeat was judged as a new request: a valid rs-hmac-v2 request was
+	 * audited a second time as rs_nonce_replayed, and one unsigned create-page used
+	 * three slots of the unsigned draft limit (POST plus the DELETE handler), so a
+	 * site was limited to 10 drafts per 24 hours instead of 30. A replay from the
+	 * network is a different request object and is still judged on its own.
+	 */
 	public static function authorize( $request, string $policy ) {
+		if ( ! is_object( $request ) ) {
+			return self::decide( $request, $policy );
+		}
+		$fingerprint = hash( 'sha256', implode( "\n", array(
+			$policy,
+			strtoupper( (string) $request->get_method() ),
+			(string) $request->get_route(),
+			(string) $request->get_header( 'x_ratesight_auth_version' ),
+			(string) $request->get_header( 'x_ratesight_key_id' ),
+			(string) $request->get_header( 'x_ratesight_timestamp' ),
+			(string) $request->get_header( 'x_ratesight_nonce' ),
+			(string) $request->get_header( 'x_ratesight_signature' ),
+			hash( 'sha256', (string) $request->get_body() ),
+		) ) );
+		self::$decisions ??= new WeakMap();
+		$known = self::$decisions[ $request ] ?? array();
+		if ( array_key_exists( $fingerprint, $known ) ) {
+			return $known[ $fingerprint ];
+		}
+		$decision              = self::decide( $request, $policy );
+		$known[ $fingerprint ] = $decision;
+		self::$decisions[ $request ] = $known;
+		return $decision;
+	}
+
+	private static function decide( $request, string $policy ) {
 		$mode    = self::mode();
 		$secret  = (string) get_option( 'ratesight_webhook_secret', '' );
 		$version = (string) $request->get_header( 'x_ratesight_auth_version' );
@@ -222,6 +273,14 @@ class Ratesight_Request_Auth {
 		}
 		$legacy_error = is_wp_error( $legacy ) ? $legacy->get_error_code() : 'rs_signature_required';
 		if ( $legacy_error === 'rs_signature_required' && self::is_unsigned_draft_candidate( $request, $policy ) ) {
+			// Since 3.15.1: the Ratesight CRM publisher does not sign. When the site
+			// turned on "Ratesight CRM posts" and the request connects from the
+			// publisher's address, the new post follows the site's Final Post Status
+			// instead of being held as a draft. Every other restriction of an unsigned
+			// creation still applies (new post only, never an update).
+			if ( self::is_trusted_publisher_source() ) {
+				return self::accept_trusted_publisher( $request, $policy );
+			}
 			return self::accept_unsigned_draft( $request, $policy );
 		}
 		return self::failure( $legacy_error, 403, $request, $policy );
@@ -251,6 +310,48 @@ class Ratesight_Request_Auth {
 		self::$unsigned_drafts ??= new WeakMap();
 		self::$unsigned_drafts[ $request ] = $request_id;
 		return true;
+	}
+
+	public static function trusted_publisher_enabled(): bool {
+		return (bool) get_option( self::TRUSTED_PUBLISHER_SETTING, 0 );
+	}
+
+	private static function is_trusted_publisher_source(): bool {
+		if ( ! self::trusted_publisher_enabled() ) {
+			return false;
+		}
+		$remote = (string) ( $_SERVER['REMOTE_ADDR'] ?? '' );
+		return $remote !== '' && in_array( $remote, self::TRUSTED_PUBLISHER_ADDRESSES, true );
+	}
+
+	private static function accept_trusted_publisher( $request, string $policy ) {
+		$now    = time();
+		$window = get_option( self::TRUSTED_PUBLISHER_OPTION, array() );
+		$window = array_values( array_filter( is_array( $window ) ? $window : array(), static function ( $stamp ) use ( $now ): bool {
+			return is_int( $stamp ) && $stamp > $now - self::TRUSTED_PUBLISHER_WINDOW && $stamp <= $now + self::MAX_CLOCK_SKEW;
+		} ) );
+		if ( count( $window ) >= self::TRUSTED_PUBLISHER_LIMIT ) {
+			update_option( self::TRUSTED_PUBLISHER_OPTION, $window, false );
+			return self::failure( 'rs_trusted_publisher_rate_limited', 429, $request, $policy );
+		}
+		$window[] = $now;
+		update_option( self::TRUSTED_PUBLISHER_OPTION, $window, false );
+		$request_id = self::record_audit( $request, $policy, 'trusted_publisher_accepted' );
+		// Also an unsigned creation: the handler keeps the new-post-only restrictions.
+		self::$unsigned_drafts ??= new WeakMap();
+		self::$unsigned_drafts[ $request ] = $request_id;
+		self::$trusted_publishers ??= new WeakMap();
+		self::$trusted_publishers[ $request ] = true;
+		return true;
+	}
+
+	/**
+	 * True when this unsigned creation was admitted from the Ratesight CRM publisher's
+	 * address on a site that turned the setting on. The create-page handler then lets
+	 * the new post follow the requested status or the site's Final Post Status.
+	 */
+	public static function is_trusted_publisher_request( $request ): bool {
+		return self::$trusted_publishers !== null && is_object( $request ) && isset( self::$trusted_publishers[ $request ] );
 	}
 
 	/**
@@ -396,6 +497,9 @@ class Ratesight_Request_Auth {
 			// Since 3.14.0: the single unsigned exception. legacy/observe_v2 only.
 			'unsigned_draft_create'  => self::mode() !== 'enforce_v2',
 			'unsigned_draft_limit'   => array( 'max' => self::UNSIGNED_DRAFT_LIMIT, 'window_seconds' => self::UNSIGNED_DRAFT_WINDOW, 'route' => 'POST ' . self::UNSIGNED_DRAFT_ROUTE, 'status' => 'draft', 'updates_existing' => false ),
+			// Since 3.15.1: per-site switch. When enabled, an unsigned POST /create-page
+			// from a listed address creates a new post with the site's Final Post Status.
+			'trusted_publisher'      => array( 'enabled' => self::mode() !== 'enforce_v2' && self::trusted_publisher_enabled(), 'addresses' => self::TRUSTED_PUBLISHER_ADDRESSES, 'max' => self::TRUSTED_PUBLISHER_LIMIT, 'window_seconds' => self::TRUSTED_PUBLISHER_WINDOW, 'route' => 'POST ' . self::UNSIGNED_DRAFT_ROUTE, 'updates_existing' => false ),
 			'configured'             => $primary !== '',
 			'current_key_id'         => $primary !== '' ? self::key_id( $primary ) : null,
 			'previous_key_id'        => $previous !== '' && $expires >= time() ? self::key_id( $previous ) : null,

@@ -176,6 +176,38 @@ foreach ( array( 'legacy', 'observe_v2' ) as $mode ) {
 	$writes = array();
 	[ , $response ] = unsigned_create( array( 'title' => 'Unsigned Draft', 'article' => 'x' ) );
 	check_draft_case( "{$mode}: an unsigned draft keeps the creation defaults (title, empty description)", $seo_for( (int) $response->data['id'] ) === array( array( 'seo', (int) $response->data['id'], 'Unsigned Draft', '' ) ) );
+	// 3.15.1: the Ratesight CRM publisher (its address + the site setting) follows the Final Post Status.
+	$options['ratesight_crm_publisher_trust'] = 1;
+	$_SERVER['REMOTE_ADDR'] = Ratesight_Request_Auth::TRUSTED_PUBLISHER_ADDRESSES[0];
+	Ratesight_Recovery_Log::$calls = 0;
+	$writes = array();
+	[ $auth, $response ] = unsigned_create( array( 'title' => "CRM Post {$mode}", 'article' => '<p>x</p>' ) );
+	check_draft_case( "{$mode}: a CRM post with no status is left to the Final Post Status (not forced to draft)", $auth === true && $response->status === 200 && last_event_status() === '' && $response->data['trusted_publisher'] === true && ! isset( $response->data['unsigned_draft'] ) );
+	check_draft_case( "{$mode}: a CRM post response carries the audit request id", $response->data['request_id'] === $options['ratesight_auth_audit'][ array_key_last( $options['ratesight_auth_audit'] ) ]['request_id'] && $options['ratesight_auth_audit'][ array_key_last( $options['ratesight_auth_audit'] ) ]['result'] === 'trusted_publisher_accepted' );
+	[ , $response ] = unsigned_create( array( 'title' => "CRM Publish {$mode}", 'article' => 'x', 'status' => 'publish' ) );
+	check_draft_case( "{$mode}: a CRM post asking for publish keeps publish", last_event_status() === 'publish' );
+	[ , $response ] = unsigned_create( array( 'title' => "CRM Draft {$mode}", 'article' => 'x', 'status' => 'draft' ) );
+	check_draft_case( "{$mode}: a CRM post asking for draft stays a draft", last_event_status() === 'draft' );
+	[ , $response ] = unsigned_create( array( 'title' => 'Existing', 'slug' => 'existing-service', 'article' => '<p>overwrite attempt</p>', 'status' => 'publish' ) );
+	$crm_id = $response->data['id'];
+	check_draft_case( "{$mode}: a CRM post never updates an existing post; it is created under a unique slug", $response->data['created'] === true && $response->data['updated'] === false && $crm_id !== 101 && $posts[101]['post_content'] === 'original' && $posts[ $crm_id ]['post_name'] !== 'existing-service' );
+	[ , $response ] = unsigned_create( array( 'title' => 'Target', 'article' => 'x', 'id' => 101 ) );
+	check_draft_case( "{$mode}: a CRM post naming an explicit post id is refused", $response->status === 403 && $response->data['code'] === 'rs_unsigned_target_refused' );
+	$writes = array();
+	[ , $response ] = unsigned_create( array( 'title' => "CRM Css {$mode}", 'article' => 'x', 'custom_css_url' => 'https://evil.example/x.css' ) );
+	$css_written = false;
+	foreach ( $writes as $w ) { if ( $w[0] === 'meta' && $w[2] === '_rs_custom_css_url' ) $css_written = true; }
+	check_draft_case( "{$mode}: a CRM post attaches no external stylesheet and writes no recovery log", ! $css_written && Ratesight_Recovery_Log::$calls === 0 );
+	$_SERVER['REMOTE_ADDR'] = '198.51.100.20';
+	[ , $response ] = unsigned_create( array( 'title' => "Stranger {$mode}", 'article' => 'x', 'status' => 'publish' ) );
+	check_draft_case( "{$mode}: with the setting on, another address is still a draft only", last_event_status() === 'draft' && $response->data['unsigned_draft'] === true && ! isset( $response->data['trusted_publisher'] ) );
+	$_SERVER['REMOTE_ADDR'] = Ratesight_Request_Auth::TRUSTED_PUBLISHER_ADDRESSES[0];
+	$options['ratesight_crm_publisher_trust'] = 0;
+	[ , $response ] = unsigned_create( array( 'title' => "CRM Off {$mode}", 'article' => 'x', 'status' => 'publish' ) );
+	check_draft_case( "{$mode}: with the setting off, the CRM address is still a draft only", last_event_status() === 'draft' && $response->data['unsigned_draft'] === true );
+	$_SERVER['REMOTE_ADDR'] = '198.51.100.20';
+	$options['ratesight_unsigned_draft_window'] = array();
+
 	Ratesight_Recovery_Log::$calls = 0; // signed creates above may log; the next mode checks unsigned drafts alone
 }
 
@@ -183,6 +215,12 @@ $options['ratesight_auth_mode'] = 'enforce_v2';
 $options['ratesight_auth_ever_enforced'] = true;
 [ $auth ] = unsigned_create( array( 'title' => 'Enforced', 'article' => 'x' ) );
 check_draft_case( 'enforce_v2: unsigned create-page is rejected', $auth instanceof WP_Error && $auth->get_error_code() === 'rs_auth_version_required' );
+
+// 3.15.1 source checks: the setting is registered, shown on the settings tab, and off by default.
+$options_source = file_get_contents( __DIR__ . '/../includes/class-ratesight-options.php' );
+$tab_source     = file_get_contents( __DIR__ . '/../admin/partials/tab-seo-pages.php' );
+check_draft_case( 'the CRM posts setting is a registered option, off by default', preg_match( "/'crm_publisher_trust'\\s*=>\\s*array\\(\\s*'name'\\s*=>\\s*'" . Ratesight_Request_Auth::TRUSTED_PUBLISHER_SETTING . "',\\s*'default'\\s*=>\\s*0,\\s*'type'\\s*=>\\s*'bool',\\s*'group'\\s*=>\\s*'seo_pages'/", $options_source ) === 1 );
+check_draft_case( 'the settings tab has the CRM posts checkbox', strpos( $tab_source, 'name="' . Ratesight_Request_Auth::TRUSTED_PUBLISHER_SETTING . '" value="1"' ) !== false );
 
 echo PHP_EOL . ( $failures === 0 ? "ALL {$checks} CHECKS PASSED" : "{$failures} of {$checks} CHECKS FAILED" ) . PHP_EOL;
 exit( $failures === 0 ? 0 : 1 );

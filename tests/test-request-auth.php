@@ -146,7 +146,16 @@ check_auth_case( 'admin self-test response never exposes the secret', strpos( $a
 
 $valid = signed_request( $fixture['secret'] );
 check_auth_case( 'valid v2 accepted', Ratesight_Request_Auth::authorize_mutation( $valid ) === true );
-check_auth_case( 'replayed nonce rejected', error_code( Ratesight_Request_Auth::authorize_mutation( $valid ) ) === 'rs_nonce_replayed' );
+// 3.15.1: one decision per request object. WordPress re-runs the permission callback for every
+// handler of the matched route (rest_send_allow_header); the repeat must not be judged as a replay.
+$audit_before_repeat = count( $options['ratesight_auth_audit'] );
+check_auth_case( 'the same request asked again gets the same decision and no second audit row', Ratesight_Request_Auth::authorize_mutation( $valid ) === true && Ratesight_Request_Auth::authorize_mutation( $valid ) === true && count( $options['ratesight_auth_audit'] ) === $audit_before_repeat );
+// A replay from the network is a new request object carrying the same headers.
+check_auth_case( 'replayed nonce rejected', error_code( Ratesight_Request_Auth::authorize_mutation( clone $valid ) ) === 'rs_nonce_replayed' );
+$tampered_same_object = signed_request( $fixture['secret'] );
+Ratesight_Request_Auth::authorize_mutation( $tampered_same_object );
+$tampered_same_object->body = '{"url":"https://example.com/other/","meta_title":"Changed after the check"}';
+check_auth_case( 'a request whose body changed after its decision is judged again', error_code( Ratesight_Request_Auth::authorize_mutation( $tampered_same_object ) ) === 'rs_body_digest_mismatch' );
 
 foreach ( array( 'method', 'route', 'query', 'body' ) as $field ) {
 	$request = signed_request( $fixture['secret'] );
@@ -220,6 +229,48 @@ foreach ( array( 'legacy', 'observe_v2', 'enforce_v2' ) as $matrix_mode ) {
 		check_auth_case( "{$matrix_mode}: unsigned POST create-page admitted only as an unsigned draft", $draft_result === true && Ratesight_Request_Auth::unsigned_draft_request_id( $draft_request ) === $draft_row['request_id'] );
 		check_auth_case( "{$matrix_mode}: unsigned draft audited as unsigned_draft_accepted with request id and REMOTE_ADDR", $draft_row['result'] === 'unsigned_draft_accepted' && preg_match( '/^[a-f0-9]{20}$/', $draft_row['request_id'] ) === 1 && $draft_row['ip'] === '203.0.113.7' );
 		$delete_draft = unsigned_request( 'DELETE', '/ratesight/v1/create-page', '' );
+		// 3.15.1: POST plus the DELETE handler's Allow-header check is one request, one slot, one audit row.
+		$options['ratesight_unsigned_draft_window'] = array();
+		$once = unsigned_request( 'POST', '/ratesight/v1/create-page', '{"title":"once","article":"a"}' );
+		$rows_before_once = count( $options['ratesight_auth_audit'] );
+		$once_results = array( Ratesight_Request_Auth::authorize_mutation( $once ), Ratesight_Request_Auth::authorize_mutation( $once ), Ratesight_Request_Auth::authorize_mutation( $once ) );
+		check_auth_case( "{$matrix_mode}: one unsigned create-page checked three times uses one slot and one audit row", $once_results === array( true, true, true ) && count( $options['ratesight_unsigned_draft_window'] ) === 1 && count( $options['ratesight_auth_audit'] ) === min( 100, $rows_before_once + 1 ) );
+
+		// 3.15.1: trusted publisher (Ratesight CRM address + site setting).
+		$options['ratesight_unsigned_draft_window'] = array();
+		$options['ratesight_trusted_publisher_window'] = array();
+		$publisher_address = Ratesight_Request_Auth::TRUSTED_PUBLISHER_ADDRESSES[0];
+		$_SERVER['REMOTE_ADDR'] = $publisher_address;
+		$off = unsigned_request( 'POST', '/ratesight/v1/create-page', '{"title":"crm off","article":"a"}' );
+		check_auth_case( "{$matrix_mode}: setting off, the CRM address is still an unsigned draft only", Ratesight_Request_Auth::authorize_mutation( $off ) === true && Ratesight_Request_Auth::is_trusted_publisher_request( $off ) === false && last_auth_result() === 'unsigned_draft_accepted' );
+		$options['ratesight_crm_publisher_trust'] = 1;
+		$on = unsigned_request( 'POST', '/ratesight/v1/create-page', '{"title":"crm on","article":"a"}' );
+		check_auth_case( "{$matrix_mode}: setting on, the CRM address is admitted as the trusted publisher and audited", Ratesight_Request_Auth::authorize_mutation( $on ) === true && Ratesight_Request_Auth::is_trusted_publisher_request( $on ) === true && last_auth_result() === 'trusted_publisher_accepted' && Ratesight_Request_Auth::unsigned_draft_request_id( $on ) !== null );
+		check_auth_case( "{$matrix_mode}: a trusted publisher post does not use an unsigned draft slot", count( $options['ratesight_unsigned_draft_window'] ) === 1 && count( $options['ratesight_trusted_publisher_window'] ) === 1 );
+		check_auth_case( "{$matrix_mode}: capabilities report the trusted publisher switch", Ratesight_Request_Auth::capability_auth()['trusted_publisher']['enabled'] === true && Ratesight_Request_Auth::capability_auth()['trusted_publisher']['addresses'] === Ratesight_Request_Auth::TRUSTED_PUBLISHER_ADDRESSES );
+		$trusted_other_routes_rejected = true;
+		foreach ( array( array( 'DELETE', '/ratesight/v1/create-page' ), array( 'POST', '/ratesight/v1/update-page' ), array( 'POST', '/ratesight/v1/redirect' ), array( 'POST', '/ratesight/v1/trash-page' ), array( 'POST', '/ratesight/v1/plugin-update' ) ) as $other ) {
+			if ( error_code( Ratesight_Request_Auth::authorize_mutation( unsigned_request( $other[0], $other[1], '{}' ) ) ) !== 'rs_signature_required' ) $trusted_other_routes_rejected = false;
+		}
+		check_auth_case( "{$matrix_mode}: the CRM address gets no other unsigned route", $trusted_other_routes_rejected && error_code( Ratesight_Request_Auth::authorize_read( unsigned_request( 'GET', '/ratesight/v1/inbound-log', '' ) ) ) === 'rs_signature_required' );
+		check_auth_case( "{$matrix_mode}: an invalid signature from the CRM address is rejected", error_code( Ratesight_Request_Auth::authorize_mutation( bad_legacy_request( 'POST', '/ratesight/v1/create-page', '{}' ) ) ) === 'rs_bad_signature' );
+		$_SERVER['HTTP_X_FORWARDED_FOR'] = $publisher_address;
+		$_SERVER['HTTP_CF_CONNECTING_IP'] = $publisher_address;
+		$_SERVER['HTTP_X_REAL_IP'] = $publisher_address;
+		$_SERVER['REMOTE_ADDR'] = '203.0.113.7';
+		$spoof = unsigned_request( 'POST', '/ratesight/v1/create-page', '{"title":"spoof","article":"a"}' );
+		$spoof->headers['x-forwarded-for'] = $publisher_address;
+		check_auth_case( "{$matrix_mode}: forwarding headers naming the CRM address are ignored (REMOTE_ADDR only)", Ratesight_Request_Auth::authorize_mutation( $spoof ) === true && Ratesight_Request_Auth::is_trusted_publisher_request( $spoof ) === false && last_auth_result() === 'unsigned_draft_accepted' );
+		unset( $_SERVER['HTTP_X_FORWARDED_FOR'], $_SERVER['HTTP_CF_CONNECTING_IP'], $_SERVER['HTTP_X_REAL_IP'] );
+		$_SERVER['REMOTE_ADDR'] = $publisher_address;
+		$options['ratesight_trusted_publisher_window'] = array_fill( 0, Ratesight_Request_Auth::TRUSTED_PUBLISHER_LIMIT, time() );
+		$flood = unsigned_request( 'POST', '/ratesight/v1/create-page', '{"title":"flood","article":"a"}' );
+		check_auth_case( "{$matrix_mode}: the trusted publisher is limited per 24h (429, audited)", error_code( Ratesight_Request_Auth::authorize_mutation( $flood ) ) === 'rs_trusted_publisher_rate_limited' && last_auth_result() === 'rs_trusted_publisher_rate_limited' && Ratesight_Request_Auth::is_trusted_publisher_request( $flood ) === false );
+		$_SERVER['REMOTE_ADDR'] = '203.0.113.7';
+		$options['ratesight_crm_publisher_trust'] = 0;
+		$options['ratesight_trusted_publisher_window'] = array();
+		$options['ratesight_unsigned_draft_window'] = array( time() ); // the one draft admitted at the top of this block
+
 		check_auth_case( "{$matrix_mode}: unsigned DELETE create-page still rejected", error_code( Ratesight_Request_Auth::authorize_mutation( $delete_draft ) ) === 'rs_signature_required' && Ratesight_Request_Auth::unsigned_draft_request_id( $delete_draft ) === null );
 		$bad_draft = bad_legacy_request( 'POST', '/ratesight/v1/create-page', '{}' );
 		check_auth_case( "{$matrix_mode}: invalidly signed POST create-page is rejected, not downgraded to a draft", error_code( Ratesight_Request_Auth::authorize_mutation( $bad_draft ) ) === 'rs_bad_signature' && Ratesight_Request_Auth::unsigned_draft_request_id( $bad_draft ) === null );
@@ -260,6 +311,13 @@ $audit_results = array_column( $options['ratesight_auth_audit'] ?? array(), 'res
 check_auth_case( 'no request is ever recorded as unsigned accepted or observed', ! in_array( 'legacy_unsigned_observed', $audit_results, true ) && ! in_array( 'legacy_unsigned_accepted', $audit_results, true ) );
 check_auth_case( 'capabilities report unsigned requests are not accepted', Ratesight_Request_Auth::capability_auth()['unsigned_accepted'] === false );
 check_auth_case( 'enforce_v2 capabilities report no unsigned draft creation', Ratesight_Request_Auth::capability_auth()['unsigned_draft_create'] === false );
+$options['ratesight_crm_publisher_trust'] = 1;
+$_SERVER['REMOTE_ADDR'] = Ratesight_Request_Auth::TRUSTED_PUBLISHER_ADDRESSES[0];
+$enforced_publisher = unsigned_request( 'POST', '/ratesight/v1/create-page', '{"title":"t","article":"a"}' );
+check_auth_case( 'enforce_v2: the CRM address with the setting on is still rejected', error_code( Ratesight_Request_Auth::authorize_mutation( $enforced_publisher ) ) === 'rs_auth_version_required' && Ratesight_Request_Auth::is_trusted_publisher_request( $enforced_publisher ) === false && Ratesight_Request_Auth::capability_auth()['trusted_publisher']['enabled'] === false );
+$_SERVER['REMOTE_ADDR'] = '203.0.113.7';
+$options['ratesight_crm_publisher_trust'] = 0;
+check_auth_case( 'the trusted publisher setting is off unless stored, and only the observed CRM address is listed', Ratesight_Request_Auth::trusted_publisher_enabled() === false && Ratesight_Request_Auth::TRUSTED_PUBLISHER_ADDRESSES === array( '67.199.171.44' ) );
 check_auth_case( 'unsigned draft limit is a named constant of 30 per 24h', Ratesight_Request_Auth::UNSIGNED_DRAFT_LIMIT === 30 && Ratesight_Request_Auth::UNSIGNED_DRAFT_WINDOW === 86400 );
 $_SERVER['REMOTE_ADDR'] = 'not-an-ip';
 Ratesight_Request_Auth::authorize_mutation( unsigned_request( 'POST', '/ratesight/v1/redirect', '{}' ) );

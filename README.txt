@@ -4,7 +4,7 @@ Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 3.15.0
+Stable tag: 3.15.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,13 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.15.1 - Ratesight CRM posts can follow the Final Post Status; one decision per request
+
+  - New setting, AI SEO Pages > Ratesight CRM posts (off by default). The Ratesight CRM does not sign its requests, so since 3.14.0 its posts were saved as drafts whatever the Final Post Status said. With the setting on, an unsigned POST /create-page that connects from the Ratesight CRM's address (REMOTE_ADDR only; forwarding headers are never read) creates the post with the requested status or the site's Final Post Status, up to 500 per site per 24 hours. It is still a new post only: an existing post is never updated (a unique slug is used), a payload naming a post id is refused, and no external stylesheet is attached. Audited as trusted_publisher_accepted; the Activity Log note reads "Ratesight CRM post: created as a new post".
+  - With the setting off, or from any other address, nothing changes: an unsigned create-page is a new draft only. enforce_v2 still rejects every unsigned request.
+  - Fix: a request is now authenticated once. WordPress calls the permission check again for each handler of the route when it builds the Allow header, and each repeat was treated as a new request. One unsigned create-page therefore used three of the 30 unsigned draft slots (a site was limited to 10 drafts per 24 hours, then 429), and every valid signed request left a second audit row reading rs_nonce_replayed. The limit is 30 again and the audit has one row per request.
+  - capabilities.auth reports trusted_publisher (enabled, addresses, max, window_seconds).
 
 3.15.0 - Page structured data through update-page
 

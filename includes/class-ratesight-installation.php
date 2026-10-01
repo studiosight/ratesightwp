@@ -94,7 +94,7 @@ class Ratesight_Installation {
 			'ratesight_link_scan_running', 'ratesight_link_broken_running', 'ratesight_bulk_queue',
 			'ratesight_bulk_publish_progress', 'ratesight_webhook_secret', 'ratesight_webhook_secret_previous',
 			'ratesight_webhook_secret_previous_expires', 'ratesight_auth_mode', 'ratesight_auth_ever_enforced',
-			'ratesight_auth_v2_readiness', 'ratesight_auth_audit', 'ratesight_api_key',
+			'ratesight_auth_v2_readiness', 'ratesight_auth_audit', 'ratesight_unsigned_draft_window', 'ratesight_trusted_publisher_window', 'ratesight_api_key',
 			'ratesight_notify_email', 'ratesight_notify_enabled', 'ratesight_rs_redirects',
 			'ratesight_deepseek_api_key', 'ratesight_recovery_actions', 'ratesight_redirect_health_last',
 			'ratesight_redirect_serve_log', 'ratesight_inbound_log', self::RETENTION_OPTION, 'ratesight_health_catch_all_urls',

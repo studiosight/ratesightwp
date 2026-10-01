@@ -141,6 +141,16 @@ $ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
 		</td>
 	</tr>
 	<tr>
+		<th scope="row">Ratesight CRM posts</th>
+		<td>
+			<label>
+				<input type="checkbox" name="ratesight_crm_publisher_trust" value="1" <?php checked( 1, (int) $o['crm_publisher_trust'] ); ?>>
+				Use the status above for posts sent by the Ratesight CRM
+			</label>
+			<p class="description">Off (default): posts the CRM sends are saved as drafts, at most 30 per day, because the CRM does not sign its requests. On: a post that arrives from the Ratesight CRM's address gets the Final Post Status (or Reference Page Status) above. These are always new posts; they never change existing content. Requests from any other address are still saved as drafts.</p>
+		</td>
+	</tr>
+	<tr>
 		<th scope="row"><label for="rs-page-status">Reference Page Status</label></th>
 		<td>
 			<select id="rs-page-status" name="ratesight_page_status">
