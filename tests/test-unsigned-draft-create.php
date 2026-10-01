@@ -180,7 +180,16 @@ foreach ( array( 'legacy', 'observe_v2' ) as $mode ) {
 	[ , $response ] = unsigned_create( array( 'title' => 'Unsigned Draft', 'article' => 'x' ) );
 	check_draft_case( "{$mode}: an unsigned draft keeps the creation defaults (title, empty description)", $seo_for( (int) $response->data['id'] ) === array( array( 'seo', (int) $response->data['id'], 'Unsigned Draft', '' ) ) );
 	// 3.15.1: the Ratesight CRM publisher (its address + the site setting) follows the Final Post Status.
-	$options['ratesight_crm_publisher_trust'] = 1;
+	// 3.15.4 default: nothing stored, no key anywhere. A post from the CRM address follows the Final Post Status.
+	unset( $options['ratesight_crm_posts_hold'], $options['ratesight_crm_key_required'], $options[ Ratesight_CRM_Publish::KEY_OPTION ] );
+	$_SERVER['REMOTE_ADDR'] = Ratesight_Request_Auth::TRUSTED_PUBLISHER_ADDRESSES[0];
+	[ $auth, $response ] = unsigned_create( array( 'title' => "CRM Default {$mode}", 'article' => '<p>x</p>' ) );
+	check_draft_case( "{$mode}: default settings, CRM address, no key: the post is left to the Final Post Status", $auth === true && $response->status === 200 && last_event_status() === '' && $response->data['trusted_publisher'] === true );
+	$_SERVER['REMOTE_ADDR'] = '198.51.100.20';
+	[ , $response ] = unsigned_create( array( 'title' => "Stranger Default {$mode}", 'article' => 'x', 'status' => 'publish' ) );
+	check_draft_case( "{$mode}: default settings, any other address: draft only", last_event_status() === 'draft' && $response->data['unsigned_draft'] === true );
+	$options['ratesight_unsigned_draft_window'] = array();
+	$options['ratesight_crm_posts_hold'] = 0; $options['ratesight_crm_key_required'] = 1;
 	// 3.15.2: the site's CRM key is required as well as the address.
 	$options[ Ratesight_CRM_Publish::KEY_OPTION ] = $crm_key = str_repeat( 'Q', 40 );
 	$options[ Ratesight_CRM_Publish::LOG_OPTION ] = array();
@@ -232,7 +241,7 @@ foreach ( array( 'legacy', 'observe_v2' ) as $mode ) {
 	check_draft_case( "{$mode}: an unsigned draft stores draft as the status the retry must keep", count( $stranger_meta ) === 1 && $stranger_meta[0][1] === $response->data['id'] && $stranger_meta[0][3] === 'draft' );
 	check_draft_case( "{$mode}: with the setting on, another address is still a draft only", last_event_status() === 'draft' && $response->data['unsigned_draft'] === true && ! isset( $response->data['trusted_publisher'] ) );
 	$_SERVER['REMOTE_ADDR'] = Ratesight_Request_Auth::TRUSTED_PUBLISHER_ADDRESSES[0];
-	$options['ratesight_crm_publisher_trust'] = 0;
+	$options['ratesight_crm_posts_hold'] = 1;
 	[ , $response ] = unsigned_create( array( 'title' => "CRM Off {$mode}", 'article' => 'x', 'status' => 'publish' ) );
 	check_draft_case( "{$mode}: with the setting off, the CRM address is still a draft only", last_event_status() === 'draft' && $response->data['unsigned_draft'] === true );
 	$_SERVER['REMOTE_ADDR'] = '198.51.100.20';
@@ -249,7 +258,7 @@ check_draft_case( 'enforce_v2: unsigned create-page is rejected', $auth instance
 // 3.15.1 source checks: the setting is registered, shown on the settings tab, and off by default.
 $options_source = file_get_contents( __DIR__ . '/../includes/class-ratesight-options.php' );
 $tab_source     = file_get_contents( __DIR__ . '/../admin/partials/tab-seo-pages.php' );
-check_draft_case( 'the CRM posts setting is a registered option, off by default', preg_match( "/'crm_publisher_trust'\\s*=>\\s*array\\(\\s*'name'\\s*=>\\s*'" . Ratesight_Request_Auth::TRUSTED_PUBLISHER_SETTING . "',\\s*'default'\\s*=>\\s*0,\\s*'type'\\s*=>\\s*'bool',\\s*'group'\\s*=>\\s*'seo_pages'/", $options_source ) === 1 );
+check_draft_case( 'the CRM posts opt-out is a registered option, unset by default', preg_match( "/'crm_posts_hold'\\s*=>\\s*array\\(\\s*'name'\\s*=>\\s*'" . Ratesight_Request_Auth::TRUSTED_PUBLISHER_SETTING . "',\\s*'default'\\s*=>\\s*0,\\s*'type'\\s*=>\\s*'bool',\\s*'group'\\s*=>\\s*'seo_pages'/", $options_source ) === 1 );
 check_draft_case( 'the settings tab has the CRM posts checkbox', strpos( $tab_source, 'name="' . Ratesight_Request_Auth::TRUSTED_PUBLISHER_SETTING . '" value="1"' ) !== false );
 
 echo PHP_EOL . ( $failures === 0 ? "ALL {$checks} CHECKS PASSED" : "{$failures} of {$checks} CHECKS FAILED" ) . PHP_EOL;

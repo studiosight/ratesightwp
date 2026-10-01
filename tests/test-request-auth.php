@@ -263,9 +263,29 @@ foreach ( array( 'legacy', 'observe_v2', 'enforce_v2' ) as $matrix_mode ) {
 		};
 		$publisher_address = Ratesight_Request_Auth::TRUSTED_PUBLISHER_ADDRESSES[0];
 		$_SERVER['REMOTE_ADDR'] = $publisher_address;
+		// 3.15.4 default: nothing stored. The CRM address alone publishes; no per-site setting, no key.
+		unset( $options['ratesight_crm_posts_hold'], $options['ratesight_crm_key_required'], $options['ratesight_crm_publisher_trust'] );
+		$options['ratesight_trusted_publisher_window'] = array();
+		$default_on = $crm( 'crm default', '' );
+		check_auth_case( "{$matrix_mode}: by default (nothing stored) the CRM address alone is the trusted publisher", Ratesight_Request_Auth::trusted_publisher_enabled() === true && Ratesight_Request_Auth::authorize_mutation( $default_on ) === true && Ratesight_Request_Auth::is_trusted_publisher_request( $default_on ) === true && last_auth_result() === 'trusted_publisher_accepted' );
+		$default_wrong_key = $crm( 'crm default wrong key', 'not-the-key-not-the-key-not-the-key-1234' );
+		check_auth_case( "{$matrix_mode}: by default a wrong key from the CRM address is still a draft (crm_key_invalid)", Ratesight_Request_Auth::authorize_mutation( $default_wrong_key ) === true && Ratesight_Request_Auth::is_trusted_publisher_request( $default_wrong_key ) === false && last_auth_note() === 'crm_key_invalid' );
+		$options['ratesight_crm_publisher_trust'] = 0;
+		$old_option = $crm( 'crm old option', '' );
+		check_auth_case( "{$matrix_mode}: the old opt-in option is not read (0 stored by a 3.15.1 form save does not hold posts)", Ratesight_Request_Auth::authorize_mutation( $old_option ) === true && Ratesight_Request_Auth::is_trusted_publisher_request( $old_option ) === true );
+		unset( $options['ratesight_crm_publisher_trust'] );
+		$_SERVER['REMOTE_ADDR'] = '203.0.113.7';
+		$default_stranger = $crm( 'stranger default', '' );
+		check_auth_case( "{$matrix_mode}: by default any other address is an unsigned draft only", Ratesight_Request_Auth::authorize_mutation( $default_stranger ) === true && Ratesight_Request_Auth::is_trusted_publisher_request( $default_stranger ) === false && last_auth_result() === 'unsigned_draft_accepted' );
+		$_SERVER['REMOTE_ADDR'] = $publisher_address;
+		$options['ratesight_crm_posts_hold'] = 1;
+		$held = $crm( 'crm held', '' );
+		check_auth_case( "{$matrix_mode}: a site that holds CRM posts gets a draft (crm_publish_off)", Ratesight_Request_Auth::trusted_publisher_enabled() === false && Ratesight_Request_Auth::authorize_mutation( $held ) === true && Ratesight_Request_Auth::is_trusted_publisher_request( $held ) === false && last_auth_note() === 'crm_publish_off' );
+		$options['ratesight_trusted_publisher_window'] = array();
+		$options['ratesight_unsigned_draft_window'] = array();
 		$off = $crm( 'crm off', $crm_key );
 		check_auth_case( "{$matrix_mode}: setting off, the CRM address with the key is still an unsigned draft only", Ratesight_Request_Auth::authorize_mutation( $off ) === true && Ratesight_Request_Auth::is_trusted_publisher_request( $off ) === false && last_auth_result() === 'unsigned_draft_accepted' && last_auth_note() === 'crm_publish_off' );
-		$options['ratesight_crm_publisher_trust'] = 1;
+		$options['ratesight_crm_posts_hold'] = 0; $options['ratesight_crm_key_required'] = 1;
 		$on = $crm( 'crm on', $crm_key );
 		check_auth_case( "{$matrix_mode}: setting on, CRM address + key (query) is admitted as the trusted publisher and audited", Ratesight_Request_Auth::authorize_mutation( $on ) === true && Ratesight_Request_Auth::is_trusted_publisher_request( $on ) === true && last_auth_result() === 'trusted_publisher_accepted' && Ratesight_Request_Auth::unsigned_draft_request_id( $on ) !== null );
 		check_auth_case( "{$matrix_mode}: a trusted publisher post does not use an unsigned draft slot", count( $options['ratesight_unsigned_draft_window'] ) === 1 && count( $options['ratesight_trusted_publisher_window'] ) === 1 );
@@ -286,7 +306,7 @@ foreach ( array( 'legacy', 'observe_v2', 'enforce_v2' ) as $matrix_mode ) {
 		$empty_any = $crm( 'crm site has no key', str_repeat( 'k', 40 ) );
 		check_auth_case( "{$matrix_mode}: a site with no key never trusts (empty or any key)", Ratesight_Request_Auth::authorize_mutation( $empty_site ) === true && Ratesight_Request_Auth::is_trusted_publisher_request( $empty_site ) === false && Ratesight_Request_Auth::authorize_mutation( $empty_any ) === true && Ratesight_Request_Auth::is_trusted_publisher_request( $empty_any ) === false );
 		$options[ Ratesight_CRM_Publish::KEY_OPTION ] = $saved_key;
-		check_auth_case( "{$matrix_mode}: capabilities report the trusted publisher switch and the key requirement", Ratesight_Request_Auth::capability_auth()['trusted_publisher']['enabled'] === true && Ratesight_Request_Auth::capability_auth()['trusted_publisher']['addresses'] === Ratesight_Request_Auth::TRUSTED_PUBLISHER_ADDRESSES && Ratesight_Request_Auth::capability_auth()['trusted_publisher']['requires_key'] === true && Ratesight_Request_Auth::capability_auth()['trusted_publisher']['key_configured'] === true && Ratesight_Request_Auth::capability_auth()['trusted_publisher']['max'] === 10 );
+		check_auth_case( "{$matrix_mode}: capabilities report the trusted publisher switch and the key requirement", Ratesight_Request_Auth::capability_auth()['trusted_publisher']['enabled'] === true && Ratesight_Request_Auth::capability_auth()['trusted_publisher']['addresses'] === Ratesight_Request_Auth::TRUSTED_PUBLISHER_ADDRESSES && Ratesight_Request_Auth::capability_auth()['trusted_publisher']['requires_key'] === true && Ratesight_Request_Auth::capability_auth()['trusted_publisher']['key_configured'] === true && Ratesight_Request_Auth::capability_auth()['trusted_publisher']['max'] === 500 );
 		$trusted_other_routes_rejected = true;
 		foreach ( array( array( 'DELETE', '/ratesight/v1/create-page' ), array( 'POST', '/ratesight/v1/update-page' ), array( 'POST', '/ratesight/v1/redirect' ), array( 'POST', '/ratesight/v1/trash-page' ), array( 'POST', '/ratesight/v1/plugin-update' ), array( 'POST', '/ratesight/v1/crm-publish' ) ) as $other ) {
 			$other_request = unsigned_request( $other[0], $other[1], '{}' );
@@ -309,9 +329,9 @@ foreach ( array( 'legacy', 'observe_v2', 'enforce_v2' ) as $matrix_mode ) {
 		$options['ratesight_trusted_publisher_window'] = array_fill( 0, Ratesight_Request_Auth::TRUSTED_PUBLISHER_LIMIT, time() );
 		$drafts_before = count( $options['ratesight_unsigned_draft_window'] );
 		$flood = $crm( 'flood', $crm_key );
-		check_auth_case( "{$matrix_mode}: past 10 per 24h a CRM post is still created, as a draft (crm_publish_limit)", Ratesight_Request_Auth::authorize_mutation( $flood ) === true && Ratesight_Request_Auth::is_trusted_publisher_request( $flood ) === false && Ratesight_Request_Auth::unsigned_draft_request_id( $flood ) !== null && last_auth_result() === 'unsigned_draft_accepted' && last_auth_note() === 'crm_publish_limit' && count( $options['ratesight_unsigned_draft_window'] ) === $drafts_before + 1 && count( $options['ratesight_trusted_publisher_window'] ) === Ratesight_Request_Auth::TRUSTED_PUBLISHER_LIMIT );
+		check_auth_case( "{$matrix_mode}: past the limit per 24h a CRM post is still created, as a draft (crm_publish_limit)", Ratesight_Request_Auth::authorize_mutation( $flood ) === true && Ratesight_Request_Auth::is_trusted_publisher_request( $flood ) === false && Ratesight_Request_Auth::unsigned_draft_request_id( $flood ) !== null && last_auth_result() === 'unsigned_draft_accepted' && last_auth_note() === 'crm_publish_limit' && count( $options['ratesight_unsigned_draft_window'] ) === $drafts_before + 1 && count( $options['ratesight_trusted_publisher_window'] ) === Ratesight_Request_Auth::TRUSTED_PUBLISHER_LIMIT );
 		$_SERVER['REMOTE_ADDR'] = '203.0.113.7';
-		$options['ratesight_crm_publisher_trust'] = 0;
+		$options['ratesight_crm_posts_hold'] = 1;
 		$options['ratesight_trusted_publisher_window'] = array();
 		unset( $options[ Ratesight_CRM_Publish::KEY_OPTION ] );
 		$options['ratesight_unsigned_draft_window'] = array( time() ); // the one draft admitted at the top of this block
@@ -356,13 +376,14 @@ $audit_results = array_column( $options['ratesight_auth_audit'] ?? array(), 'res
 check_auth_case( 'no request is ever recorded as unsigned accepted or observed', ! in_array( 'legacy_unsigned_observed', $audit_results, true ) && ! in_array( 'legacy_unsigned_accepted', $audit_results, true ) );
 check_auth_case( 'capabilities report unsigned requests are not accepted', Ratesight_Request_Auth::capability_auth()['unsigned_accepted'] === false );
 check_auth_case( 'enforce_v2 capabilities report no unsigned draft creation', Ratesight_Request_Auth::capability_auth()['unsigned_draft_create'] === false );
-$options['ratesight_crm_publisher_trust'] = 1;
+$options['ratesight_crm_posts_hold'] = 0; $options['ratesight_crm_key_required'] = 1;
 $_SERVER['REMOTE_ADDR'] = Ratesight_Request_Auth::TRUSTED_PUBLISHER_ADDRESSES[0];
 $enforced_publisher = unsigned_request( 'POST', '/ratesight/v1/create-page', '{"title":"t","article":"a"}' );
 check_auth_case( 'enforce_v2: the CRM address with the setting on is still rejected', error_code( Ratesight_Request_Auth::authorize_mutation( $enforced_publisher ) ) === 'rs_auth_version_required' && Ratesight_Request_Auth::is_trusted_publisher_request( $enforced_publisher ) === false && Ratesight_Request_Auth::capability_auth()['trusted_publisher']['enabled'] === false );
 $_SERVER['REMOTE_ADDR'] = '203.0.113.7';
-$options['ratesight_crm_publisher_trust'] = 0;
-check_auth_case( 'the trusted publisher setting is off unless stored, and only the observed CRM address is listed', Ratesight_Request_Auth::trusted_publisher_enabled() === false && Ratesight_Request_Auth::TRUSTED_PUBLISHER_ADDRESSES === array( '67.199.171.44' ) );
+$options['ratesight_crm_posts_hold'] = 1;
+unset( $options['ratesight_crm_posts_hold'], $options['ratesight_crm_key_required'] );
+check_auth_case( 'CRM publishing is on and the key optional unless stored otherwise, the limit is 500, and only the observed CRM address is listed', Ratesight_Request_Auth::trusted_publisher_enabled() === true && Ratesight_Request_Auth::trusted_publisher_key_required() === false && Ratesight_Request_Auth::TRUSTED_PUBLISHER_LIMIT === 500 && Ratesight_Request_Auth::capability_auth()['trusted_publisher']['requires_key'] === false && Ratesight_Request_Auth::TRUSTED_PUBLISHER_ADDRESSES === array( '67.199.171.44' ) );
 check_auth_case( 'unsigned draft limit is a named constant of 30 per 24h', Ratesight_Request_Auth::UNSIGNED_DRAFT_LIMIT === 30 && Ratesight_Request_Auth::UNSIGNED_DRAFT_WINDOW === 86400 );
 $_SERVER['REMOTE_ADDR'] = 'not-an-ip';
 Ratesight_Request_Auth::authorize_mutation( unsigned_request( 'POST', '/ratesight/v1/redirect', '{}' ) );
