@@ -16,8 +16,8 @@ function check_fuzzy_case( string $name, bool $ok ): void {
 	echo ( $ok ? 'ok     ' : 'NOT OK ' ) . $name . PHP_EOL;
 }
 
-check_fuzzy_case( 'schema default is off', Ratesight_Options::schema()['fuzzy_mode']['default'] === 'off' );
-check_fuzzy_case( 'unset option reads as off through the options registry', Ratesight_Options::get( 'fuzzy_mode' ) === 'off' );
+check_fuzzy_case( 'schema default is same-city-or-hub', Ratesight_Options::schema()['fuzzy_mode']['default'] === 'same-city-or-hub' );
+check_fuzzy_case( 'unset option reads as same-city-or-hub through the options registry', Ratesight_Options::get( 'fuzzy_mode' ) === 'same-city-or-hub' );
 foreach ( array( 'legacy', 'same-city-or-hub', 'off' ) as $mode ) {
 	check_fuzzy_case( "posted {$mode} is stored", Ratesight_Options::sanitise( $mode, 'fuzzy_mode' ) === $mode );
 }

@@ -57,9 +57,9 @@ class Ratesight_Options {
 			// Runtime 404 fuzzy-router mode (v3.2.18). 'legacy' = unconstrained slug
 			// similarity; 'same-city-or-hub' = cross-city fuzzy matches are blocked,
 			// with a same-service base-hub fallback; 'off' = no fuzzy redirects.
-			// Since 3.14.0 an UNSET option resolves to 'off' (a 404 stays a 404); a
+			// Since 3.15.3 an UNSET option resolves to 'same-city-or-hub' (3.14.0 to 3.15.2: 'off'); a
 			// value an admin stored explicitly is still honored.
-			'fuzzy_mode'           => array( 'name' => 'ratesight_fuzzy_mode',            'default' => 'off',        'type' => 'fuzzy_mode', 'group' => 'seo_pages' ),
+			'fuzzy_mode'           => array( 'name' => 'ratesight_fuzzy_mode',            'default' => 'same-city-or-hub', 'type' => 'fuzzy_mode', 'group' => 'seo_pages' ),
 
 			// ── GBP CTA / posting settings ────────────────────────────────────
 			'gbp_cta_type'     => array( 'name' => 'ratesight_gbp_cta_type',     'default' => 'LEARN_MORE', 'type' => 'text', 'group' => 'connections' ),
@@ -179,7 +179,7 @@ class Ratesight_Options {
 				// saving: WP passes null for fields it did not post) must PRESERVE the
 				// stored mode. When nothing valid is stored, return false: update_option
 				// sees no change from the missing option and writes nothing, so the
-				// option stays unset (resolving to 'off') instead of being pinned to a
+				// option stays unset (resolving to the default mode) instead of being pinned to a
 				// value nobody chose.
 				$current = get_option( 'ratesight_fuzzy_mode', false );
 				return in_array( $current, array( 'legacy', 'same-city-or-hub', 'off' ), true ) ? $current : false;

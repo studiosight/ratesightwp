@@ -138,15 +138,15 @@ check( 'review: dedup suffix cross-city still blocked', Ratesight_Runtime_404_Ro
 // current_mode()/mode_state(): 3.14.0 default-off semantics through the real read path.
 $wp_options = array();
 $state = Ratesight_Runtime_404_Router::mode_state();
-check( '3.14.0: unset option resolves to off', Ratesight_Runtime_404_Router::current_mode() === 'off' && $state['mode'] === 'off' );
-check( '3.14.0: unset option is reported as not explicit', $state['explicit'] === false && $state['source'] === 'default' && $state['default'] === 'off' );
+check( '3.15.3: unset option resolves to same-city-or-hub', Ratesight_Runtime_404_Router::current_mode() === 'same-city-or-hub' && $state['mode'] === 'same-city-or-hub' );
+check( '3.14.0: unset option is reported as not explicit', $state['explicit'] === false && $state['source'] === 'default' && $state['default'] === 'same-city-or-hub' );
 $wp_options['ratesight_fuzzy_mode'] = false;
-check( '3.14.0: a false option (nothing stored) resolves to off', Ratesight_Runtime_404_Router::current_mode() === 'off' && Ratesight_Runtime_404_Router::mode_state()['explicit'] === false );
+check( '3.15.3: a false option (nothing stored) resolves to same-city-or-hub', Ratesight_Runtime_404_Router::current_mode() === 'same-city-or-hub' && Ratesight_Runtime_404_Router::mode_state()['explicit'] === false );
 $wp_options['ratesight_fuzzy_mode'] = '';
-check( '3.14.0: an empty option resolves to off', Ratesight_Runtime_404_Router::current_mode() === 'off' && Ratesight_Runtime_404_Router::mode_state()['explicit'] === false );
+check( '3.15.3: an empty option resolves to same-city-or-hub', Ratesight_Runtime_404_Router::current_mode() === 'same-city-or-hub' && Ratesight_Runtime_404_Router::mode_state()['explicit'] === false );
 $wp_options['ratesight_fuzzy_mode'] = 'weird-value';
 $state = Ratesight_Runtime_404_Router::mode_state();
-check( 'review: bogus stored value fails safe to off, not legacy', $state['mode'] === 'off' && $state['explicit'] === false && $state['source'] === 'invalid_stored_value' );
+check( 'review: bogus stored value resolves to the constrained default, never legacy', $state['mode'] === 'same-city-or-hub' && $state['explicit'] === false && $state['source'] === 'invalid_stored_value' );
 foreach ( array( 'legacy', 'same-city-or-hub', 'off' ) as $explicit_mode ) {
 	$wp_options['ratesight_fuzzy_mode'] = $explicit_mode;
 	$state = Ratesight_Runtime_404_Router::mode_state();
@@ -155,9 +155,17 @@ foreach ( array( 'legacy', 'same-city-or-hub', 'off' ) as $explicit_mode ) {
 $handler_source = file_get_contents( __DIR__ . '/../includes/class-ratesight-webhook-handler.php' );
 check( '3.14.0: capabilities expose the fuzzy 404 mode state', strpos( $handler_source, "'fuzzy_404'            => Ratesight_Runtime_404_Router::mode_state()" ) !== false );
 $admin_source = file_get_contents( __DIR__ . '/../admin/partials/tab-seo-pages.php' );
-check( '3.14.0: admin select labels Off as the default and selects the effective mode', strpos( $admin_source, 'Off: missing pages return 404 (default)' ) !== false && strpos( $admin_source, '(default)</option>' ) === strpos( $admin_source, 'Off: missing pages return 404 (default)</option>' ) + strlen( 'Off: missing pages return 404 ' ) && strpos( $admin_source, "selected( 'off', Ratesight_Runtime_404_Router::current_mode() )" ) !== false );
+check( '3.15.3: admin select labels Automatic as the default, lists it first and selects the effective mode', strpos( $admin_source, "never to another city's page (default)</option>" ) !== false && substr_count( $admin_source, '(default)</option>' ) === 1 && strpos( $admin_source, '<option value="same-city-or-hub"' ) < strpos( $admin_source, '<option value="off"' ) && strpos( $admin_source, "selected( 'off', Ratesight_Runtime_404_Router::current_mode() )" ) !== false );
 $options_source = file_get_contents( __DIR__ . '/../includes/class-ratesight-options.php' );
-check( '3.14.0: options schema default is off', strpos( $options_source, "'ratesight_fuzzy_mode',            'default' => 'off'" ) !== false );
+check( '3.15.3: options schema default is same-city-or-hub', Ratesight_Runtime_404_Router::DEFAULT_MODE === 'same-city-or-hub' && strpos( $options_source, "'ratesight_fuzzy_mode',            'default' => 'same-city-or-hub'" ) !== false );
+// The default mode end to end: a close same-city miss redirects, a cross-city miss does not.
+$default_index = array( row( 'movers-san-ramon-ca' ), row( 'aba-therapy-at-home-guide' ) );
+$near = Ratesight_Runtime_404_Router::route_decision( 'aba-therapy-at-home-guides', $default_index, Ratesight_Runtime_404_Router::DEFAULT_MODE, Ratesight_Runtime_404_Router::THRESHOLD );
+$cross = Ratesight_Runtime_404_Router::route_decision( 'movers-san-bruno-ca', $default_index, Ratesight_Runtime_404_Router::DEFAULT_MODE, Ratesight_Runtime_404_Router::THRESHOLD );
+$far = Ratesight_Runtime_404_Router::route_decision( 'completely-unrelated-thing', $default_index, Ratesight_Runtime_404_Router::DEFAULT_MODE, Ratesight_Runtime_404_Router::THRESHOLD );
+check( '3.15.3: default mode redirects a near miss to its closest page', $near['action'] === 'redirect' && $near['url'] === 'https://example.com/aba-therapy-at-home-guide/' );
+check( '3.15.3: default mode never sends one city to another', $cross['action'] !== 'redirect' );
+check( '3.15.3: default mode leaves an unrelated URL a 404', $far['action'] === 'none' );
 
 echo PHP_EOL . ( $failures === 0 ? "ALL {$checks} CHECKS PASSED" : "{$failures} of {$checks} CHECKS FAILED" ) . PHP_EOL;
 exit( $failures === 0 ? 0 : 1 );

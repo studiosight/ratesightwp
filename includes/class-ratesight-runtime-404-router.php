@@ -110,8 +110,12 @@ class Ratesight_Runtime_404_Router {
 	/** Stored option that holds an explicit per-site fuzzy mode. */
 	const OPTION = 'ratesight_fuzzy_mode';
 
-	/** Effective mode when nothing valid is stored (since 3.14.0; was 'legacy'). */
-	const DEFAULT_MODE = 'off';
+	/**
+	 * Effective mode when nothing valid is stored. 3.15.3: 'same-city-or-hub', so a
+	 * missing page is sent to its closest page on every site without a per-site
+	 * setting, and never to another city's page. (3.14.0 to 3.15.2: 'off'; before: 'legacy'.)
+	 */
+	const DEFAULT_MODE = 'same-city-or-hub';
 
 	/**
 	 * The per-site fuzzy mode.
@@ -124,9 +128,8 @@ class Ratesight_Runtime_404_Router {
 	 * Effective fuzzy mode plus where it came from, for capabilities reporting.
 	 *
 	 * A valid stored value ('legacy', 'same-city-or-hub', 'off') is honored as an
-	 * explicit site choice. An unset option resolves to 'off' (a 404 stays a 404,
-	 * no speculative redirect). An unrecognized stored value also fails safe to
-	 * 'off' and is reported as not explicit.
+	 * explicit site choice. An unset option, and an unrecognized stored value,
+	 * resolve to DEFAULT_MODE and are reported as not explicit.
 	 *
 	 * @return array{mode: string, explicit: bool, source: string, default: string}
 	 */
