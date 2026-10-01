@@ -30,8 +30,14 @@ class Ratesight_Options {
 			'parent_category'      => array( 'name' => 'ratesight_parent_category',      'default' => 0, 'type' => 'int', 'group' => 'seo_pages' ),
 			'rs_page_parent_category' => array( 'name' => 'ratesight_rs_page_parent_cat', 'default' => 0,  'type' => 'int',  'group' => 'seo_pages' ),
 			'rs_page_base'            => array( 'name' => 'ratesight_rs_page_base',          'default' => '', 'type' => 'text', 'group' => 'seo_pages' ),
-			'link_approved_domains'   => array( 'name' => 'ratesight_link_approved_domains', 'default' => '', 'type' => 'text', 'group' => 'seo_pages' ),
-			'link_excluded_domains'   => array( 'name' => 'ratesight_link_excluded_domains', 'default' => '', 'type' => 'text', 'group' => 'seo_pages' ),
+			// Since 3.15.1 these two have their own settings group. WordPress writes every
+			// option registered in a group when one of its forms is saved, and an option
+			// the form does not carry is written as empty. While the Link Domain Rules form
+			// shared the seo_pages group, saving it reset the Final Post Status and the
+			// Reference Page Status to Published, cleared the RS Page base slug and turned
+			// the checkboxes off, and saving the AI SEO Pages tab emptied these two lists.
+			'link_approved_domains'   => array( 'name' => 'ratesight_link_approved_domains', 'default' => '', 'type' => 'text', 'group' => 'links' ),
+			'link_excluded_domains'   => array( 'name' => 'ratesight_link_excluded_domains', 'default' => '', 'type' => 'text', 'group' => 'links' ),
 			'post_status'          => array( 'name' => 'ratesight_post_status',     'default' => 'publish', 'type' => 'status', 'group' => 'seo_pages' ),
 			'post_author'          => array( 'name' => 'ratesight_post_author',     'default' => 1,         'type' => 'int',    'group' => 'seo_pages' ),
 			'default_layout'       => array( 'name' => 'ratesight_default_layout',       'default' => 'right-sidebar', 'type' => 'text', 'group' => 'seo_pages' ),
@@ -66,6 +72,12 @@ class Ratesight_Options {
 
 			// ── Reference page (ratesight_page CPT) status ──────────────────
 			'page_status'      => array( 'name' => 'ratesight_page_status', 'default' => 'publish', 'type' => 'status', 'group' => 'seo_pages' ),
+
+			// Since 3.15.1: posts the Ratesight CRM sends are not signed. Off (default):
+			// they are saved as drafts (at most 30 per 24 hours). On: a post arriving
+			// from the CRM's address is created with the Final Post Status. The option
+			// name is Ratesight_Request_Auth::TRUSTED_PUBLISHER_SETTING.
+			'crm_publisher_trust' => array( 'name' => 'ratesight_crm_publisher_trust', 'default' => 0, 'type' => 'bool', 'group' => 'seo_pages' ),
 		);
 	}
 

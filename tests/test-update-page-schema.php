@@ -99,7 +99,7 @@ check( 'the schema write happens before the cache purge', strpos( $update, 'Rate
 check( 'capabilities report schema_write', (bool) preg_match( "/'schema_write'\\s+=> true,/", substr( $handler, strpos( $handler, 'public function handle_capabilities' ) ) ) );
 preg_match( "/define\\( 'RATESIGHT_RELEASE_VERSION', '([0-9.]+)' \\);/", $plugin, $release_match );
 preg_match( '/Version:\\s+([0-9.]+)/', $plugin, $header_match );
-check( 'plugin version is 3.15.0 and the header matches', ( $release_match[1] ?? '' ) === '3.15.0' && ( $header_match[1] ?? '' ) === '3.15.0' );
+check( 'plugin version is 3.15.0 or later and the header matches', version_compare( (string) ( $release_match[1] ?? '0' ), '3.15.0', '>=' ) && ( $header_match[1] ?? '' ) === ( $release_match[1] ?? null ) );
 
 echo PHP_EOL . "{$checks} checks, {$failures} failure(s)" . PHP_EOL;
 exit( $failures > 0 ? 1 : 0 );

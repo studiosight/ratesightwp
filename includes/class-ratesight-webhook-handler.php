@@ -313,6 +313,10 @@ class Ratesight_Webhook_Handler {
 		//     unique slug, and skip writes that reach beyond the new draft.
 		$unsigned_request_id = class_exists( 'Ratesight_Request_Auth' ) ? Ratesight_Request_Auth::unsigned_draft_request_id( $request ) : null;
 		$unsigned_draft      = $unsigned_request_id !== null;
+		// Since 3.15.1: an unsigned creation from the Ratesight CRM publisher's address,
+		// on a site that turned on "Ratesight CRM posts". Still a NEW post only; the
+		// status is not forced to draft.
+		$trusted_publisher   = $unsigned_draft && Ratesight_Request_Auth::is_trusted_publisher_request( $request );
 		if ( $unsigned_draft ) {
 			foreach ( array( 'id', 'ID', 'post_id', 'target_id', 'target_post_id' ) as $target_key ) {
 				if ( isset( $data[ $target_key ] ) && $data[ $target_key ] !== '' && $data[ $target_key ] !== 0 && $data[ $target_key ] !== '0' ) {
@@ -387,7 +391,9 @@ class Ratesight_Webhook_Handler {
 		// upsert) under a slug no existing post uses, and no external stylesheet is
 		// attached.
 		if ( $unsigned_draft ) {
-			$request_status = 'draft';
+			if ( ! $trusted_publisher ) {
+				$request_status = 'draft';
+			}
 			$custom_css_url = '';
 			$slug           = self::unique_unsigned_slug( $slug !== '' ? $slug : 'ratesight-draft' );
 		}
@@ -544,6 +550,12 @@ class Ratesight_Webhook_Handler {
 		if ( $custom_css_url !== '' ) {
 			update_post_meta( $post_id, '_rs_custom_css_url', $custom_css_url );
 		}
+		// Since 3.15.1: remember the status this request must end in (always 'draft' for
+		// an unsigned draft). The hourly retry of a deferred publish that never ran
+		// reads it, so a stuck unsigned draft is not published by the retry.
+		if ( $request_status !== '' ) {
+			update_post_meta( $post_id, '_rs_request_status', $request_status );
+		}
 		if ( $rs_term_id > 0 ) {
 			wp_set_object_terms( $post_id, $rs_term_id, 'rs_category' );
 		}
@@ -564,6 +576,20 @@ class Ratesight_Webhook_Handler {
 
 		$new_post     = get_post( $post_id );
 		$content_hash = md5( $new_post->post_content . $new_post->post_title . $new_post->post_excerpt );
+
+		if ( $trusted_publisher ) {
+			Ratesight_Logger::log_update( $log_id, $post_id, Ratesight_Logger::STATUS_PENDING, 'Ratesight CRM post: created as a new post (request ' . $unsigned_request_id . ').' );
+			return new \WP_REST_Response( array(
+				'ok'                => true,
+				'created'           => true,
+				'updated'           => false,
+				'id'                => $post_id,
+				'url'               => $expected_url,
+				'content_hash'      => $content_hash,
+				'trusted_publisher' => true,
+				'request_id'        => $unsigned_request_id,
+			), 200 );
+		}
 
 		if ( $unsigned_draft ) {
 			Ratesight_Logger::log_update( $log_id, $post_id, Ratesight_Logger::STATUS_PENDING, 'Unsigned request: created as a new draft only (request ' . $unsigned_request_id . ').' );

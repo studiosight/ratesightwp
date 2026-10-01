@@ -1067,7 +1067,7 @@ if ( ! empty( $redirects ) ) :
 	These lists tell the AI which external domains to favour or avoid when suggesting and scoring links. One domain per line.
 </p>
 <form method="post" action="options.php">
-<?php settings_fields( 'ratesight_options_seo_pages' ); ?>
+<?php settings_fields( 'ratesight_options_links' ); ?>
 <table class="form-table" role="presentation" style="margin:0;">
 	<tr>
 		<th style="width:180px;"><label for="rs-approved-domains">Approved Sources</label></th>
