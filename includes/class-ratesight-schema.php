@@ -25,6 +25,15 @@ class Ratesight_Schema {
 
 	const META_KEY = '_rs_schema';
 
+	/** Class on the injected script tag, so a reader can tell this plugin's block from any other JSON-LD. Since 3.15.0. */
+	const MARKER_CLASS = 'ratesight-schema';
+
+	/** Largest JSON-LD document update-page accepts (bytes, encoded). Since 3.15.0. */
+	const MAX_WRITE_BYTES = 32768;
+
+	/** Flags for every JSON-LD this plugin prints: no raw <, >, & or ' can close the script element. */
+	const PRINT_FLAGS = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
+
 	// -------------------------------------------------------------------------
 	// Detection
 	// -------------------------------------------------------------------------
@@ -215,6 +224,75 @@ class Ratesight_Schema {
 		delete_post_meta( $post_id, self::META_KEY );
 	}
 
+	// -------------------------------------------------------------------------
+	// Change-control write path (POST /update-page `schema`, since 3.15.0)
+	// -------------------------------------------------------------------------
+
+	/**
+	 * The stored JSON-LD exactly as kept in _rs_schema ('' when none). GET /update-page reports it so a
+	 * caller can compare, and send it back to restore it.
+	 */
+	public static function stored_json( int $post_id ): string {
+		$raw = get_post_meta( $post_id, self::META_KEY, true );
+		return is_string( $raw ) ? $raw : '';
+	}
+
+	/** sha256 of the stored JSON-LD ('' when none). */
+	public static function stored_hash( int $post_id ): string {
+		$raw = self::stored_json( $post_id );
+		return $raw === '' ? '' : hash( 'sha256', $raw );
+	}
+
+	/**
+	 * Validate a `schema` value sent to update-page. Accepts a JSON string or an already-decoded object.
+	 * Returns array( 'remove' => true ) for null or '' (delete the stored block), array( 'json' => <canonical
+	 * encoding>, 'data' => <array> ) for a valid document, or array( 'error' => <reason> ).
+	 *
+	 * A valid document is ONE JSON object whose @context is schema.org and which carries @type or @graph,
+	 * at most MAX_WRITE_BYTES once encoded. Nothing else is interpreted: the caller (the dashboard's change
+	 * control) owns what goes into it and verifies the served page after the write.
+	 *
+	 * @param mixed $value Value of the `schema` key.
+	 */
+	/** array_is_list() for PHP 8.0 (the plugin's minimum). */
+	private static function is_list( array $value ): bool {
+		return $value === array() || array_keys( $value ) === range( 0, count( $value ) - 1 );
+	}
+
+	public static function validate_for_write( $value ): array {
+		if ( $value === null || $value === '' ) {
+			return array( 'remove' => true );
+		}
+		if ( is_string( $value ) ) {
+			$decoded = json_decode( $value, true );
+			if ( ! is_array( $decoded ) ) {
+				return array( 'error' => 'schema is not valid JSON.' );
+			}
+			$value = $decoded;
+		}
+		if ( ! is_array( $value ) || self::is_list( $value ) ) {
+			return array( 'error' => 'schema must be one JSON object (use @graph for several blocks).' );
+		}
+		$context = $value['@context'] ?? null;
+		if ( ! is_string( $context ) || ! preg_match( '#^https?://schema\.org/?$#', $context ) ) {
+			return array( 'error' => 'schema @context must be https://schema.org.' );
+		}
+		if ( ! isset( $value['@type'] ) && ! isset( $value['@graph'] ) ) {
+			return array( 'error' => 'schema needs @type or @graph.' );
+		}
+		if ( isset( $value['@graph'] ) && ( ! is_array( $value['@graph'] ) || ! self::is_list( $value['@graph'] ) || ! $value['@graph'] ) ) {
+			return array( 'error' => 'schema @graph must be a non-empty list.' );
+		}
+		$json = wp_json_encode( $value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
+		if ( ! is_string( $json ) ) {
+			return array( 'error' => 'schema could not be encoded.' );
+		}
+		if ( strlen( $json ) > self::MAX_WRITE_BYTES ) {
+			return array( 'error' => 'schema exceeds ' . self::MAX_WRITE_BYTES . ' bytes.' );
+		}
+		return array( 'json' => $json, 'data' => $value );
+	}
+
 	/**
 	 * Inject schema into wp_head for any post that has _rs_schema meta.
 	 * Hooked to wp_head.
@@ -228,8 +306,17 @@ class Ratesight_Schema {
 		$raw = get_post_meta( $post_id, self::META_KEY, true );
 		if ( ! $raw ) return;
 
-		echo '<script type="application/ld+json">' . "\n";
-		echo wp_kses_post( $raw ) . "\n";
+		// Since 3.15.0: decoded and re-encoded with every HTML-significant character escaped, instead of
+		// passed through wp_kses_post, which turned a literal & inside a JSON string into &amp; (a changed
+		// value) and could not make the text safe inside a script element anyway. A stored value that is
+		// not JSON is not printed.
+		$data = json_decode( (string) $raw, true );
+		if ( ! is_array( $data ) ) return;
+		$json = wp_json_encode( $data, self::PRINT_FLAGS );
+		if ( ! is_string( $json ) ) return;
+
+		echo '<script type="application/ld+json" class="' . esc_attr( self::MARKER_CLASS ) . '">' . "\n";
+		echo $json . "\n"; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON encoded with JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS: no character can close the script element.
 		echo '</script>' . "\n";
 	}
 
