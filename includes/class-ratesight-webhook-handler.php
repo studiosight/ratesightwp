@@ -550,6 +550,12 @@ class Ratesight_Webhook_Handler {
 		if ( $custom_css_url !== '' ) {
 			update_post_meta( $post_id, '_rs_custom_css_url', $custom_css_url );
 		}
+		// Since 3.15.1: remember the status this request must end in (always 'draft' for
+		// an unsigned draft). The hourly retry of a deferred publish that never ran
+		// reads it, so a stuck unsigned draft is not published by the retry.
+		if ( $request_status !== '' ) {
+			update_post_meta( $post_id, '_rs_request_status', $request_status );
+		}
 		if ( $rs_term_id > 0 ) {
 			wp_set_object_terms( $post_id, $rs_term_id, 'rs_category' );
 		}

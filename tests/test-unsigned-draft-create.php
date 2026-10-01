@@ -36,7 +36,7 @@ function get_page_by_path( $slug, $output, $types ) {
 }
 function get_post( $id ) { global $posts; return isset( $posts[ $id ] ) ? (object) $posts[ $id ] : null; }
 function wp_update_post( $args ) { global $posts, $writes; $writes[] = array( 'update', $args ); $posts[ $args['ID'] ] = array_merge( $posts[ $args['ID'] ], $args ); return $args['ID']; }
-function update_post_meta( $id, $key, $value ) { global $writes; $writes[] = array( 'meta', $id, $key ); }
+function update_post_meta( $id, $key, $value ) { global $writes; $writes[] = array( 'meta', $id, $key, $value ); }
 function wp_set_object_terms() {}
 function get_sample_permalink( $id ) { global $posts; return array( 'https://example.test/%postname%/', $posts[ $id ]['post_name'] ); }
 function wp_schedule_single_event( $time, $hook, $args ) { global $events; $events[] = array( $hook, $args ); }
@@ -198,8 +198,19 @@ foreach ( array( 'legacy', 'observe_v2' ) as $mode ) {
 	$css_written = false;
 	foreach ( $writes as $w ) { if ( $w[0] === 'meta' && $w[2] === '_rs_custom_css_url' ) $css_written = true; }
 	check_draft_case( "{$mode}: a CRM post attaches no external stylesheet and writes no recovery log", ! $css_written && Ratesight_Recovery_Log::$calls === 0 );
+	[ , $response ] = unsigned_create( array( 'title' => "CRM Page {$mode}", 'article' => 'x', 'post_type' => 'rs_page' ) );
+	check_draft_case( "{$mode}: a CRM reference page is created as an RS page and left to the Reference Page Status", $posts[ $response->data['id'] ]['post_type'] === 'ratesight_page' && last_event_status() === '' );
+	$events_before = count( $events );
+	$writes = array();
+	[ , $response ] = unsigned_create( array( 'title' => "CRM Upsert {$mode}", 'slug' => 'existing-service', 'article' => '<p>again</p>', 'update' => true, 'status' => 'publish' ) );
+	check_draft_case( "{$mode}: update:true from the CRM still creates a new post and leaves the existing one alone", $response->data['created'] === true && $response->data['id'] !== 101 && $posts[101]['post_content'] === 'original' && count( $events ) === $events_before + 1 );
+	$request_status_meta = array_values( array_filter( $writes, static fn( $w ) => $w[0] === 'meta' && $w[2] === '_rs_request_status' ) );
+	check_draft_case( "{$mode}: the requested status is stored on the new post for the retry", count( $request_status_meta ) === 1 && $request_status_meta[0][1] === $response->data['id'] );
 	$_SERVER['REMOTE_ADDR'] = '198.51.100.20';
+	$writes = array();
 	[ , $response ] = unsigned_create( array( 'title' => "Stranger {$mode}", 'article' => 'x', 'status' => 'publish' ) );
+	$stranger_meta = array_values( array_filter( $writes, static fn( $w ) => $w[0] === 'meta' && $w[2] === '_rs_request_status' ) );
+	check_draft_case( "{$mode}: an unsigned draft stores draft as the status the retry must keep", count( $stranger_meta ) === 1 && $stranger_meta[0][1] === $response->data['id'] && $stranger_meta[0][3] === 'draft' );
 	check_draft_case( "{$mode}: with the setting on, another address is still a draft only", last_event_status() === 'draft' && $response->data['unsigned_draft'] === true && ! isset( $response->data['trusted_publisher'] ) );
 	$_SERVER['REMOTE_ADDR'] = Ratesight_Request_Auth::TRUSTED_PUBLISHER_ADDRESSES[0];
 	$options['ratesight_crm_publisher_trust'] = 0;

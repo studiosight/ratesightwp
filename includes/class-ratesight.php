@@ -244,9 +244,14 @@ class Ratesight {
 	 * Retry posts stuck in pending state.
 	 *
 	 * Finds log rows that are still 'pending' with a post_id and a post that
-	 * is still a draft after 30+ minutes. Simply flips them to published.
+	 * is still a draft after 30+ minutes, and gives them their final status.
 	 * This catches cases where the ratesight_deferred_publish WP-Cron event
 	 * never fired due to loopback failures or low site traffic.
+	 *
+	 * Since 3.15.1 the status the request asked for (post meta
+	 * _rs_request_status) wins over the site setting, exactly as in the deferred
+	 * publish. Before, a stuck post always got the site's Final Post Status, so
+	 * an unsigned draft whose deferred publish never completed was published.
 	 */
 	public function retry_pending_posts(): void {
 		global $wpdb;
@@ -283,12 +288,18 @@ class Ratesight {
 				continue;
 			}
 
-			// Determine intended status from plugin settings.
+			// The status the request asked for, else the site setting.
 			$post_type    = get_post_type( $post_id );
 			$status_key   = ( $post_type === 'ratesight_page' ) ? 'page_status' : 'post_status';
-			$final_status = Ratesight_Options::get( $status_key );
-			if ( ! in_array( $final_status, array( 'publish', 'draft', 'pending', 'private' ), true ) ) {
-				$final_status = 'publish';
+			$requested    = (string) get_post_meta( $post_id, '_rs_request_status', true );
+			if ( ! in_array( $requested, array( 'publish', 'draft', 'pending', 'private' ), true ) ) {
+				$requested = '';
+			}
+			$final_status = Ratesight_Publisher::resolve_final_status( $requested, (string) Ratesight_Options::get( $status_key ) );
+
+			if ( $final_status === (string) $post->post_status ) {
+				Ratesight_Logger::log_update( $log_id, $post_id, Ratesight_Logger::STATUS_SUCCESS, "Resolved by retry check: kept as {$final_status}, the status this request ends in." );
+				continue;
 			}
 
 			$updated = wp_update_post( array( 'ID' => $post_id, 'post_status' => $final_status ), true );
@@ -296,7 +307,7 @@ class Ratesight {
 			if ( is_wp_error( $updated ) ) {
 				Ratesight_Logger::log_update( $log_id, $post_id, Ratesight_Logger::STATUS_FAILED, 'Retry failed: ' . $updated->get_error_message() );
 			} else {
-				Ratesight_Logger::log_update( $log_id, $post_id, Ratesight_Logger::STATUS_SUCCESS, 'Published by retry cron — original deferred_publish event did not fire.' );
+				Ratesight_Logger::log_update( $log_id, $post_id, Ratesight_Logger::STATUS_SUCCESS, "Set to {$final_status} by retry cron: the original deferred_publish event did not fire." );
 			}
 		}
 	}

@@ -232,7 +232,13 @@ class Ratesight_Request_Auth {
 			(string) $request->get_header( 'x_ratesight_timestamp' ),
 			(string) $request->get_header( 'x_ratesight_nonce' ),
 			(string) $request->get_header( 'x_ratesight_signature' ),
+			(string) $request->get_header( 'x_ratesight_content_sha256' ),
+			method_exists( $request, 'get_query_string' ) ? (string) $request->get_query_string() : (string) ( $_SERVER['QUERY_STRING'] ?? '' ),
+			(string) json_encode( $request->get_query_params() ),
 			hash( 'sha256', (string) $request->get_body() ),
+			(string) ( $_SERVER['REMOTE_ADDR'] ?? '' ),
+			self::mode(),
+			self::trusted_publisher_enabled() ? '1' : '0',
 		) ) );
 		self::$decisions ??= new WeakMap();
 		$known = self::$decisions[ $request ] ?? array();

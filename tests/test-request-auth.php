@@ -148,8 +148,12 @@ $valid = signed_request( $fixture['secret'] );
 check_auth_case( 'valid v2 accepted', Ratesight_Request_Auth::authorize_mutation( $valid ) === true );
 // 3.15.1: one decision per request object. WordPress re-runs the permission callback for every
 // handler of the matched route (rest_send_allow_header); the repeat must not be judged as a replay.
-$audit_before_repeat = count( $options['ratesight_auth_audit'] );
-check_auth_case( 'the same request asked again gets the same decision and no second audit row', Ratesight_Request_Auth::authorize_mutation( $valid ) === true && Ratesight_Request_Auth::authorize_mutation( $valid ) === true && count( $options['ratesight_auth_audit'] ) === $audit_before_repeat );
+$last_row_before_repeat = $options['ratesight_auth_audit'][ array_key_last( $options['ratesight_auth_audit'] ) ]['request_id'];
+check_auth_case( 'the same request asked again gets the same decision and no second audit row', Ratesight_Request_Auth::authorize_mutation( $valid ) === true && Ratesight_Request_Auth::authorize_mutation( $valid ) === true && $options['ratesight_auth_audit'][ array_key_last( $options['ratesight_auth_audit'] ) ]['request_id'] === $last_row_before_repeat );
+$moved = signed_request( $fixture['secret'] );
+Ratesight_Request_Auth::authorize_mutation( $moved );
+$moved->query = array( 'tag' => 'changed-after-the-check' );
+check_auth_case( 'a request whose query changed after its decision is judged again', error_code( Ratesight_Request_Auth::authorize_mutation( $moved ) ) === 'rs_bad_signature' );
 // A replay from the network is a new request object carrying the same headers.
 check_auth_case( 'replayed nonce rejected', error_code( Ratesight_Request_Auth::authorize_mutation( clone $valid ) ) === 'rs_nonce_replayed' );
 $tampered_same_object = signed_request( $fixture['secret'] );
@@ -232,9 +236,13 @@ foreach ( array( 'legacy', 'observe_v2', 'enforce_v2' ) as $matrix_mode ) {
 		// 3.15.1: POST plus the DELETE handler's Allow-header check is one request, one slot, one audit row.
 		$options['ratesight_unsigned_draft_window'] = array();
 		$once = unsigned_request( 'POST', '/ratesight/v1/create-page', '{"title":"once","article":"a"}' );
-		$rows_before_once = count( $options['ratesight_auth_audit'] );
+		$options['ratesight_auth_audit'] = array(); // the audit keeps 100 rows; count from empty so the row count is exact
 		$once_results = array( Ratesight_Request_Auth::authorize_mutation( $once ), Ratesight_Request_Auth::authorize_mutation( $once ), Ratesight_Request_Auth::authorize_mutation( $once ) );
-		check_auth_case( "{$matrix_mode}: one unsigned create-page checked three times uses one slot and one audit row", $once_results === array( true, true, true ) && count( $options['ratesight_unsigned_draft_window'] ) === 1 && count( $options['ratesight_auth_audit'] ) === min( 100, $rows_before_once + 1 ) );
+		check_auth_case( "{$matrix_mode}: one unsigned create-page checked three times uses one slot and one audit row", $once_results === array( true, true, true ) && count( $options['ratesight_unsigned_draft_window'] ) === 1 && count( $options['ratesight_auth_audit'] ) === 1 && $options['ratesight_auth_audit'][0]['result'] === 'unsigned_draft_accepted' );
+		$options['ratesight_auth_audit'] = array();
+		$signed_once = signed_request( $fixture['secret'], array( 'method' => 'GET', 'route' => '/ratesight/v1/connection-status', 'query' => array(), 'body' => '' ) );
+		$signed_results = array( Ratesight_Request_Auth::authorize_read( $signed_once ), Ratesight_Request_Auth::authorize_read( $signed_once ) );
+		check_auth_case( "{$matrix_mode}: one signed read checked twice is accepted twice with one audit row and no rs_nonce_replayed", $signed_results === array( true, true ) && count( $options['ratesight_auth_audit'] ) === 1 && $options['ratesight_auth_audit'][0]['result'] === 'v2_accepted' );
 
 		// 3.15.1: trusted publisher (Ratesight CRM address + site setting).
 		$options['ratesight_unsigned_draft_window'] = array();
