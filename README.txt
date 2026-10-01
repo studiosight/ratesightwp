@@ -4,7 +4,7 @@ Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 3.14.3
+Stable tag: 3.15.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,13 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.15.0 - Page structured data through update-page
+
+  - POST /update-page accepts `schema`: one JSON-LD object (schema.org @context, with @type or @graph, at most 32 KB) stored as the page's structured data block, or null / '' to remove it. It is validated before the dry run, so dry_run reports the same refusal a write would and lists `schema` in would_write. The previous block is kept in the pre-update snapshot.
+  - GET /update-page reports `schema` (the stored block exactly as kept, '' when none), `schema_hash` (sha256) and `schema_write: true`; /capabilities reports `schema_write: true`.
+  - The block is printed with class="ratesight-schema" and every HTML-significant character escaped inside the JSON. Before, it went through the post HTML filter, which changed a literal & in a value into &amp;.
+  - Nothing else changes: an update-page call without `schema` leaves the block untouched.
 
 3.14.3 - Paired sites can join managed plugin updates
 

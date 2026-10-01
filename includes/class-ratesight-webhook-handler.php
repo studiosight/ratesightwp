@@ -771,6 +771,11 @@ class Ratesight_Webhook_Handler {
 			'seo_plugins'       => Ratesight_SEO_Writer::detected_plugin_ids(),
 			'squirrly'          => Ratesight_Squirrly::is_active() ? Ratesight_Squirrly::describe( $post_id ) : null,
 			'seo_write_mode'    => 'field_preserving',
+			// Since 3.15.0: the page's JSON-LD block this plugin prints (_rs_schema), exactly as stored
+			// ('' when none), and its sha256. POST /update-page `schema` writes it.
+			'schema'            => Ratesight_Schema::stored_json( $post_id ),
+			'schema_hash'       => Ratesight_Schema::stored_hash( $post_id ),
+			'schema_write'      => true,
 			'layout'            => get_post_meta( $post_id, '_rs_layout', true ) ?: '',
 			'show_title'        => (bool) get_post_meta( $post_id, '_rs_show_title', true ),
 			'custom_css_url'    => get_post_meta( $post_id, '_rs_custom_css_url', true ) ?: '',
@@ -856,6 +861,24 @@ class Ratesight_Webhook_Handler {
 			), 422 );
 		}
 
+		// Since 3.15.0: `schema` writes the page's JSON-LD block (_rs_schema), printed in wp_head by
+		// Ratesight_Schema::inject. null or '' removes it. Validated here, above the dry run, so a dry run
+		// reports the same 422 a real write would.
+		$schema_write = null;
+		if ( array_key_exists( 'schema', $data ) ) {
+			if ( ! $builder['update_seo'] ) {
+				return new \WP_REST_Response( array(
+					'success'      => false,
+					'page_builder' => $builder['name'],
+					'message'      => "Schema updates are not supported for {$builder['name']} pages. " . $builder['note'],
+				), 422 );
+			}
+			$schema_write = Ratesight_Schema::validate_for_write( $data['schema'] );
+			if ( isset( $schema_write['error'] ) ) {
+				return new \WP_REST_Response( array( 'success' => false, 'message' => $schema_write['error'] ), 422 );
+			}
+		}
+
 		// ── dry_run: predict, write nothing ───────────────────────────────────
 		// Since 3.4.0. Before this, update-page ACCEPTED a dry_run field and updated the post anyway
 		// -- the same class of defect DELETE /create-page carried until 3.2.19. A caller could not
@@ -874,7 +897,7 @@ class Ratesight_Webhook_Handler {
 					$would_write[] = $column;
 				}
 			}
-			foreach ( array( 'meta_title', 'meta_description', 'layout', 'show_title', 'custom_css_url', 'child_category' ) as $field ) {
+			foreach ( array( 'meta_title', 'meta_description', 'schema', 'layout', 'show_title', 'custom_css_url', 'child_category' ) as $field ) {
 				if ( array_key_exists( $field, $data ) ) {
 					$would_write[] = $field;
 				}
@@ -914,6 +937,7 @@ class Ratesight_Webhook_Handler {
 			'post_excerpt'    => $post->post_excerpt,
 			'meta_title'      => $seo_title_before,
 			'meta_description'=> $seo_desc_before,
+			'schema'          => Ratesight_Schema::stored_json( $post_id ),
 			'snapshot_at'     => current_time( 'mysql' ),
 		) );
 
@@ -937,6 +961,17 @@ class Ratesight_Webhook_Handler {
 		if ( $meta_title !== null || $meta_description !== null ) {
 			$writer = new Ratesight_SEO_Writer();
 			$seo_written = $writer->write( $post_id, $meta_title, $meta_description );
+		}
+
+		// Schema (JSON-LD block) — only if sent. Read back rather than echo what was sent.
+		$schema_stored = null;
+		if ( $schema_write !== null ) {
+			if ( ! empty( $schema_write['remove'] ) ) {
+				Ratesight_Schema::remove_schema( $post_id );
+			} else {
+				Ratesight_Schema::save_schema( $post_id, $schema_write['data'] );
+			}
+			$schema_stored = Ratesight_Schema::stored_json( $post_id );
 		}
 
 		// Layout / display — only if sent.
@@ -1011,6 +1046,9 @@ class Ratesight_Webhook_Handler {
 			'page_builder'    => $builder['name'],
 			'seo_plugin'      => Ratesight_SEO_Writer::active_plugin(),
 			'seo_stored'      => $seo_written, // [ meta_title, meta_description, source ] — verify without a second GET
+			// Since 3.15.0: the stored JSON-LD after a `schema` write (null when schema was not sent).
+			'schema_stored'   => $schema_stored,
+			'schema_hash'     => $schema_stored === null ? null : ( $schema_stored === '' ? '' : hash( 'sha256', $schema_stored ) ),
 			// Status is reported before AND after so a caller can prove this
 			// write did not publish anything. They are always equal.
 			'status_before'   => (string) $post->post_status,
@@ -1401,6 +1439,9 @@ class Ratesight_Webhook_Handler {
 			// Since 3.4.0: POST /media-alt can correct alt text on an existing attachment. Before
 			// this, alt text was only ever set implicitly at upload time and could not be repaired.
 			'media_alt'            => true,
+			// Since 3.15.0: POST /update-page accepts `schema` (the page's JSON-LD block, _rs_schema) and
+			// GET /update-page reports it as stored, with its sha256.
+			'schema_write'         => true,
 			// Since 3.4.0: TOP-LEVEL, mirroring provider_ownership.indexnow below. The submitter has
 			// existed for a long time but had no REST route; callers gate on a top-level flag, so the
 			// nested one alone kept the capability permanently switched off for them.
