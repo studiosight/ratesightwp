@@ -579,6 +579,11 @@ class Ratesight_Webhook_Handler {
 
 		if ( $trusted_publisher ) {
 			Ratesight_Logger::log_update( $log_id, $post_id, Ratesight_Logger::STATUS_PENDING, 'Ratesight CRM post: created as a new post (request ' . $unsigned_request_id . ').' );
+			// Since 3.15.2: every auto-published CRM post is recorded with its source and post id
+			// (GET /crm-publish lists them).
+			if ( class_exists( 'Ratesight_CRM_Publish' ) ) {
+				Ratesight_CRM_Publish::record( 'auto_publish', (string) $unsigned_request_id, (int) $post_id, (string) $slug, (string) $post_type, $request_status !== '' ? $request_status : 'final_post_status' );
+			}
 			return new \WP_REST_Response( array(
 				'ok'                => true,
 				'created'           => true,

@@ -4,7 +4,7 @@ Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 3.15.1
+Stable tag: 3.15.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -67,6 +67,15 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 
 == Changelog ==
+
+3.15.2 - Ratesight CRM posts need the site's CRM key as well as the CRM's address
+
+  - With "Ratesight CRM posts" on, an unsigned POST /create-page now gets the Final Post Status only when it connects from the Ratesight CRM's address (REMOTE_ADDR only) AND carries the site's CRM key, as the rs_crm_key query parameter of the webhook URL or the X-Ratesight-CRM-Key header. With either missing, or a wrong key, the post is a new draft (audit note crm_key_missing, crm_key_invalid). A key sent from any other address is never accepted (note crm_key_wrong_source). The key is per site, random (240 bits), stored in its own option and compared in constant time; it is not the signing secret and cannot sign anything.
+  - Publish limit lowered from 500 to 10 per site per 24 hours. Past it a CRM post is still created, as a draft (note crm_publish_limit), so nothing is lost.
+  - Every auto-published CRM post is recorded (time, source ratesight_crm, address, request id, post id, slug, post type, status, key fingerprint) in the option ratesight_crm_publish_log (last 100).
+  - New signed route /crm-publish: GET (signed read) returns the switch, key fingerprint, limits and recent auto-publishes; POST (signed mutation) { enabled, rotate_key, dry_run } turns the switch on or off, makes or rotates the key, and returns the CRM webhook URL while the switch is on. The key is never shown in the plugin admin (fingerprint only).
+  - Content still goes through the same create-page path: wp_kses_post on the article, new post only, no external stylesheet, no update of an existing post.
+  - capabilities.auth.trusted_publisher reports requires_key, key_configured and over_limit.
 
 3.15.1 - Ratesight CRM posts can follow the Final Post Status; one decision per request
 
