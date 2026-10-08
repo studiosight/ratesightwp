@@ -4,7 +4,7 @@ Tags: seo, reviews, ai, local seo, content
 Requires at least: 5.9
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 3.15.4
+Stable tag: 3.15.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -68,6 +68,7 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 == Changelog ==
 
+3.15.5 - Redirects: method native stores a rule in the plugin's own map whatever else is active; Redirection plugin writes and deletes fixed (exact-match items only, errors reported, real storage method returned)
 3.15.4 - Ratesight CRM posts publish by default; no per-site setting
 
   - A post that arrives from the Ratesight CRM's address (REMOTE_ADDR only) now gets the Final Post Status on every site by default. 3.15.1 to 3.15.3 needed a per-site switch, and 3.15.2 also a per-site key in the CRM webhook URL, which meant editing every site and every CRM webhook.

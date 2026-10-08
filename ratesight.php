@@ -4,7 +4,7 @@
  * Plugin URI:        https://ratesight.com
  * Update URI:        https://ratesight.com
  * Description:       Review widgets, shortcodes, and AI-powered SEO page creation via webhook.
- * Version:           3.15.4
+ * Version:           3.15.5
  * Requires at least: 5.9
  * Requires PHP:      8.0
  * Author:            Ratesight
@@ -19,7 +19,7 @@
 
 defined( 'WPINC' ) || die;
 
-define( 'RATESIGHT_RELEASE_VERSION', '3.15.4' );
+define( 'RATESIGHT_RELEASE_VERSION', '3.15.5' );
 define( 'RATESIGHT_VERSION', RATESIGHT_RELEASE_VERSION . '.' . filemtime( __FILE__ ) );
 define( 'RATESIGHT_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'RATESIGHT_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -83,6 +83,7 @@ foreach ( array(
 	'includes/class-ratesight-enrollment.php',
 	'includes/class-ratesight-release-update.php',
 	'includes/class-ratesight-performance-snapshot.php',
+	'includes/class-ratesight-redirect-writer.php',
 	'includes/class-ratesight-webhook-handler.php',
 	'includes/class-ratesight-page-lifecycle.php',
 	'includes/class-ratesight-related-links.php',
