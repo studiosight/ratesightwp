@@ -1115,37 +1115,22 @@ class Ratesight_Webhook_Handler {
 		}
 
 		// Normalise to /slug/ format.
-		$key    = '/' . trim( wp_parse_url( $from, PHP_URL_PATH ) ?? trim( $from, '/' ), '/' ) . '/';
-		$removed = false;
+		$key = '/' . trim( wp_parse_url( $from, PHP_URL_PATH ) ?? trim( $from, '/' ), '/' ) . '/';
 
-		// Native.
-		$redirects = get_option( 'ratesight_rs_redirects', array() );
-		foreach ( array( $key, trim( $key, '/' ), ltrim( $key, '/' ), rtrim( $key, '/' ) ) as $try ) {
-			if ( isset( $redirects[ $try ] ) ) {
-				unset( $redirects[ $try ] );
-				$removed = true;
-			}
-		}
-		if ( $removed ) {
-			update_option( 'ratesight_rs_redirects', $redirects, false );
-		}
+		// Native map and every exact-match Redirection plugin item (3.15.5: the Redirection lookup
+		// returns a list; before, the delete threw on it and never removed the item).
+		list( $removed, $redirection_removed ) = Ratesight_Redirect_Writer::delete( $key );
 
-		// Redirection plugin.
-		if ( class_exists( 'Red_Item' ) ) {
-			try {
-				$item = \Red_Item::get_for_url( $key );
-				if ( $item ) $item->delete();
-			} catch ( \Throwable $e ) {} // phpcs:ignore Generic.CodeAnalysis.EmptyStatement
-		}
-
-		return new \WP_REST_Response( array( 'ok' => true, 'removed' => $removed, 'from' => $key ), 200 );
+		return new \WP_REST_Response( array( 'ok' => true, 'removed' => $removed, 'redirection_removed' => $redirection_removed, 'from' => $key ), 200 );
 	}
 
 	/**
 	 * POST /wp-json/ratesight/v1/redirect
-	 * Body: { from, to, code: 301|302, dry_run? }
+	 * Body: { from, to, code: 301|302, dry_run?, method? }
 	 * Idempotent by `from`. Same-site `to` only. Tries redirect systems in order:
 	 * Redirection plugin → Rank Math → Yoast Premium → native (ratesight_rs_redirects).
+	 * Since 3.15.5 `method: "native"` stores it in the native map whatever else is active, and the
+	 * answer's `method` is where it was really stored (see Ratesight_Redirect_Writer).
 	 */
 	public function handle_redirect( \WP_REST_Request $request ): \WP_REST_Response {
 		$data    = $request->get_json_params() ?: $request->get_body_params();
@@ -1183,7 +1168,8 @@ class Ratesight_Webhook_Handler {
 			}
 		}
 
-		$method = $this->detect_redirect_method();
+		$requested_method = isset( $data['method'] ) && is_string( $data['method'] ) ? strtolower( trim( $data['method'] ) ) : null;
+		$method           = Ratesight_Redirect_Writer::method_for_request( $requested_method );
 
 		if ( $dry_run ) {
 			return new \WP_REST_Response( array(
@@ -1197,7 +1183,12 @@ class Ratesight_Webhook_Handler {
 			), 200 );
 		}
 
-		$applied = $this->write_redirect( $from, $to, $code, $method );
+		$note = null;
+		if ( $method === 'native' || $method === 'redirection' ) {
+			list( $applied, $method, $note ) = Ratesight_Redirect_Writer::write( $from, $to, $code, $method );
+		} else {
+			$applied = $this->write_redirect( $from, $to, $code, $method );
+		}
 
 		Ratesight_Logger::log_update(
 			Ratesight_Logger::log_pending( "Redirect: {$from} → {$to}", '', wp_json_encode( $data ) ),
@@ -1208,25 +1199,20 @@ class Ratesight_Webhook_Handler {
 
 		Ratesight_Recovery_Log::log( 'redirect', $from, $to, [ 'code' => $code, 'method' => $method ] );
 
-		return new \WP_REST_Response( array(
-			'ok'      => $applied,
-			'applied' => $applied,
-			'method'  => $method,
-		), $applied ? 200 : 500 );
+		return new \WP_REST_Response( array_filter( array(
+			'ok'               => $applied,
+			'applied'          => $applied,
+			'method'           => $method,
+			'requested_method' => $requested_method,
+			'note'             => $note,
+		), static function ( $v ) { return $v !== null; } ), $applied ? 200 : 500 );
 	}
 
 	/**
 	 * Detect which redirect system is available (first match wins).
 	 */
 	private function detect_redirect_method(): string {
-		// Redirection plugin (John Godley).
-		if ( class_exists( 'Red_Item' ) || function_exists( 'red_get_table_name' ) ) return 'redirection';
-		// Rank Math Redirections module.
-		if ( class_exists( 'RankMath\\Redirections\\Redirections' ) ) return 'rankmath';
-		// Yoast SEO Premium redirects.
-		if ( class_exists( 'WPSEO_Redirect' ) ) return 'yoast_premium';
-		// Native: plugin's own ratesight_rs_redirects option.
-		return 'native';
+		return Ratesight_Redirect_Writer::detect_method();
 	}
 
 	/**
@@ -1235,24 +1221,8 @@ class Ratesight_Webhook_Handler {
 	private function write_redirect( string $from, string $to, int $code, string $method ): bool {
 		switch ( $method ) {
 			case 'redirection':
-				try {
-					$existing = \Red_Item::get_for_url( $from );
-					if ( $existing ) {
-						$existing->update( array( 'url' => $from, 'action_data' => array( 'url' => $to ), 'action_code' => $code ) );
-					} else {
-						\Red_Item::create( array(
-							'url'         => $from,
-							'action_type' => 'url',
-							'action_data' => array( 'url' => $to ),
-							'action_code' => $code,
-							'group_id'    => 1,
-						) );
-					}
-					return true;
-				} catch ( \Throwable $e ) {
-					// Redirection API call failed — fall through to native.
-					return $this->write_redirect( $from, $to, $code, 'native' );
-				}
+				// 3.15.5: exact-match items, errors checked, native fallback (Ratesight_Redirect_Writer).
+				return Ratesight_Redirect_Writer::write( $from, $to, $code, 'redirection' )[0];
 
 			case 'rankmath':
 				try {
@@ -1446,6 +1416,9 @@ class Ratesight_Webhook_Handler {
 			'create_page'          => true,
 			'set_redirect'         => true,
 			'delete_redirect'      => true,
+			// Since 3.15.5: POST /redirect honours method:"native" (the plugin's own map whatever other
+			// redirect system is active) and reports where the rule was really stored.
+			'redirect_force_native' => true,
 			'list_redirects'       => true,
 			'can_recreate'         => $can_recreate,
 			'update_page'          => true,
