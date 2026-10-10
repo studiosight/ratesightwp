@@ -96,8 +96,8 @@ class Ratesight_Admin {
 		// Add Pages list as a submenu — uses the CPT's native list table.
 		add_submenu_page(
 			'ratesight',
-			__( 'SEO Content', 'ratesight' ),
-			__( 'SEO Content', 'ratesight' ),
+			__( 'Pages', 'ratesight' ),
+			__( 'Pages', 'ratesight' ),
 			'manage_options',
 			'edit.php?post_type=ratesight_page'
 		);
@@ -131,7 +131,7 @@ class Ratesight_Admin {
 				$entry[0] = 'Overview';
 				$overview = $entry;
 			} elseif ( isset( $entry[2] ) && $entry[2] === 'edit.php?post_type=ratesight_page' ) {
-				$entry[0] = 'SEO Content';
+				$entry[0] = 'Pages';
 				$content  = $entry;
 			} else {
 				$rest[] = $entry;

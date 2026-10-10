@@ -98,13 +98,14 @@ class Ratesight_Release_Update {
 
 	private static function preflight_result( array $manifest ): array {
 		$current    = defined( 'RATESIGHT_RELEASE_VERSION' ) ? RATESIGHT_RELEASE_VERSION : '0.0.0';
-		$wp_version = (string) get_bloginfo( 'version' );
+		$wp_version = Ratesight_WordPress_Compatibility::core_version();
 		$reasons    = array();
 		if ( ! Ratesight_Pairing::is_connected() ) $reasons[] = 'dashboard_pairing_required';
 		if ( version_compare( $manifest['version'], $current, '<=' ) ) $reasons[] = 'target_not_newer';
 		if ( version_compare( $current, $manifest['minManagedVersion'], '<' ) ) $reasons[] = 'managed_bridge_too_old';
 		if ( version_compare( PHP_VERSION, $manifest['minPhp'], '<' ) ) $reasons[] = 'php_too_old';
-		if ( version_compare( $wp_version, $manifest['minWordPress'], '<' ) || version_compare( $wp_version, '6.3', '<' ) ) $reasons[] = 'wordpress_rollback_unavailable';
+		if ( $wp_version === null ) $reasons[] = 'wordpress_version_unreadable';
+		if ( $wp_version === null || version_compare( $wp_version, $manifest['minWordPress'], '<' ) || version_compare( $wp_version, '6.3', '<' ) ) $reasons[] = 'wordpress_rollback_unavailable';
 		if ( function_exists( 'wp_is_file_mod_allowed' ) && ! wp_is_file_mod_allowed( 'automatic_updater' ) ) $reasons[] = 'file_modifications_disabled';
 		if ( ! defined( 'RATESIGHT_PLUGIN_DIR' ) || basename( untrailingslashit( RATESIGHT_PLUGIN_DIR ) ) !== 'ratesight' ) $reasons[] = 'noncanonical_plugin_directory';
 		return array(
@@ -115,7 +116,7 @@ class Ratesight_Release_Update {
 			'targetVersion'    => $manifest['version'],
 			'blockedBy'        => $reasons,
 			'applySupported'   => true,
-			'rollbackSupported' => version_compare( $wp_version, '6.3', '>=' ),
+			'rollbackSupported' => $wp_version !== null && version_compare( $wp_version, '6.3', '>=' ),
 		);
 	}
 

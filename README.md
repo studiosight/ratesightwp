@@ -23,6 +23,12 @@ Ratesight unifies review generation and search visibility in one place. It publi
 - WordPress 5.9 or later
 - PHP 8.0 or later
 
+Managed updates additionally require WordPress 6.3+ for native rollback, the release's minimum
+WordPress/PHP versions, and a verified dashboard pairing. From 3.15.6, an authenticated private
+compatibility read uses the unmodified WordPress core version; public version hiding stays intact.
+Unreadable/incompatible core versions remain blocked. Older installed plugins require a reviewed
+bootstrap update before they can provide this evidence; this is not automatic fleet authorization.
+
 ## Installation
 
 1. Upload the `ratesight` folder to `/wp-content/plugins/`, or install it via **Plugins → Add New → Upload Plugin**.
@@ -34,7 +40,7 @@ Ratesight unifies review generation and search visibility in one place. It publi
 The client-facing menu has six destinations:
 
 - **Overview** — positive search, local visibility, and completed-work results.
-- **SEO Content** — published search-focused service and location content.
+- **Pages** — published Ratesight-managed service and location pages, not a list of all SEO work.
 - **Publishing** — exact site-specific webhook URLs and publishing defaults.
 - **Activity Log** — webhook successes, warnings, failures, payload diagnostics, and retries.
 - **Reviews & Widgets** — reviews-page selection, a live style preview, appearance controls, and copy-ready review shortcodes.

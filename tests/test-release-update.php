@@ -2,6 +2,8 @@
 
 $release_test_root = sys_get_temp_dir() . '/ratesight-release-test-' . getmypid();
 mkdir( $release_test_root . '/wp-admin/includes', 0777, true );
+mkdir( $release_test_root . '/wp-includes', 0777, true );
+file_put_contents( $release_test_root . '/wp-includes/version.php', '<?php $wp_version = "6.6.0";' );
 file_put_contents( $release_test_root . '/wp-admin/includes/file.php', "<?php\n" );
 file_put_contents( $release_test_root . '/wp-admin/includes/plugin.php', "<?php\n" );
 define( 'ABSPATH', $release_test_root . '/' );
@@ -53,7 +55,7 @@ class Ratesight_Pairing {
 	public static function verify_control_plane_signature( string $body, string $signature ): bool { global $control_signature_valid; return $control_signature_valid; }
 	public static function is_connected(): bool { global $dashboard_connected; return $dashboard_connected; }
 }
-function get_bloginfo() { return '6.6.0'; }
+function get_bloginfo() { return '42'; }
 function wp_is_file_mod_allowed() { global $file_modifications_allowed; return $file_modifications_allowed; }
 function untrailingslashit( $value ) { return rtrim( $value, '/\\' ); }
 function trailingslashit( $value ) { return rtrim( $value, '/\\' ) . '/'; }
@@ -81,6 +83,7 @@ function get_plugin_data( $file ) {
 	return array( 'Name' => trim( $name[1] ?? '' ), 'Version' => trim( $version[1] ?? '' ) );
 }
 
+require __DIR__ . '/../includes/class-ratesight-wordpress-compatibility.php';
 require __DIR__ . '/../includes/class-ratesight-release-update.php';
 
 $release_source = file_get_contents( __DIR__ . '/../includes/class-ratesight-release-update.php' );
@@ -115,6 +118,14 @@ function check_release_case( string $name, bool $ok ): void {
 
 $valid = Ratesight_Release_Update::handle( release_request() );
 check_release_case( 'signed immutable Ratesight release is eligible', $valid instanceof WP_REST_Response && $valid->status === 200 && $valid->data['eligible'] === true && $valid->data['applySupported'] === true );
+check_release_case( 'public version remains masked while private core proves rollback compatibility', get_bloginfo() === '42' && $valid->data['rollbackSupported'] === true );
+file_put_contents( $release_test_root . '/wp-includes/version.php', '<?php $wp_version = "6.2.9";' );
+$old_core = Ratesight_Release_Update::handle( release_request() );
+check_release_case( 'masked old core remains ineligible and cannot roll back', ! $old_core->data['eligible'] && ! $old_core->data['rollbackSupported'] && in_array( 'wordpress_rollback_unavailable', $old_core->data['blockedBy'], true ) );
+unlink( $release_test_root . '/wp-includes/version.php' );
+$unknown_core = Ratesight_Release_Update::handle( release_request() );
+check_release_case( 'unreadable core remains fail closed instead of trusting 42', ! $unknown_core->data['eligible'] && ! $unknown_core->data['rollbackSupported'] && in_array( 'wordpress_version_unreadable', $unknown_core->data['blockedBy'], true ) );
+file_put_contents( $release_test_root . '/wp-includes/version.php', '<?php $wp_version = "6.6.0";' );
 $wrong_host = Ratesight_Release_Update::handle( release_request( array( 'assetUrl' => 'https://attacker.invalid/ratesight.zip' ) ) );
 check_release_case( 'non-Ratesight release host is refused', $wrong_host instanceof WP_Error && $wrong_host->get_error_code() === 'rs_release_manifest_invalid' );
 $mutable_name = Ratesight_Release_Update::handle( release_request( array( 'assetUrl' => 'https://github.com/studiosight/ratesightwp/releases/download/v3.10.1/ratesight-3.10.1.zip' ) ) );
