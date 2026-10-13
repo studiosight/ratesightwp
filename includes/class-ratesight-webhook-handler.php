@@ -1301,6 +1301,10 @@ class Ratesight_Webhook_Handler {
 				'readinessExpires' => $auth['readiness_expires'],
 			),
 			'pairing' => Ratesight_Pairing::status(),
+			// Since 3.15.7: value-free feature flags the dashboard gates on.
+			'features' => array(
+				'rsPagesVisibility' => true,
+			),
 			'enrollment' => class_exists( 'Ratesight_Enrollment' ) ? Ratesight_Enrollment::status() : array( 'supported' => false, 'accepted' => false, 'code' => null, 'httpStatus' => null, 'attemptedAt' => null ),
 			'publicationEvents' => class_exists( 'Ratesight_Publication_Events' ) ? Ratesight_Publication_Events::status() : array( 'pending' => 0, 'oldestQueuedAt' => null ),
 			'legacyProviderResidue' => array(
@@ -1430,6 +1434,11 @@ class Ratesight_Webhook_Handler {
 			// DELETE /create-page and cannot be asked to trash anything.
 			'trash_page'           => true,
 			'restore_page'         => true,
+			// Since 3.15.7: POST /unpublish-rs-pages and /republish-rs-pages hold
+			// ratesight_page posts out of public display (draft) and restore them.
+			// Mirrored under features for callers that read a features map.
+			'rsPagesVisibility'    => true,
+			'features'             => array( 'rsPagesVisibility' => true ),
 			// Since 3.2.19: DELETE /create-page honours dry_run instead of
 			// deleting regardless.
 			'delete_page_dry_run'  => true,

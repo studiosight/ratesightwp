@@ -206,7 +206,7 @@ foreach ( Ratesight_Request_Auth::ROUTE_POLICIES as $key => $route_policy ) {
 	if ( $route_policy === 'signed_mutation' ) $mutation_routes[] = array( $route_method, $route_path );
 	if ( $route_policy === 'signed_read' ) $read_routes[] = array( $route_method, $route_path );
 }
-check_auth_case( 'route policy table lists the protected mutation routes', count( $mutation_routes ) === 15 && in_array( array( 'POST', '/ratesight/v1/crm-publish' ), $mutation_routes, true ) && in_array( array( 'GET', '/ratesight/v1/crm-publish' ), $read_routes, true ) && in_array( array( 'POST', '/ratesight/v1/update-page' ), $mutation_routes, true ) );
+check_auth_case( 'route policy table lists the protected mutation routes', count( $mutation_routes ) === 17 && in_array( array( 'POST', '/ratesight/v1/unpublish-rs-pages' ), $mutation_routes, true ) && in_array( array( 'POST', '/ratesight/v1/republish-rs-pages' ), $mutation_routes, true ) && in_array( array( 'POST', '/ratesight/v1/crm-publish' ), $mutation_routes, true ) && in_array( array( 'GET', '/ratesight/v1/crm-publish' ), $read_routes, true ) && in_array( array( 'POST', '/ratesight/v1/update-page' ), $mutation_routes, true ) );
 foreach ( array( 'legacy', 'observe_v2', 'enforce_v2' ) as $matrix_mode ) {
 	unset( $options['ratesight_auth_ever_enforced'] );
 	$options['ratesight_auth_mode'] = $matrix_mode;

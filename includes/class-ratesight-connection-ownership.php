@@ -170,13 +170,15 @@ class Ratesight_Connection_Ownership {
 			'/media-alt' => array( 'POST' ), '/indexnow' => array( 'POST' ),
 			// Since 3.15.2.
 			'/crm-publish' => array( 'GET', 'POST' ),
+			// Since 3.15.7: hosting-only rs_pages visibility hold.
+			'/unpublish-rs-pages' => array( 'POST' ), '/republish-rs-pages' => array( 'POST' ),
 		);
 		$result = array();
 		foreach ( $definitions as $path => $methods ) {
 			foreach ( $methods as $method ) {
 				$result[] = array(
 					'id' => $method . ' /ratesight/v1' . $path, 'type' => 'rest_route',
-					'source' => $path === '/crm-publish' ? 'includes/class-ratesight-crm-publish.php' : ( str_contains( $path, 'performance-snapshot' ) ? 'includes/class-ratesight-performance-snapshot.php' : ( $path === '/pair' ? 'includes/class-ratesight-pairing.php' : ( $path === '/enrollment-challenge' || $path === '/claim' ? 'includes/class-ratesight-enrollment.php' : ( $path === '/plugin-update' ? 'includes/class-ratesight-release-update.php' : ( str_contains( $path, 'related-links' ) ? 'includes/class-ratesight-related-links.php' : ( str_contains( $path, '/page' ) ? 'includes/class-ratesight-page-api.php' : ( str_contains( $path, 'trash-' ) || str_contains( $path, 'restore-' ) ? 'includes/class-ratesight-page-lifecycle.php' : 'includes/class-ratesight-webhook-handler.php' ) ) ) ) ) ) ),
+					'source' => $path === '/crm-publish' ? 'includes/class-ratesight-crm-publish.php' : ( str_contains( $path, 'performance-snapshot' ) ? 'includes/class-ratesight-performance-snapshot.php' : ( $path === '/pair' ? 'includes/class-ratesight-pairing.php' : ( $path === '/enrollment-challenge' || $path === '/claim' ? 'includes/class-ratesight-enrollment.php' : ( $path === '/plugin-update' ? 'includes/class-ratesight-release-update.php' : ( str_contains( $path, 'related-links' ) ? 'includes/class-ratesight-related-links.php' : ( str_contains( $path, '/page' ) ? 'includes/class-ratesight-page-api.php' : ( str_contains( $path, 'trash-' ) || str_contains( $path, 'restore-' ) || str_contains( $path, '-rs-pages' ) ? 'includes/class-ratesight-page-lifecycle.php' : 'includes/class-ratesight-webhook-handler.php' ) ) ) ) ) ) ),
 					'owner' => 'wordpress_plugin', 'state' => 'retained_wordpress', 'replacement' => null, 'proofType' => 'route_registration',
 					'reasonCode' => null, 'evidenceToUnblock' => null,
 				);

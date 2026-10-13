@@ -97,8 +97,9 @@ check( 'the write saves or removes and reads back', str_contains( $update, 'Rate
 check( 'the response reports schema_stored and schema_hash', str_contains( $update, "'schema_stored'   => \$schema_stored" ) && str_contains( $update, "'schema_hash'     =>" ) );
 check( 'the schema write happens before the cache purge', strpos( $update, 'Ratesight_Schema::save_schema' ) < strpos( $update, '$this->purge_cache( $post_id );' ) );
 check( 'capabilities report schema_write', (bool) preg_match( "/'schema_write'\\s+=> true,/", substr( $handler, strpos( $handler, 'public function handle_capabilities' ) ) ) );
-preg_match( "/define\\( 'RATESIGHT_RELEASE_VERSION', '([0-9.]+)' \\);/", $plugin, $release_match );
-preg_match( '/Version:\\s+([0-9.]+)/', $plugin, $header_match );
+// A pre-release suffix (3.15.7-dev) is allowed on a development branch.
+preg_match( "/define\\( 'RATESIGHT_RELEASE_VERSION', '([0-9.]+(?:-[A-Za-z0-9.]+)?)' \\);/", $plugin, $release_match );
+preg_match( '/Version:\\s+([0-9.]+(?:-[A-Za-z0-9.]+)?)/', $plugin, $header_match );
 check( 'plugin version is 3.15.0 or later and the header matches', version_compare( (string) ( $release_match[1] ?? '0' ), '3.15.0', '>=' ) && ( $header_match[1] ?? '' ) === ( $release_match[1] ?? null ) );
 
 echo PHP_EOL . "{$checks} checks, {$failures} failure(s)" . PHP_EOL;
