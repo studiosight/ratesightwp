@@ -73,9 +73,12 @@ Content, meta, revisions and slugs are preserved; the change is reversible with
 - `ids` omitted means every `ratesight_page` with post_status `publish`, at most 200 per call:
   `has_more: true` means call again. When sent, `ids` must be a non-empty array of positive integer
   ids (at most 200); an empty array is a `422`, never "all".
-- One real run at a time per site: a run lock (option `ratesight_rs_pages_visibility_lock`, taken
-  with `add_option`, expires after 300 s) makes a concurrent unpublish or republish run get `409`
-  with `code: "rs_pages_visibility_busy"`. Dry runs take no lock.
+- One real run at a time per site: a run lock makes a concurrent unpublish or republish run get
+  `409` with `code: "rs_pages_visibility_busy"`. Dry runs take no lock. The lock is the options row
+  `ratesight_rs_pages_visibility_lock` with value `<expires>|<random token>` (300 s), created with
+  `INSERT IGNORE` and held only when this call inserted it. An expired lock is taken over with a
+  conditional `UPDATE ... WHERE option_value = <value read>`, and release deletes the row only when
+  it still holds this run's value.
 - Only post_type `ratesight_page` is ever changed. Any other id (a client page or post, an
   attachment, an id that does not exist) is refused per item with `not_ratesight_page`, and its slug
   and status are not reported. Only status `publish` is changed; a `ratesight_page` in any other
@@ -90,9 +93,9 @@ Content, meta, revisions and slugs are preserved; the change is reversible with
 - A page is never set to draft without a readable hold. If the hold cannot be written, cannot be
   read back, or an existing hold is unreadable, the item reports `failed` and its status is not
   touched. If the status write fails, a hold added by this call is removed and the item is `failed`.
-- After each changed page the plugin runs the same page-cache purge set as `update-page`
-  (`clean_post_cache`, WP Rocket, LiteSpeed, W3 Total Cache, WP Super Cache, Elementor files,
-  `flush_post_cache`).
+- After each changed page the plugin runs the per-post part of the `update-page` purge set
+  (`clean_post_cache`, WP Rocket, LiteSpeed, W3 Total Cache, WP Super Cache, `flush_post_cache`);
+  the site-wide part (Elementor generated files) runs once at the end of a run that changed pages.
 - Each real change appends `{action:"unpublish", post_id, slug, from, to, reason, at}` to option
   `ratesight_rs_pages_visibility_log` (not autoloaded, append-only, newest 1000 kept), one entry per
   page as it is changed, so a timeout cannot lose the entries of pages already changed. Skipped and
@@ -140,14 +143,19 @@ Reverses `unpublish-rs-pages`.
 ## A hold is bound to the draft these routes made
 
 - `transition_post_status` (priority 5): when a held `ratesight_page` changes to any status other
-  than `draft` outside these two routes (an admin publish, private, trash, another plugin), the hold
-  is deleted and `{action:"hold_cleared", post_id, slug, from, to, reason, at}` is logged. The post
-  itself is left as it is. So an admin who publishes a held page and later sets it back to draft
-  has an ordinary draft, which `republish-rs-pages` will not publish.
-- Other publish paths respect a hold: the hourly retry of stuck deferred publishes
-  (`Ratesight::retry_pending_posts`) never publishes a held page and moves its log row out of
-  `pending` (status `modified`), and the deferred publisher (`Ratesight_Publisher::run`) leaves a
-  held page untouched (no image attach, no status change).
+  than `draft` or `trash` outside these two routes (an admin publish, private, pending, another
+  plugin), the hold is deleted and `{action:"hold_cleared", post_id, slug, from, to, reason, at}` is
+  logged. The post itself is left as it is. So an admin who publishes a held page and later sets it
+  back to draft has an ordinary draft, which `republish-rs-pages` will not publish.
+- Trash is exempt: a held page that is trashed keeps its hold, `restore-page` returns it to draft
+  (its pre-trash status) with the hold intact, and `republish-rs-pages` then publishes it.
+- Other publish paths respect a hold. The hourly retry of stuck deferred publishes
+  (`Ratesight::retry_pending_posts`) never publishes a held page and marks its log row `held`
+  (Ratesight_Logger::STATUS_HELD, shown as "Held"), so it leaves the pending queue without reading as
+  a human edit. The deferred publisher (`Ratesight_Publisher::run`) leaves a held page untouched (no
+  image attach, no status change), marks its row `held` and keeps the job in post meta
+  `_ratesight_held_publish_job`. On republish, `held` rows for the page go back to `pending` and
+  kept jobs are rescheduled (`ratesight_deferred_publish`), so a featured-image attach is not lost.
 
 ## What "out of public display" means
 
@@ -165,6 +173,10 @@ A held page is an ordinary WordPress draft, so:
   fuzzy-301'd to another page, including the client's own pages. Decision (integrator, 2026-10-13):
   a hosting-only client gets no SEO redirection from us, and a cached 301 would outlive a republish.
   The router's index holds published posts only and is rebuilt on every status change.
+- WordPress core's own 404 guess (`redirect_guess_404_permalink`) prefix-matches published slugs
+  and 301s even with fuzzy mode off (for example `office-movers-san-jose` to
+  `office-movers-san-jose-ca`). A `do_redirect_guess_404_permalink` filter returns false when the
+  requested slug is held, so that URL is a plain 404 too.
 
 ## Auth
 

@@ -564,9 +564,10 @@ class Ratesight_Page_Lifecycle {
 		}
 
 		// One real run at a time. A dry run writes nothing and takes no lock.
-		$locked = false;
+		$lock = null;
 		if ( ! $intent['dry_run'] ) {
-			if ( ! self::acquire_visibility_lock() ) {
+			$lock = self::acquire_visibility_lock();
+			if ( $lock === null ) {
 				return new \WP_REST_Response( array(
 					'ok'       => false,
 					'code'     => 'rs_pages_visibility_busy',
@@ -578,14 +579,13 @@ class Ratesight_Page_Lifecycle {
 					'message'  => 'Another unpublish-rs-pages or republish-rs-pages run is in progress. Retry shortly.',
 				), 409 );
 			}
-			$locked = true;
 		}
 
 		try {
 			return self::run_visibility( $action, $intent );
 		} finally {
-			if ( $locked ) {
-				self::release_visibility_lock();
+			if ( $lock !== null ) {
+				self::release_visibility_lock( $lock );
 			}
 		}
 	}
@@ -696,8 +696,11 @@ class Ratesight_Page_Lifecycle {
 
 			if ( $action === 'republish' ) {
 				delete_post_meta( $post_id, self::VISIBILITY_HOLD_META );
+				// Deferred publish work skipped while the page was held runs again now.
+				self::requeue_held_jobs( $post_id );
 			}
 
+			// Per-post purges here; global purges (Elementor files) once per run below.
 			self::purge_post_cache( $post_id );
 
 			// Logged per item, so a timeout later in the run cannot lose the entry
@@ -713,6 +716,10 @@ class Ratesight_Page_Lifecycle {
 			) );
 			$pages[] = $row;
 			$count++;
+		}
+
+		if ( $count > 0 && ! $intent['dry_run'] ) {
+			self::purge_global_cache();
 		}
 
 		$body = array(
@@ -766,14 +773,18 @@ class Ratesight_Page_Lifecycle {
 	/**
 	 * transition_post_status: a hold is bound to the draft these routes made. Any
 	 * other change of a held post to a status other than draft (an admin publish,
-	 * private, trash, another plugin) clears the hold and logs hold_cleared, and
+	 * private, pending, another plugin) clears the hold and logs hold_cleared, and
 	 * leaves the post as it is. Republish then never acts on a stale hold.
+	 *
+	 * Trash is exempt: a held page that is trashed keeps its hold, restore-page
+	 * returns it to draft (its pre-trash status) with the hold intact, and
+	 * republish-rs-pages works as before.
 	 */
 	public static function on_transition_post_status( $new_status, $old_status, $post ): void {
 		if ( ! $post instanceof \WP_Post || $post->post_type !== self::VISIBILITY_POST_TYPE ) {
 			return;
 		}
-		if ( (int) $post->ID === self::$route_write || $new_status === 'draft' ) {
+		if ( (int) $post->ID === self::$route_write || $new_status === 'draft' || $new_status === 'trash' ) {
 			return;
 		}
 		if ( ! self::has_hold( (int) $post->ID ) ) {
@@ -813,31 +824,145 @@ class Ratesight_Page_Lifecycle {
 		return (int) $n;
 	}
 
-	/** Run lock: add_option is atomic; an expired lock is taken over once. */
-	private static function acquire_visibility_lock(): bool {
-		$expires = time() + self::VISIBILITY_LOCK_TTL;
-		if ( add_option( self::VISIBILITY_LOCK_OPTION, $expires, '', false ) ) {
-			return true;
+	/**
+	 * Run lock, atomic in the database. The row is created with INSERT IGNORE and
+	 * the lock is held only when this call inserted it (rows affected = 1). The
+	 * value is "<expires>|<random token>". An expired lock is taken over with a
+	 * conditional UPDATE on the exact value that was read, so of two callers that
+	 * saw the same expired lock only one wins. Release deletes the row only when it
+	 * still holds this run's value, so a run whose lock expired and was taken over
+	 * cannot remove the new owner's lock.
+	 *
+	 * @return string|null The lock value (pass it to release), or null when busy.
+	 */
+	public static function acquire_visibility_lock(): ?string {
+		global $wpdb;
+		$name  = self::VISIBILITY_LOCK_OPTION;
+		$value = ( time() + self::VISIBILITY_LOCK_TTL ) . '|' . bin2hex( random_bytes( 16 ) );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->query( $wpdb->prepare( "INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')", $name, $value ) );
+		if ( (int) $wpdb->rows_affected === 1 ) {
+			self::forget_lock_cache();
+			return $value;
 		}
-		$current = (int) get_option( self::VISIBILITY_LOCK_OPTION, 0 );
-		if ( $current > time() ) {
-			return false;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$current = $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", $name ) );
+		if ( ! is_string( $current ) || $current === '' ) {
+			return null; // Released between the two statements: busy, the caller retries.
 		}
-		delete_option( self::VISIBILITY_LOCK_OPTION );
-		return (bool) add_option( self::VISIBILITY_LOCK_OPTION, $expires, '', false );
+		$expires = (int) explode( '|', $current, 2 )[0];
+		if ( $expires > time() ) {
+			return null;
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s", $value, $name, $current ) );
+		if ( (int) $wpdb->rows_affected === 1 ) {
+			self::forget_lock_cache();
+			return $value;
+		}
+		return null;
 	}
 
-	private static function release_visibility_lock(): void {
-		delete_option( self::VISIBILITY_LOCK_OPTION );
+	public static function release_visibility_lock( string $value ): bool {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = %s", self::VISIBILITY_LOCK_OPTION, $value ) );
+		$released = (int) $wpdb->rows_affected === 1;
+		self::forget_lock_cache();
+		return $released;
 	}
 
-	/** The page-cache purge set update-page uses. */
+	private static function forget_lock_cache(): void {
+		if ( function_exists( 'wp_cache_delete' ) ) {
+			wp_cache_delete( self::VISIBILITY_LOCK_OPTION, 'options' );
+			wp_cache_delete( 'notoptions', 'options' );
+		}
+	}
+
+	/** Per-post part of the update-page purge set. */
 	private static function purge_post_cache( int $post_id ): void {
 		if ( class_exists( 'Ratesight_Webhook_Handler' ) && method_exists( 'Ratesight_Webhook_Handler', 'purge_post_cache' ) ) {
-			Ratesight_Webhook_Handler::purge_post_cache( $post_id );
+			Ratesight_Webhook_Handler::purge_post_cache( $post_id, false );
 			return;
 		}
 		clean_post_cache( $post_id );
+	}
+
+	/** Site-wide part of the update-page purge set, once per run. */
+	private static function purge_global_cache(): void {
+		if ( class_exists( 'Ratesight_Webhook_Handler' ) && method_exists( 'Ratesight_Webhook_Handler', 'purge_global_cache' ) ) {
+			Ratesight_Webhook_Handler::purge_global_cache();
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// Deferred publish work skipped while a page is held
+	// -------------------------------------------------------------------------
+
+	/** Post meta: deferred publisher jobs that arrived while the page was held. */
+	const HELD_JOBS_META = '_ratesight_held_publish_job';
+
+	/**
+	 * Called by Ratesight_Publisher::run() for a held page: keep the job so the
+	 * featured-image attach is not lost, and mark the log row held.
+	 */
+	public static function hold_publish_job( int $post_id, int $log_id, array $args ): void {
+		$jobs   = get_post_meta( $post_id, self::HELD_JOBS_META, true );
+		$jobs   = is_array( $jobs ) ? $jobs : array();
+		$jobs[] = array_values( $args );
+		update_post_meta( $post_id, self::HELD_JOBS_META, array_slice( $jobs, -20 ) );
+		self::mark_log_row_held( $log_id, $post_id, 'Held: the page is held out of public display (visibility hold). This deferred publish job runs again on republish-rs-pages.' );
+	}
+
+	/** Mark a Ratesight log row held (a distinct status, not a human edit). */
+	public static function mark_log_row_held( int $log_id, int $post_id, string $note ): void {
+		if ( class_exists( 'Ratesight_Logger' ) && defined( 'Ratesight_Logger::STATUS_HELD' ) ) {
+			Ratesight_Logger::log_update( $log_id, $post_id, Ratesight_Logger::STATUS_HELD, $note );
+		}
+	}
+
+	/** On republish: held log rows go back to pending and held publisher jobs are rescheduled. */
+	private static function requeue_held_jobs( int $post_id ): void {
+		global $wpdb;
+		if ( isset( $wpdb ) && defined( 'RATESIGHT_LOG_TABLE' ) && class_exists( 'Ratesight_Logger' ) && defined( 'Ratesight_Logger::STATUS_HELD' ) ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->update(
+				$wpdb->prefix . RATESIGHT_LOG_TABLE,
+				array( 'status' => Ratesight_Logger::STATUS_PENDING, 'notes' => 'Requeued by republish-rs-pages.' ),
+				array( 'post_id' => $post_id, 'status' => Ratesight_Logger::STATUS_HELD ),
+				array( '%s', '%s' ),
+				array( '%d', '%s' )
+			);
+		}
+		$jobs = get_post_meta( $post_id, self::HELD_JOBS_META, true );
+		if ( ! is_array( $jobs ) || ! $jobs ) {
+			return;
+		}
+		$delay = 15;
+		foreach ( $jobs as $args ) {
+			if ( is_array( $args ) && count( $args ) === 6 && (int) $args[0] === $post_id ) {
+				wp_schedule_single_event( time() + $delay, 'ratesight_deferred_publish', array_values( $args ) );
+				$delay++;
+			}
+		}
+		delete_post_meta( $post_id, self::HELD_JOBS_META );
+	}
+
+	/**
+	 * do_redirect_guess_404_permalink: WordPress core prefix-matches a 404 slug
+	 * against published posts and 301s to the first match (for example a held
+	 * office-movers-san-jose to office-movers-san-jose-ca). A held page's URL must
+	 * stay a plain 404, so the guess is switched off for that request only.
+	 */
+	public static function filter_redirect_guess_404( $do_redirect_guess ) {
+		if ( ! $do_redirect_guess ) {
+			return $do_redirect_guess;
+		}
+		$path = (string) wp_parse_url( (string) ( $_SERVER['REQUEST_URI'] ?? '' ), PHP_URL_PATH ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+		$slug = sanitize_title( basename( trim( $path, '/' ) ) );
+		return ( $slug !== '' && self::slug_is_held( $slug ) ) ? false : $do_redirect_guess;
 	}
 
 	/**

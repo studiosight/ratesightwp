@@ -25,6 +25,8 @@ class Ratesight_Logger {
 	const STATUS_SUCCESS_WARNINGS = 'success_with_warnings';
 	const STATUS_FAILED           = 'failed';
 	const STATUS_MODIFIED         = 'modified';
+	/** Since 3.15.7: a deferred publish job skipped because the page is held out of public display. */
+	const STATUS_HELD             = 'held';
 
 	// -------------------------------------------------------------------------
 	// Public API

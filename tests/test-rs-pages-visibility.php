@@ -180,7 +180,9 @@ $L::on_transition_post_status( 'publish', 'draft', new WP_Post( array( 'ID' => 2
 check( 'transition: other post types are ignored', isset( $meta[21]['_ratesight_visibility_hold'] ) );
 $meta[ 22 ] = array( '_ratesight_visibility_hold' => $hold_json );
 $L::on_transition_post_status( 'trash', 'draft', new WP_Post( array( 'ID' => 22, 'post_type' => 'ratesight_page', 'post_status' => 'trash' ) ) );
-check( 'transition: trashing a held page also clears the hold', ! isset( $meta[22]['_ratesight_visibility_hold'] ) );
+check( 'transition: trashing a held page keeps the hold (restore returns it to a held draft)', isset( $meta[22]['_ratesight_visibility_hold'] ) );
+$L::on_transition_post_status( 'pending', 'draft', new WP_Post( array( 'ID' => 22, 'post_type' => 'ratesight_page', 'post_status' => 'pending' ) ) );
+check( 'transition: an outside move to pending clears the hold', ! isset( $meta[22]['_ratesight_visibility_hold'] ) );
 
 // ── the other publish paths and the 404 router check the hold first ─────────
 $src = static fn( string $f ): string => (string) file_get_contents( __DIR__ . '/../includes/' . $f );
@@ -194,6 +196,61 @@ check( 'deferred publisher returns for a held post before image attach and statu
 $router = $src( 'class-ratesight-runtime-404-router.php' );
 $route = substr( $router, strpos( $router, 'public static function maybe_route' ) );
 check( '404 router returns for a held slug before any routing decision', strpos( $route, 'Ratesight_Page_Lifecycle::slug_is_held(' ) !== false && strpos( $route, 'Ratesight_Page_Lifecycle::slug_is_held(' ) < strpos( $route, 'self::route_decision(' ) );
+
+
+// ── run lock: atomic INSERT IGNORE, token-checked release, conditional takeover ─
+class Fake_Lock_Wpdb {
+	public $options = 'wp_options';
+	public $rows_affected = 0;
+	public array $rows = array();
+	public $after_select = null;
+	public function prepare( $sql, ...$args ) { return json_encode( array( $sql, $args ) ); }
+	public function query( $q ) {
+		[ $sql, $a ] = json_decode( $q, true );
+		$this->rows_affected = 0;
+		if ( str_starts_with( $sql, 'INSERT IGNORE INTO wp_options' ) ) {
+			if ( ! array_key_exists( $a[0], $this->rows ) ) { $this->rows[ $a[0] ] = $a[1]; $this->rows_affected = 1; }
+		} elseif ( str_starts_with( $sql, 'UPDATE wp_options SET option_value = %s WHERE option_name = %s AND option_value = %s' ) ) {
+			if ( ( $this->rows[ $a[1] ] ?? null ) === $a[2] ) { $this->rows[ $a[1] ] = $a[0]; $this->rows_affected = 1; }
+		} elseif ( str_starts_with( $sql, 'DELETE FROM wp_options WHERE option_name = %s AND option_value = %s' ) ) {
+			if ( ( $this->rows[ $a[0] ] ?? null ) === $a[1] ) { unset( $this->rows[ $a[0] ] ); $this->rows_affected = 1; }
+		} else {
+			throw new RuntimeException( 'unexpected SQL ' . $sql );
+		}
+		return $this->rows_affected;
+	}
+	public function get_var( $q ) {
+		[ $sql, $a ] = json_decode( $q, true );
+		$v = $this->rows[ $a[0] ] ?? null;
+		if ( $this->after_select ) { ( $this->after_select )( $this ); $this->after_select = null; }
+		return $v;
+	}
+}
+$wpdb = new Fake_Lock_Wpdb();
+$K = 'ratesight_rs_pages_visibility_lock';
+$t1 = $L::acquire_visibility_lock();
+check( 'lock: first caller acquires (INSERT IGNORE inserted the row)', is_string( $t1 ) && $wpdb->rows[ $K ] === $t1 && preg_match( '/^\d{10}\|[a-f0-9]{32}$/', $t1 ) );
+check( 'lock: a second caller is busy while it is held', $L::acquire_visibility_lock() === null && $wpdb->rows[ $K ] === $t1 );
+check( 'lock: release with a different token removes nothing', $L::release_visibility_lock( '1|not-mine' ) === false && $wpdb->rows[ $K ] === $t1 );
+check( 'lock: release with its own token removes it', $L::release_visibility_lock( $t1 ) === true && ! isset( $wpdb->rows[ $K ] ) );
+$wpdb->rows[ $K ] = ( time() - 5 ) . '|oldtoken';
+$t2 = $L::acquire_visibility_lock();
+check( 'lock: an expired lock is taken over with a conditional UPDATE', is_string( $t2 ) && $wpdb->rows[ $K ] === $t2 );
+check( 'lock: the run whose lock expired cannot release the new owner', $L::release_visibility_lock( ( time() - 5 ) . '|oldtoken' ) === false && $wpdb->rows[ $K ] === $t2 );
+$wpdb->rows[ $K ] = ( time() - 5 ) . '|stale';
+$wpdb->after_select = static function ( $db ) use ( $K ) { $db->rows[ $K ] = ( time() + 300 ) . '|racer'; };
+check( 'lock: of two callers that saw the same expired lock, the second loses', $L::acquire_visibility_lock() === null && str_ends_with( $wpdb->rows[ $K ], '|racer' ) );
+$wpdb->rows[ $K ] = (string) ( time() - 1 );
+check( 'lock: a legacy integer value that expired is taken over too', is_string( $L::acquire_visibility_lock() ) );
+unset( $GLOBALS['wpdb'] );
+
+// ── cache purge: per post inside the loop, global once per run ──────────────
+$life = $src( 'class-ratesight-page-lifecycle.php' );
+$runv = substr( $life, strpos( $life, 'private static function run_visibility' ), strpos( $life, '/** Decoded hold meta' ) - strpos( $life, 'private static function run_visibility' ) );
+check( 'purge: per-post purge inside the loop, global purge once after it', substr_count( $runv, 'self::purge_post_cache( $post_id );' ) === 1 && substr_count( $runv, 'self::purge_global_cache();' ) === 1 && strpos( $runv, 'self::purge_global_cache();' ) > strrpos( $runv, '$count++;' ) );
+$wh = $src( 'class-ratesight-webhook-handler.php' );
+check( 'purge: Elementor clear_cache only in purge_global_cache; the routes call purge_post_cache( $id, false )', substr_count( $wh, 'files_manager->clear_cache()' ) === 1 && strpos( $wh, 'files_manager->clear_cache()' ) > strpos( $wh, 'public static function purge_global_cache' ) && str_contains( $life, 'Ratesight_Webhook_Handler::purge_post_cache( $post_id, false );' ) );
+check( 'core 404 guess filter is registered', str_contains( $core, "'do_redirect_guess_404_permalink', array( 'Ratesight_Page_Lifecycle',     'filter_redirect_guess_404'" ) );
 
 echo ( $failures ? "FAIL" : "PASS" ) . ": {$checks} checks, {$failures} failures" . PHP_EOL;
 exit( $failures ? 1 : 0 );

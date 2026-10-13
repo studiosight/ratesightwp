@@ -727,8 +727,10 @@ class Ratesight_Webhook_Handler {
 
 	/**
 	 * The page-cache purge set, shared with the rs_pages visibility routes (3.15.7).
+	 * Those routes pass $global = false per post and call purge_global_cache()
+	 * once per run.
 	 */
-	public static function purge_post_cache( int $post_id ): void {
+	public static function purge_post_cache( int $post_id, bool $global = true ): void {
 		clean_post_cache( $post_id );
 		// WP Rocket
 		if ( function_exists( 'rocket_clean_post' ) ) rocket_clean_post( $post_id );
@@ -738,12 +740,18 @@ class Ratesight_Webhook_Handler {
 		if ( function_exists( 'w3tc_flush_post' ) ) w3tc_flush_post( $post_id );
 		// WP Super Cache
 		if ( function_exists( 'wp_cache_post_change' ) ) wp_cache_post_change( $post_id );
-		// Elementor (clear its generated CSS/files)
+		// Generic WordPress hooks other caching plugins listen on
+		do_action( 'flush_post_cache', $post_id ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound
+		if ( $global ) {
+			self::purge_global_cache();
+		}
+	}
+
+	/** Site-wide purges: Elementor clears all of its generated CSS/files. */
+	public static function purge_global_cache(): void {
 		if ( class_exists( '\Elementor\Plugin' ) ) {
 			\Elementor\Plugin::$instance->files_manager->clear_cache();
 		}
-		// Generic WordPress hooks other caching plugins listen on
-		do_action( 'flush_post_cache', $post_id ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound
 	}
 
 	// -------------------------------------------------------------------------
