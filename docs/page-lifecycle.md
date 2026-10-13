@@ -70,8 +70,12 @@ Content, meta, revisions and slugs are preserved; the change is reversible with
 - Exactly one of `dry_run: true` or `confirm: true`. Neither: `428`. Both: `422`. Nothing is written
   on a refusal or a dry run.
 - `reason` is required and must be `hosting_only` (`422` otherwise).
-- `ids` omitted means every `ratesight_page` with post_status `publish`. When sent it must be a
-  non-empty array of positive integer ids (at most 1000); an empty array is a `422`, never "all".
+- `ids` omitted means every `ratesight_page` with post_status `publish`, at most 200 per call:
+  `has_more: true` means call again. When sent, `ids` must be a non-empty array of positive integer
+  ids (at most 200); an empty array is a `422`, never "all".
+- One real run at a time per site: a run lock (option `ratesight_rs_pages_visibility_lock`, taken
+  with `add_option`, expires after 300 s) makes a concurrent unpublish or republish run get `409`
+  with `code: "rs_pages_visibility_busy"`. Dry runs take no lock.
 - Only post_type `ratesight_page` is ever changed. Any other id (a client page or post, an
   attachment, an id that does not exist) is refused per item with `not_ratesight_page`, and its slug
   and status are not reported. Only status `publish` is changed; a `ratesight_page` in any other
@@ -82,10 +86,16 @@ Content, meta, revisions and slugs are preserved; the change is reversible with
   written because the content is unchanged; existing revisions are kept.
 - Before the status write the plugin adds post meta `_ratesight_visibility_hold`, a JSON string
   `{"prior_status":"publish","reason":"hosting_only","at":"2026-10-13T17:05:47Z"}` (ISO 8601 UTC).
-  An existing hold is never overwritten, so repeating the call cannot lose the prior status. If the
-  status write fails the new hold is removed and the item reports `failed`.
+  An existing hold is never overwritten, so repeating the call cannot lose the prior status.
+- A page is never set to draft without a readable hold. If the hold cannot be written, cannot be
+  read back, or an existing hold is unreadable, the item reports `failed` and its status is not
+  touched. If the status write fails, a hold added by this call is removed and the item is `failed`.
+- After each changed page the plugin runs the same page-cache purge set as `update-page`
+  (`clean_post_cache`, WP Rocket, LiteSpeed, W3 Total Cache, WP Super Cache, Elementor files,
+  `flush_post_cache`).
 - Each real change appends `{action:"unpublish", post_id, slug, from, to, reason, at}` to option
-  `ratesight_rs_pages_visibility_log` (not autoloaded, append-only, newest 1000 kept). Skipped and
+  `ratesight_rs_pages_visibility_log` (not autoloaded, append-only, newest 1000 kept), one entry per
+  page as it is changed, so a timeout cannot lose the entries of pages already changed. Skipped and
   refused items are not logged.
 - Idempotent: a page already unpublished is `skipped`, the hold and log are untouched.
 
@@ -102,7 +112,9 @@ Response (`200` whenever the request itself was valid):
 
 `result` is one of `unpublished` (confirm), `would_unpublish` (dry run), `skipped`,
 `not_ratesight_page` or `failed`. `count` is the number of pages changed (or that would change on a
-dry run). `ok` is false only when at least one item `failed`.
+dry run). `ok` is false only when at least one item `failed`. Every response also carries
+`has_more`, and unpublish responses carry `pending_publish_jobs`: the number of pending Ratesight
+log rows (deferred publish jobs) for the affected pages.
 
 ## POST /wp-json/ratesight/v1/republish-rs-pages (3.15.7)
 
@@ -122,8 +134,20 @@ Reverses `unpublish-rs-pages`.
   publish a page that was a draft for any other reason. Other post types: `not_ratesight_page`.
 - Each real change appends `{action:"republish", post_id, slug, from, to, reason, at}` to the same
   log, with the reason recorded in the hold.
-- Same response shape; `result` is `republished`, `would_republish`, `skipped`,
-  `not_ratesight_page` or `failed`.
+- Same response shape, batching (200, `has_more`), lock and cache purge; `result` is
+  `republished`, `would_republish`, `skipped`, `not_ratesight_page` or `failed`.
+
+## A hold is bound to the draft these routes made
+
+- `transition_post_status` (priority 5): when a held `ratesight_page` changes to any status other
+  than `draft` outside these two routes (an admin publish, private, trash, another plugin), the hold
+  is deleted and `{action:"hold_cleared", post_id, slug, from, to, reason, at}` is logged. The post
+  itself is left as it is. So an admin who publishes a held page and later sets it back to draft
+  has an ordinary draft, which `republish-rs-pages` will not publish.
+- Other publish paths respect a hold: the hourly retry of stuck deferred publishes
+  (`Ratesight::retry_pending_posts`) never publishes a held page and moves its log row out of
+  `pending` (status `modified`), and the deferred publisher (`Ratesight_Publisher::run`) leaves a
+  held page untouched (no image attach, no status change).
 
 ## What "out of public display" means
 
@@ -136,10 +160,11 @@ A held page is an ordinary WordPress draft, so:
 - Routing: the plugin's own slug router and its 404 fallback resolve only published
   `ratesight_page` posts (`includes/class-ratesight-cpt.php:180`, `:184` and `:207`). WordPress core
   does not serve a draft to anonymous visitors, so the old URL is a 404.
-- The runtime 404 router indexes published posts only (`includes/class-ratesight-runtime-404-router.php:336`)
-  and rebuilds that index on every status change (`includes/class-ratesight.php:223`). When fuzzy
-  404 mode is on, the old URL of a held page may therefore be 301-redirected to the closest
-  remaining published page instead of showing the 404 page.
+- The runtime 404 router (`Ratesight_Runtime_404_Router::maybe_route`) returns early when the
+  requested slug belongs to a held `ratesight_page`, so the old URL is a plain 404 and is never
+  fuzzy-301'd to another page, including the client's own pages. Decision (integrator, 2026-10-13):
+  a hosting-only client gets no SEO redirection from us, and a cached 301 would outlive a republish.
+  The router's index holds published posts only and is rebuilt on every status change.
 
 ## Auth
 

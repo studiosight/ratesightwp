@@ -65,6 +65,13 @@ class Ratesight_Publisher {
 			return;
 		}
 
+		// Since 3.15.7: a page held out of public display (hosting-only) is left
+		// exactly as it is: no image attach, no status change.
+		if ( class_exists( 'Ratesight_Page_Lifecycle' ) && Ratesight_Page_Lifecycle::has_hold( $post_id ) ) {
+			Ratesight_Logger::log_update( $log_id, $post_id, Ratesight_Logger::STATUS_MODIFIED, 'Deferred publish skipped: the page is held out of public display (visibility hold).' );
+			return;
+		}
+
 		$warnings       = array();
 		$already_live   = ! in_array( $post->post_status, array( 'draft', 'auto-draft' ), true );
 

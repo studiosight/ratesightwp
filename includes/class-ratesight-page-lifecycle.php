@@ -428,8 +428,16 @@ class Ratesight_Page_Lifecycle {
 	/** Statuses a hold may restore. Unpublish only ever records publish. */
 	const VISIBILITY_RESTORABLE = array( 'publish' );
 
-	/** Upper bound on an explicit ids list. */
-	const VISIBILITY_MAX_IDS = 1000;
+	/** Upper bound on an explicit ids list, and on one all-ids run (has_more reports the rest). */
+	const VISIBILITY_MAX_IDS = 200;
+	const VISIBILITY_BATCH   = 200;
+
+	/** Run lock (add_option) and its expiry in seconds. */
+	const VISIBILITY_LOCK_OPTION = 'ratesight_rs_pages_visibility_lock';
+	const VISIBILITY_LOCK_TTL    = 300;
+
+	/** Post id being written by these routes, so the transition hook leaves its hold alone. */
+	private static int $route_write = 0;
 
 	/**
 	 * Validate an unpublish/republish body. Pure: no WordPress calls.
@@ -545,22 +553,52 @@ class Ratesight_Page_Lifecycle {
 
 		if ( ! $intent['ok'] ) {
 			return new \WP_REST_Response( array(
-				'ok'      => false,
-				'dry_run' => $intent['dry_run'],
-				'reason'  => $intent['reason'],
-				'count'   => 0,
-				'pages'   => array(),
-				'message' => $intent['message'],
+				'ok'       => false,
+				'dry_run'  => $intent['dry_run'],
+				'reason'   => $intent['reason'],
+				'count'    => 0,
+				'pages'    => array(),
+				'has_more' => false,
+				'message'  => $intent['message'],
 			), $intent['status'] );
 		}
 
-		$ids = $intent['ids'];
+		// One real run at a time. A dry run writes nothing and takes no lock.
+		$locked = false;
+		if ( ! $intent['dry_run'] ) {
+			if ( ! self::acquire_visibility_lock() ) {
+				return new \WP_REST_Response( array(
+					'ok'       => false,
+					'code'     => 'rs_pages_visibility_busy',
+					'dry_run'  => false,
+					'reason'   => $intent['reason'],
+					'count'    => 0,
+					'pages'    => array(),
+					'has_more' => false,
+					'message'  => 'Another unpublish-rs-pages or republish-rs-pages run is in progress. Retry shortly.',
+				), 409 );
+			}
+			$locked = true;
+		}
+
+		try {
+			return self::run_visibility( $action, $intent );
+		} finally {
+			if ( $locked ) {
+				self::release_visibility_lock();
+			}
+		}
+	}
+
+	private static function run_visibility( string $action, array $intent ): \WP_REST_Response {
+		$ids      = $intent['ids'];
+		$has_more = false;
 		if ( $ids === null ) {
 			$query = array(
 				'post_type'        => self::VISIBILITY_POST_TYPE,
 				'post_status'      => $action === 'unpublish' ? 'publish' : 'draft',
 				'fields'           => 'ids',
-				'posts_per_page'   => -1,
+				'posts_per_page'   => self::VISIBILITY_BATCH + 1,
 				'orderby'          => 'ID',
 				'order'            => 'ASC',
 				'no_found_rows'    => true,
@@ -570,13 +608,17 @@ class Ratesight_Page_Lifecycle {
 				$query['meta_key'] = self::VISIBILITY_HOLD_META; // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
 			}
 			$ids = array_map( 'intval', get_posts( $query ) );
+			if ( count( $ids ) > self::VISIBILITY_BATCH ) {
+				$has_more = true;
+				$ids      = array_slice( $ids, 0, self::VISIBILITY_BATCH );
+			}
 		}
 
-		$now     = gmdate( 'Y-m-d\TH:i:s\Z' );
-		$pages   = array();
-		$entries = array();
-		$count   = 0;
-		$failed  = 0;
+		$now      = gmdate( 'Y-m-d\TH:i:s\Z' );
+		$pages    = array();
+		$count    = 0;
+		$failed   = 0;
+		$affected = array();
 
 		foreach ( $ids as $post_id ) {
 			$post   = get_post( $post_id );
@@ -598,6 +640,8 @@ class Ratesight_Page_Lifecycle {
 				continue;
 			}
 
+			$affected[] = $post_id;
+
 			if ( $intent['dry_run'] ) {
 				$row['result'] = 'would_' . ( $action === 'unpublish' ? 'unpublish' : 'republish' );
 				$pages[]       = $row;
@@ -605,19 +649,39 @@ class Ratesight_Page_Lifecycle {
 				continue;
 			}
 
-			$log_reason = $action === 'unpublish' ? $intent['reason'] : (string) ( $hold['reason'] ?? '' );
 			$hold_added = false;
-			if ( $action === 'unpublish' && $hold === null ) {
-				// Recorded before the status write. An existing hold is never overwritten.
-				$hold_added = (bool) add_post_meta( $post_id, self::VISIBILITY_HOLD_META, wp_slash( wp_json_encode( array(
-					'prior_status' => $status,
-					'reason'       => $intent['reason'],
-					'at'           => $now,
-				) ) ), true );
+			if ( $action === 'unpublish' ) {
+				// Recorded before the status write and never overwritten. A post is
+				// never set to draft without a readable hold: an unreadable existing
+				// hold, or a hold that cannot be read back after writing, fails the item.
+				if ( ! metadata_exists( 'post', $post_id, self::VISIBILITY_HOLD_META ) ) {
+					$hold_added = (bool) add_post_meta( $post_id, self::VISIBILITY_HOLD_META, wp_slash( wp_json_encode( array(
+						'prior_status' => $status,
+						'reason'       => $intent['reason'],
+						'at'           => $now,
+					) ) ), true );
+				}
+				$hold = self::read_hold( $post_id );
+				if ( ! is_array( $hold ) || ! in_array( (string) ( $hold['prior_status'] ?? '' ), self::VISIBILITY_RESTORABLE, true ) ) {
+					if ( $hold_added ) {
+						delete_post_meta( $post_id, self::VISIBILITY_HOLD_META );
+					}
+					$row['to']     = $status;
+					$row['result'] = 'failed';
+					$pages[]       = $row;
+					$failed++;
+					continue;
+				}
 			}
+			$log_reason = $action === 'unpublish' ? $intent['reason'] : (string) ( $hold['reason'] ?? '' );
 
-			$written = self::set_status_only( $post, $plan['to'] );
-			$after   = (string) get_post_status( $post_id );
+			self::$route_write = $post_id;
+			try {
+				$written = self::set_status_only( $post, $plan['to'] );
+			} finally {
+				self::$route_write = 0;
+			}
+			$after = (string) get_post_status( $post_id );
 
 			if ( ! $written || $after !== $plan['to'] ) {
 				if ( $hold_added ) {
@@ -634,7 +698,11 @@ class Ratesight_Page_Lifecycle {
 				delete_post_meta( $post_id, self::VISIBILITY_HOLD_META );
 			}
 
-			$entries[] = array(
+			self::purge_post_cache( $post_id );
+
+			// Logged per item, so a timeout later in the run cannot lose the entry
+			// for a page that was already changed.
+			self::log_visibility( array(
 				'action'  => $action,
 				'post_id' => $post_id,
 				'slug'    => (string) $post->post_name,
@@ -642,22 +710,26 @@ class Ratesight_Page_Lifecycle {
 				'to'      => $after,
 				'reason'  => $log_reason,
 				'at'      => $now,
-			);
+			) );
 			$pages[] = $row;
 			$count++;
 		}
 
-		if ( $entries ) {
-			update_option( self::VISIBILITY_LOG_OPTION, self::append_visibility_log( get_option( self::VISIBILITY_LOG_OPTION, array() ), $entries ), false );
+		$body = array(
+			'ok'       => $failed === 0,
+			'dry_run'  => $intent['dry_run'],
+			'reason'   => $intent['reason'],
+			'count'    => $count,
+			'pages'    => $pages,
+			'has_more' => $has_more,
+		);
+		if ( $action === 'unpublish' ) {
+			// Deferred publish jobs still pending for the affected pages. The hourly
+			// retry and the deferred publisher skip a held page, so these will not
+			// publish it; the count is reported so the caller can see them.
+			$body['pending_publish_jobs'] = self::pending_publish_jobs( $affected );
 		}
-
-		return new \WP_REST_Response( array(
-			'ok'      => $failed === 0,
-			'dry_run' => $intent['dry_run'],
-			'reason'  => $intent['reason'],
-			'count'   => $count,
-			'pages'   => $pages,
-		), 200 );
+		return new \WP_REST_Response( $body, 200 );
 	}
 
 	/** Decoded hold meta for a post, or null when absent or not valid JSON. */
@@ -668,6 +740,104 @@ class Ratesight_Page_Lifecycle {
 		}
 		$hold = json_decode( $raw, true );
 		return is_array( $hold ) ? $hold : null;
+	}
+
+	/** True when the post carries a visibility hold (readable or not). */
+	public static function has_hold( int $post_id ): bool {
+		return $post_id > 0 && function_exists( 'metadata_exists' ) && metadata_exists( 'post', $post_id, self::VISIBILITY_HOLD_META );
+	}
+
+	/** True when a held ratesight_page uses this slug (the 404 router must not redirect it). */
+	public static function slug_is_held( string $slug ): bool {
+		global $wpdb;
+		if ( $slug === '' || ! isset( $wpdb ) ) {
+			return false;
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		return (bool) $wpdb->get_var( $wpdb->prepare(
+			"SELECT p.ID FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID AND m.meta_key = %s
+			 WHERE p.post_name = %s AND p.post_type = %s LIMIT 1",
+			self::VISIBILITY_HOLD_META,
+			$slug,
+			self::VISIBILITY_POST_TYPE
+		) );
+	}
+
+	/**
+	 * transition_post_status: a hold is bound to the draft these routes made. Any
+	 * other change of a held post to a status other than draft (an admin publish,
+	 * private, trash, another plugin) clears the hold and logs hold_cleared, and
+	 * leaves the post as it is. Republish then never acts on a stale hold.
+	 */
+	public static function on_transition_post_status( $new_status, $old_status, $post ): void {
+		if ( ! $post instanceof \WP_Post || $post->post_type !== self::VISIBILITY_POST_TYPE ) {
+			return;
+		}
+		if ( (int) $post->ID === self::$route_write || $new_status === 'draft' ) {
+			return;
+		}
+		if ( ! self::has_hold( (int) $post->ID ) ) {
+			return;
+		}
+		$hold = self::read_hold( (int) $post->ID );
+		delete_post_meta( (int) $post->ID, self::VISIBILITY_HOLD_META );
+		self::log_visibility( array(
+			'action'  => 'hold_cleared',
+			'post_id' => (int) $post->ID,
+			'slug'    => (string) $post->post_name,
+			'from'    => (string) $old_status,
+			'to'      => (string) $new_status,
+			'reason'  => (string) ( $hold['reason'] ?? '' ),
+			'at'      => gmdate( 'Y-m-d\TH:i:s\Z' ),
+		) );
+	}
+
+	/** Append one entry to the history log. */
+	private static function log_visibility( array $entry ): void {
+		update_option( self::VISIBILITY_LOG_OPTION, self::append_visibility_log( get_option( self::VISIBILITY_LOG_OPTION, array() ), array( $entry ) ), false );
+	}
+
+	/** Pending Ratesight log rows (deferred publish jobs) for these posts. */
+	private static function pending_publish_jobs( array $post_ids ): int {
+		global $wpdb;
+		$post_ids = array_values( array_filter( array_map( 'intval', $post_ids ) ) );
+		if ( ! $post_ids || ! isset( $wpdb ) || ! defined( 'RATESIGHT_LOG_TABLE' ) ) {
+			return 0;
+		}
+		$table = $wpdb->prefix . RATESIGHT_LOG_TABLE;
+		$in    = implode( ',', $post_ids );
+		$prev  = $wpdb->suppress_errors( true );
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$n = $wpdb->get_var( "SELECT COUNT(*) FROM `{$table}` WHERE status = 'pending' AND post_id IN ({$in})" );
+		$wpdb->suppress_errors( $prev );
+		return (int) $n;
+	}
+
+	/** Run lock: add_option is atomic; an expired lock is taken over once. */
+	private static function acquire_visibility_lock(): bool {
+		$expires = time() + self::VISIBILITY_LOCK_TTL;
+		if ( add_option( self::VISIBILITY_LOCK_OPTION, $expires, '', false ) ) {
+			return true;
+		}
+		$current = (int) get_option( self::VISIBILITY_LOCK_OPTION, 0 );
+		if ( $current > time() ) {
+			return false;
+		}
+		delete_option( self::VISIBILITY_LOCK_OPTION );
+		return (bool) add_option( self::VISIBILITY_LOCK_OPTION, $expires, '', false );
+	}
+
+	private static function release_visibility_lock(): void {
+		delete_option( self::VISIBILITY_LOCK_OPTION );
+	}
+
+	/** The page-cache purge set update-page uses. */
+	private static function purge_post_cache( int $post_id ): void {
+		if ( class_exists( 'Ratesight_Webhook_Handler' ) && method_exists( 'Ratesight_Webhook_Handler', 'purge_post_cache' ) ) {
+			Ratesight_Webhook_Handler::purge_post_cache( $post_id );
+			return;
+		}
+		clean_post_cache( $post_id );
 	}
 
 	/**

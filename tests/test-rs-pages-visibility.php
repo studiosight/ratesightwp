@@ -62,6 +62,11 @@ function wp_untrash_post( $id ) {
 	return $posts[ $id ];
 }
 
+function metadata_exists( $type, $id, $key ) { global $meta; return isset( $meta[ (int) $id ][ $key ] ); }
+function delete_post_meta( $id, $key ) { global $meta; unset( $meta[ (int) $id ][ $key ] ); return true; }
+$opts = array();
+function get_option( $k, $d = false ) { global $opts; return $opts[ $k ] ?? $d; }
+function update_option( $k, $v, $a = null ) { global $opts; $opts[ $k ] = $v; return true; }
 require_once __DIR__ . '/../includes/class-ratesight-page-lifecycle.php';
 
 $failures = 0;
@@ -106,7 +111,7 @@ foreach ( array( 0, -2, 'abc', 1.5, null, array( 1 ) ) as $bad ) {
 	check( 'ids: invalid entry ' . json_encode( $bad ) . ' refuses the whole request', $r['ok'] === false && $r['status'] === 422 );
 }
 $r = $L::parse_visibility_intent( array( 'reason' => 'hosting_only', 'confirm' => true, 'ids' => range( 1, 1001 ) ), true );
-check( 'ids: more than 1000 is refused', $r['ok'] === false && $r['status'] === 422 );
+check( 'ids: more than 200 is refused', $r['ok'] === false && $r['status'] === 422 );
 
 // ── per-item decisions ───────────────────────────────────────────────────────
 $d = $L::decide_visibility( 'unpublish', 'ratesight_page', 'publish', null );
@@ -159,6 +164,36 @@ $posts[ 13 ] = new WP_Post( array( 'ID' => 13, 'post_type' => 'post', 'post_stat
 $meta[ 13 ]  = array( '_wp_trash_meta_status' => 'publish' );
 wp_untrash_post( 13 );
 check( 'restore: the filter does not leak into other untrash calls', $posts[13]->post_status === 'draft' );
+
+
+// ── stale holds: a status change made elsewhere clears the hold ──────────────
+$hold_json = '{"prior_status":"publish","reason":"hosting_only","at":"2026-10-13T00:00:00Z"}';
+$posts[ 20 ] = new WP_Post( array( 'ID' => 20, 'post_type' => 'ratesight_page', 'post_status' => 'publish', 'post_name' => 'held' ) );
+$meta[ 20 ]  = array( '_ratesight_visibility_hold' => $hold_json );
+$L::on_transition_post_status( 'draft', 'draft', $posts[20] );
+check( 'transition: draft -> draft keeps the hold', isset( $meta[20]['_ratesight_visibility_hold'] ) );
+$L::on_transition_post_status( 'publish', 'draft', $posts[20] );
+$last = end( $opts['ratesight_rs_pages_visibility_log'] );
+check( 'transition: an outside publish clears the hold and logs hold_cleared', ! isset( $meta[20]['_ratesight_visibility_hold'] ) && $last['action'] === 'hold_cleared' && $last['post_id'] === 20 && $last['from'] === 'draft' && $last['to'] === 'publish' && $last['reason'] === 'hosting_only' );
+$meta[ 21 ] = array( '_ratesight_visibility_hold' => $hold_json );
+$L::on_transition_post_status( 'publish', 'draft', new WP_Post( array( 'ID' => 21, 'post_type' => 'page', 'post_status' => 'publish' ) ) );
+check( 'transition: other post types are ignored', isset( $meta[21]['_ratesight_visibility_hold'] ) );
+$meta[ 22 ] = array( '_ratesight_visibility_hold' => $hold_json );
+$L::on_transition_post_status( 'trash', 'draft', new WP_Post( array( 'ID' => 22, 'post_type' => 'ratesight_page', 'post_status' => 'trash' ) ) );
+check( 'transition: trashing a held page also clears the hold', ! isset( $meta[22]['_ratesight_visibility_hold'] ) );
+
+// ── the other publish paths and the 404 router check the hold first ─────────
+$src = static fn( string $f ): string => (string) file_get_contents( __DIR__ . '/../includes/' . $f );
+$core = $src( 'class-ratesight.php' );
+$retry = substr( $core, strpos( $core, 'public function retry_pending_posts' ) );
+check( 'retry_pending_posts skips a held post before any status write', strpos( $retry, 'Ratesight_Page_Lifecycle::has_hold( $post_id )' ) !== false && strpos( $retry, 'Ratesight_Page_Lifecycle::has_hold( $post_id )' ) < strpos( $retry, 'wp_update_post(' ) );
+check( 'the transition hook is registered', str_contains( $core, "array( 'Ratesight_Page_Lifecycle',      'on_transition_post_status'       ), 5, 3 )" ) );
+$pub = $src( 'class-ratesight-publisher.php' );
+$run = substr( $pub, strpos( $pub, 'public function run(' ) );
+check( 'deferred publisher returns for a held post before image attach and status write', strpos( $run, 'Ratesight_Page_Lifecycle::has_hold( $post_id )' ) !== false && strpos( $run, 'Ratesight_Page_Lifecycle::has_hold( $post_id )' ) < strpos( $run, 'Ratesight_Image_Uploader' ) );
+$router = $src( 'class-ratesight-runtime-404-router.php' );
+$route = substr( $router, strpos( $router, 'public static function maybe_route' ) );
+check( '404 router returns for a held slug before any routing decision', strpos( $route, 'Ratesight_Page_Lifecycle::slug_is_held(' ) !== false && strpos( $route, 'Ratesight_Page_Lifecycle::slug_is_held(' ) < strpos( $route, 'self::route_decision(' ) );
 
 echo ( $failures ? "FAIL" : "PASS" ) . ": {$checks} checks, {$failures} failures" . PHP_EOL;
 exit( $failures ? 1 : 0 );

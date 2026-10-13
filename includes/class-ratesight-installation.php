@@ -108,6 +108,7 @@ class Ratesight_Installation {
 			'ratesight_claim_receipt',
 			'ratesight_enrollment_checked_version',
 			'ratesight_rs_pages_visibility_log',
+			'ratesight_rs_pages_visibility_lock',
 		) );
 		foreach ( array( 'gbp', 'gsc' ) as $service ) {
 			foreach ( array( 'oauth', 'selection', 'locked', 'revoked', 'disconnect_reason', 'refresh_error', 'scope_error' ) as $suffix ) {

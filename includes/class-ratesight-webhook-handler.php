@@ -722,6 +722,13 @@ class Ratesight_Webhook_Handler {
 	// -------------------------------------------------------------------------
 
 	private function purge_cache( int $post_id ): void {
+		self::purge_post_cache( $post_id );
+	}
+
+	/**
+	 * The page-cache purge set, shared with the rs_pages visibility routes (3.15.7).
+	 */
+	public static function purge_post_cache( int $post_id ): void {
 		clean_post_cache( $post_id );
 		// WP Rocket
 		if ( function_exists( 'rocket_clean_post' ) ) rocket_clean_post( $post_id );
