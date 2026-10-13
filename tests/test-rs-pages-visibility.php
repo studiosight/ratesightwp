@@ -25,7 +25,7 @@ class WP_REST_Response {
 }
 class WP_Error {}
 class WP_Post {
-	public $ID; public $post_type; public $post_status; public $post_name = ''; public $post_title = ''; public $post_content = ''; public $post_excerpt = ''; public $post_content_filtered = '';
+	public $ID; public $post_type; public $post_status; public $post_name = ''; public $post_title = ''; public $post_content = ''; public $post_excerpt = ''; public $post_content_filtered = ''; public $post_parent = 0;
 	public function __construct( array $f ) { foreach ( $f as $k => $v ) $this->$k = $v; }
 }
 class Ratesight_Logger {
@@ -251,6 +251,21 @@ check( 'purge: per-post purge inside the loop, global purge once after it', subs
 $wh = $src( 'class-ratesight-webhook-handler.php' );
 check( 'purge: Elementor clear_cache only in purge_global_cache; the routes call purge_post_cache( $id, false )', substr_count( $wh, 'files_manager->clear_cache()' ) === 1 && strpos( $wh, 'files_manager->clear_cache()' ) > strpos( $wh, 'public static function purge_global_cache' ) && str_contains( $life, 'Ratesight_Webhook_Handler::purge_post_cache( $post_id, false );' ) );
 check( 'core 404 guess filter is registered', str_contains( $core, "'do_redirect_guess_404_permalink', array( 'Ratesight_Page_Lifecycle',     'filter_redirect_guess_404'" ) );
+
+
+// ── page_location: real public path for hierarchical pages, front-page flag ─
+$posts[ 30 ] = new WP_Post( array( 'ID' => 30, 'post_type' => 'ratesight_page', 'post_status' => 'publish', 'post_name' => 'parent' ) );
+$posts[ 31 ] = new WP_Post( array( 'ID' => 31, 'post_type' => 'ratesight_page', 'post_status' => 'draft', 'post_name' => 'child', 'post_parent' => 30 ) );
+function get_page_uri( $p ) { global $posts; $parts = array( $p->post_name ); $par = (int) ( $p->post_parent ?? 0 ); while ( $par && isset( $posts[ $par ] ) ) { array_unshift( $parts, $posts[ $par ]->post_name ); $par = (int) ( $posts[ $par ]->post_parent ?? 0 ); } return implode( '/', $parts ); }
+function get_permalink( $p ) { return $p->post_status === 'publish' ? 'https://example.test/' . get_page_uri( $p ) . '/' : 'https://example.test/?post_type=' . $p->post_type . '&p=' . $p->ID; }
+$loc = $L::page_location( $posts[31] );
+check( 'location: a child page reports uri parent/child', $loc['uri'] === 'parent/child' );
+check( 'location: a draft gets its would-be public link, not the ?p= form', $loc['link'] === 'https://example.test/parent/child/' && $posts[31]->post_status === 'draft' );
+check( 'location: not the front page by default', $loc['front_page'] === false );
+$opts['show_on_front'] = 'page'; $opts['page_on_front'] = '31';
+check( 'location: front_page true when show_on_front=page and page_on_front is this id', $L::page_location( $posts[31] )['front_page'] === true && $L::page_location( $posts[30] )['front_page'] === false );
+$opts['show_on_front'] = 'posts';
+check( 'location: front_page false when show_on_front is posts', $L::page_location( $posts[31] )['front_page'] === false );
 
 echo ( $failures ? "FAIL" : "PASS" ) . ": {$checks} checks, {$failures} failures" . PHP_EOL;
 exit( $failures ? 1 : 0 );

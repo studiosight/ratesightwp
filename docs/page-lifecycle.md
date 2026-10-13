@@ -113,6 +113,20 @@ Response (`200` whenever the request itself was valid):
   ] }
 ```
 
+Every `ratesight_page` row (dry run and real run, any result) also carries its real public location,
+so a caller judges protection on the actual path rather than `slug` (`ratesight_page` is
+hierarchical):
+
+- `uri`: `get_page_uri()`, for example `parent/child`;
+- `link`: the would-be public URL. For a draft, `get_permalink()` only gives the
+  `?post_type=...&p=ID` form, so the link is computed from an in-memory copy of the post with status
+  `publish` (never saved). That uses the site's real permalink structure and `post_type_link`
+  filters. `get_sample_permalink()` was not used: it is a wp-admin function that returns a
+  `%pagename%` template;
+- `front_page`: true when `show_on_front` is `page` and `page_on_front` is this id.
+
+Refused rows (`not_ratesight_page`) keep `slug: null` and carry no `uri`, `link` or `front_page`.
+
 `result` is one of `unpublished` (confirm), `would_unpublish` (dry run), `skipped`,
 `not_ratesight_page` or `failed`. `count` is the number of pages changed (or that would change on a
 dry run). `ok` is false only when at least one item `failed`. Every response also carries

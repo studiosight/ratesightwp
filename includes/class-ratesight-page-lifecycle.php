@@ -634,6 +634,11 @@ class Ratesight_Page_Lifecycle {
 				'to'     => $plan['to'],
 				'result' => $plan['result'],
 			);
+			if ( $type === self::VISIBILITY_POST_TYPE ) {
+				// The real public path, so the caller judges protection on it (hierarchical
+				// pages: parent/child). Refused rows carry none of this.
+				$row += self::page_location( $post );
+			}
 
 			if ( ! $plan['change'] ) {
 				$pages[] = $row;
@@ -737,6 +742,29 @@ class Ratesight_Page_Lifecycle {
 			$body['pending_publish_jobs'] = self::pending_publish_jobs( $affected );
 		}
 		return new \WP_REST_Response( $body, 200 );
+	}
+
+	/**
+	 * Public location of a ratesight_page, whatever its current status.
+	 *
+	 * - uri: get_page_uri() (ancestor slugs joined, for example "parent/child").
+	 * - link: the would-be public URL. A draft's get_permalink() is the ugly
+	 *   ?post_type=...&p=ID form, so the link is computed from a copy of the post
+	 *   with post_status "publish" (in memory only, never saved). That runs the
+	 *   site's real permalink structure and every post_type_link filter, exactly
+	 *   as the URL will be once the page is public. get_sample_permalink() was not
+	 *   used: it lives in wp-admin and returns a %pagename% template.
+	 * - front_page: show_on_front is "page" and page_on_front is this id.
+	 */
+	public static function page_location( \WP_Post $post ): array {
+		$public              = clone $post;
+		$public->post_status = 'publish';
+		$link                = get_permalink( $public );
+		return array(
+			'uri'        => (string) get_page_uri( $public ),
+			'link'       => is_string( $link ) ? $link : null,
+			'front_page' => get_option( 'show_on_front' ) === 'page' && (int) get_option( 'page_on_front' ) === (int) $post->ID,
+		);
 	}
 
 	/** Decoded hold meta for a post, or null when absent or not valid JSON. */

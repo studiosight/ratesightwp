@@ -74,6 +74,7 @@ are never sent in URLs or displayed in the client-facing plugin.
   - New signed POST /republish-rs-pages { ids?, dry_run | confirm } restores held pages to their recorded status and removes the hold. An ordinary draft (no hold) is never published.
   - capabilities.rsPagesVisibility and connection-status features.rsPagesVisibility report the feature.
   - A held page is never published by the hourly retry or the deferred publisher, and its old URL is a plain 404 (no fuzzy 301 and no WordPress core 404 guess). Skipped publish jobs are marked Held and requeued on republish. A status change made elsewhere (for example an admin publish, but not trash) clears the hold and logs hold_cleared. Runs take an atomic database lock (409 rs_pages_visibility_busy), are bounded to 200 pages per call (has_more), are logged per page and purge the page cache per page, with site-wide purges once per run.
+  - Each Ratesight page row in the responses reports uri (parent/child for child pages), link (the would-be public URL, also for drafts) and front_page.
   - restore-page now returns a post to the status it held before it was trashed (WordPress 5.6+ otherwise restores to draft). trash-page and restore-page no longer pass stored content through kses again on the status write.
 
 3.15.5 - Redirects: method native stores a rule in the plugin's own map whatever else is active; Redirection plugin writes and deletes fixed (exact-match items only, errors reported, real storage method returned)
