@@ -722,6 +722,15 @@ class Ratesight_Webhook_Handler {
 	// -------------------------------------------------------------------------
 
 	private function purge_cache( int $post_id ): void {
+		self::purge_post_cache( $post_id );
+	}
+
+	/**
+	 * The page-cache purge set, shared with the rs_pages visibility routes (3.15.7).
+	 * Those routes pass $global = false per post and call purge_global_cache()
+	 * once per run.
+	 */
+	public static function purge_post_cache( int $post_id, bool $global = true ): void {
 		clean_post_cache( $post_id );
 		// WP Rocket
 		if ( function_exists( 'rocket_clean_post' ) ) rocket_clean_post( $post_id );
@@ -731,12 +740,18 @@ class Ratesight_Webhook_Handler {
 		if ( function_exists( 'w3tc_flush_post' ) ) w3tc_flush_post( $post_id );
 		// WP Super Cache
 		if ( function_exists( 'wp_cache_post_change' ) ) wp_cache_post_change( $post_id );
-		// Elementor (clear its generated CSS/files)
+		// Generic WordPress hooks other caching plugins listen on
+		do_action( 'flush_post_cache', $post_id ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound
+		if ( $global ) {
+			self::purge_global_cache();
+		}
+	}
+
+	/** Site-wide purges: Elementor clears all of its generated CSS/files. */
+	public static function purge_global_cache(): void {
 		if ( class_exists( '\Elementor\Plugin' ) ) {
 			\Elementor\Plugin::$instance->files_manager->clear_cache();
 		}
-		// Generic WordPress hooks other caching plugins listen on
-		do_action( 'flush_post_cache', $post_id ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound
 	}
 
 	// -------------------------------------------------------------------------
@@ -1301,6 +1316,10 @@ class Ratesight_Webhook_Handler {
 				'readinessExpires' => $auth['readiness_expires'],
 			),
 			'pairing' => Ratesight_Pairing::status(),
+			// Since 3.15.7: value-free feature flags the dashboard gates on.
+			'features' => array(
+				'rsPagesVisibility' => true,
+			),
 			'enrollment' => class_exists( 'Ratesight_Enrollment' ) ? Ratesight_Enrollment::status() : array( 'supported' => false, 'accepted' => false, 'code' => null, 'httpStatus' => null, 'attemptedAt' => null ),
 			'publicationEvents' => class_exists( 'Ratesight_Publication_Events' ) ? Ratesight_Publication_Events::status() : array( 'pending' => 0, 'oldestQueuedAt' => null ),
 			'legacyProviderResidue' => array(
@@ -1430,6 +1449,11 @@ class Ratesight_Webhook_Handler {
 			// DELETE /create-page and cannot be asked to trash anything.
 			'trash_page'           => true,
 			'restore_page'         => true,
+			// Since 3.15.7: POST /unpublish-rs-pages and /republish-rs-pages hold
+			// ratesight_page posts out of public display (draft) and restore them.
+			// Mirrored under features for callers that read a features map.
+			'rsPagesVisibility'    => true,
+			'features'             => array( 'rsPagesVisibility' => true ),
 			// Since 3.2.19: DELETE /create-page honours dry_run instead of
 			// deleting regardless.
 			'delete_page_dry_run'  => true,

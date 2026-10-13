@@ -221,6 +221,10 @@ class Ratesight {
 		add_action( 'template_redirect',              array( 'Ratesight_Runtime_404_Router',  'maybe_route'                     ), 5 );
 		// Invalidate post index when content changes.
 		add_action( 'transition_post_status',         array( 'Ratesight_Runtime_404_Router',  'invalidate_index'                ), 10 );
+		// Since 3.15.7: a visibility hold is cleared when anything else changes the held post's status.
+		add_action( 'transition_post_status',         array( 'Ratesight_Page_Lifecycle',      'on_transition_post_status'       ), 5, 3 );
+		// Since 3.15.7: core's 404 slug guess must not 301 a held page's URL to another page.
+		add_filter( 'do_redirect_guess_404_permalink', array( 'Ratesight_Page_Lifecycle',     'filter_redirect_guess_404'       ), PHP_INT_MAX );
 		add_action( 'delete_post',                    array( 'Ratesight_Runtime_404_Router',  'invalidate_index'                ), 10 );
 		add_action( 'ratesight_sync_gbp_performance', array( 'Ratesight_GBP_Insights_Client', 'sync_performance' ) );
 		add_action( 'ratesight_sync_bing',            array( 'Ratesight_Bing_Client',         'sync_performance' ) );
@@ -281,6 +285,14 @@ class Ratesight {
 			if ( ! $post ) {
 				// Post was deleted — mark as failed.
 				Ratesight_Logger::log_update( $log_id, $post_id, Ratesight_Logger::STATUS_FAILED, 'Post not found during retry.' );
+				continue;
+			}
+
+			// Since 3.15.7: a page held out of public display (hosting-only) is never
+			// published by the retry. The row leaves the pending queue so it cannot
+			// crowd out other stuck posts.
+			if ( class_exists( 'Ratesight_Page_Lifecycle' ) && Ratesight_Page_Lifecycle::has_hold( $post_id ) ) {
+				Ratesight_Page_Lifecycle::mark_log_row_held( $log_id, $post_id, 'Held: not published by retry while the page is held out of public display (visibility hold). Requeued on republish-rs-pages.' );
 				continue;
 			}
 

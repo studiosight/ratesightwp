@@ -63,6 +63,7 @@ check_connection_case( 'reports only boolean local provider residue', $response-
 check_connection_case( 'reports retained IndexNow without returning its key', $response->data['retainedLocal']['indexNowConfigured'] === true && strpos( $encoded, 'fixture-indexnow-key' ) === false );
 check_connection_case( 'does not expose stored auth or provider material', strpos( $encoded, 'fixture-secret' ) === false && ! preg_match( '/(?:current|previous)_key_id|access_token|refresh_token|email|property|location|siteUrl/i', $encoded ) );
 check_connection_case( 'does not call WordPress or provider networks', $network_calls === 0 );
+check_connection_case( '3.15.7: features report rsPagesVisibility', ( $response->data['features']['rsPagesVisibility'] ?? null ) === true );
 
 echo $failures ? "{$failures} CONNECTION STATUS CHECKS FAILED\n" : "ALL CONNECTION STATUS CHECKS PASSED\n";
 exit( $failures ? 1 : 0 );

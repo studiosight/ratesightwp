@@ -80,6 +80,12 @@ class Ratesight_Runtime_404_Router {
 
 		if ( $slug === '' ) return;
 
+		// 1b. Since 3.15.7: a Ratesight page held out of public display for a
+		//     hosting-only client stays a plain 404. No fuzzy 301 to another page:
+		//     we do no SEO redirection for that client, and a cached 301 would
+		//     outlive a later republish.
+		if ( class_exists( 'Ratesight_Page_Lifecycle' ) && Ratesight_Page_Lifecycle::slug_is_held( sanitize_title( $slug ) ) ) return;
+
 		// 2. Decide. Pure logic (unit-tested in tests/test-runtime-404-router.php):
 		//    legacy = old behavior; same-city-or-hub = cross-city candidates are
 		//    ineligible, with a same-service base-hub fallback; off handled above.

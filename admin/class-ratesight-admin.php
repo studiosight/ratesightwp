@@ -916,6 +916,7 @@ class Ratesight_Admin {
 			Ratesight_Logger::STATUS_SUCCESS_WARNINGS => array( 'Warnings', 'warnings' ),
 			Ratesight_Logger::STATUS_FAILED           => array( 'Failed',   'failed'   ),
 			Ratesight_Logger::STATUS_MODIFIED         => array( 'Modified', 'modified' ),
+			Ratesight_Logger::STATUS_HELD             => array( 'Held',     'pending'  ),
 		);
 
 		ob_start();

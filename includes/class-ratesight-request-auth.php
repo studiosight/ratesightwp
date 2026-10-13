@@ -77,6 +77,8 @@ class Ratesight_Request_Auth {
 		'POST /ratesight/v1/page' => 'signed_mutation',
 		'POST /ratesight/v1/trash-page' => 'signed_mutation',
 		'POST /ratesight/v1/restore-page' => 'signed_mutation',
+		'POST /ratesight/v1/unpublish-rs-pages' => 'signed_mutation',
+		'POST /ratesight/v1/republish-rs-pages' => 'signed_mutation',
 		'POST /ratesight/v1/media-alt' => 'signed_mutation',
 		'POST /ratesight/v1/indexnow' => 'signed_mutation',
 		'GET /ratesight/v1/crm-publish' => 'signed_read',
