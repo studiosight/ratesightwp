@@ -102,6 +102,9 @@ def failure_metadata(stage, error):
                 (("package", "Package"), ("version", "Version"), ("architecture", "Architecture"),
                  ("archiveSha256", "SHA256")))):
         result["archiveLink"] = link
+    native = getattr(error, "native_diagnostic", None) if type(error) is Held and reason == "native_missing_library" else None
+    if stage == "execute-native" and native_diagnostic_valid(native):
+        result["nativeDiagnostic"] = dict(native)
     return result
 
 
@@ -643,6 +646,25 @@ def native_context(profile):
     need(fds == {0, 1, 2}, "native_isolation")
 
 
+def native_diagnostic_valid(value):
+    return (type(value) is dict and set(value) == {"commandPhase", "category", "soname"} and
+            value["commandPhase"] in ("list", "version") and value["category"] == "missing-shared-library" and
+            type(value["soname"]) is str and 0 < len(value["soname"]) <= 128 and ".." not in value["soname"] and
+            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.+-]*\.so(?:\.[A-Za-z0-9][A-Za-z0-9_.+-]*)?", value["soname"]) is not None)
+
+
+def native_library_diagnostic(kind, stderr):
+    # Exact fixed public command prefix and one complete loader error only; never echo stderr.
+    if kind not in ("list", "version") or type(stderr) is not bytes or not 0 < len(stderr) <= 512:
+        return None
+    prefix = b"(?:" + re.escape(NATIVE_TOOL.encode("ascii")) + b"|" + re.escape(LOADER.encode("ascii")) + b")"
+    match = re.fullmatch(prefix + rb": error while loading shared libraries: ([A-Za-z0-9_.+-]{1,128}): cannot open shared object file: No such file or directory\n", stderr)
+    if match is None:
+        return None
+    result = {"commandPhase": kind, "category": "missing-shared-library", "soname": match.group(1).decode("ascii")}
+    return result if native_diagnostic_valid(result) else None
+
+
 def native_command(kind, output_budget):
     need(kind in ("list", "version"), "native_profile")
     # Even --list is potentially acquired-code execution (embedded audit modules).
@@ -671,8 +693,13 @@ def native_command(kind, output_budget):
                     need(output_budget[0] <= 65536, "native_output_cap")
         native = process.wait(timeout=max(.001, end - time.monotonic()))
         out, err = bytes(buffers[process.stdout]), bytes(buffers[process.stderr])
-        need(not err, "native_missing_library" if b"cannot open shared object" in err or b"not found" in err else
-             "native_version_error" if b"version" in err else "native_stderr")
+        if err:
+            error = Held("native_missing_library" if b"cannot open shared object" in err or b"not found" in err else
+                         "native_version_error" if b"version" in err else "native_stderr")
+            diagnostic = native_library_diagnostic(kind, err)
+            if diagnostic is not None:
+                error.native_diagnostic = diagnostic
+            raise error from None
         need(native == 0, "native_nonzero")
         return out
     finally:

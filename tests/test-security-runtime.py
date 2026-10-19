@@ -963,6 +963,74 @@ class MaterializationAndNativeTests(unittest.TestCase):
         self.assertEqual(env, {"PATH": "/usr/bin:/bin", "HOME": "/work", "TMPDIR": "/tmp", "LC_ALL": "C"})
         self.assertEqual(cwd, "/work")
 
+    def test_native_library_diagnostic_is_exact_bounded_soname_only(self):
+        raw = b"/analyzer/readelf: error while loading shared libraries: libz.so.1: cannot open shared object file: No such file or directory\n"
+        for kind in ("list", "version"):
+            self.assertEqual(M.native_library_diagnostic(kind, raw),
+                             {"commandPhase": kind, "category": "missing-shared-library", "soname": "libz.so.1"})
+        loader = raw.replace(b"/analyzer/readelf", M.LOADER.encode())
+        self.assertEqual(M.native_library_diagnostic("list", loader)["soname"], "libz.so.1")
+        for bad in (raw.replace(b"/analyzer/readelf", b"/SENSITIVE/path"), raw + raw,
+                    raw[:-1], raw + b"SENSITIVE", raw.replace(b"libz.so.1", b"/private/SENSITIVE.so"),
+                    raw.replace(b"libz.so.1", b"../SENSITIVE.so"), raw.replace(b"libz.so.1", b"lib..so.1"),
+                    raw.replace(b"libz.so.1", b"libz.so.1\x00SENSITIVE"),
+                    raw.replace(b"libz.so.1", b"x" * 129 + b".so"),
+                    raw.replace(b"No such file or directory", b"SENSITIVE"), raw.replace(b"libz.so.1", b"not-a-soname")):
+            with self.subTest(raw=bad):
+                self.assertIsNone(M.native_library_diagnostic("list", bad))
+        self.assertIsNone(M.native_library_diagnostic("other", raw))
+        self.assertIsNone(M.native_library_diagnostic("list", "SENSITIVE"))
+
+    def test_native_diagnostic_failure_metadata_is_closed_and_not_raw(self):
+        error = M.Held("native_missing_library")
+        error.native_diagnostic = {"commandPhase": "list", "category": "missing-shared-library", "soname": "libz.so.1"}
+        result = M.failure_metadata("execute-native", error)
+        self.assertEqual(result["nativeDiagnostic"], error.native_diagnostic)
+        self.assertNotIn("nativeDiagnostic", M.failure_metadata("execute-inspection", error))
+        for bad in ({**error.native_diagnostic, "raw": "SENSITIVE"},
+                    {**error.native_diagnostic, "soname": "/private/SENSITIVE.so"},
+                    {**error.native_diagnostic, "commandPhase": "SENSITIVE"}):
+            error.native_diagnostic = bad
+            self.assertNotIn("nativeDiagnostic", M.failure_metadata("execute-native", error))
+            self.assertNotIn("SENSITIVE", json.dumps(M.failure_metadata("execute-native", error)))
+
+    def test_native_missing_library_retains_diagnostic_and_never_versions(self):
+        error = M.Held("native_missing_library")
+        error.native_diagnostic = {"commandPhase": "list", "category": "missing-shared-library", "soname": "libz.so.1"}
+        inventory = self.inventory_fixture(); ids = {"fixture": [1]}
+        document = {"packages": [dict(M.READELF_ROW)], "profile": {}, "closedInputSha256": M.sha(M.canonical(inventory))}
+        with patch.object(M, "native_context"), patch.object(M, "native_inventory", return_value=(inventory, ids)), \
+             patch.object(M, "native_command", side_effect=error) as command, self.assertRaises(M.Held) as caught:
+            M.execute_native_probe(document, None)
+        self.assertIs(caught.exception, error)
+        self.assertEqual([c.args[0] for c in command.call_args_list], ["list"])
+
+    def test_native_command_attaches_only_sanitized_library_evidence(self):
+        from unittest.mock import Mock
+        raw = b"/analyzer/readelf: error while loading shared libraries: libz.so.1: cannot open shared object file: No such file or directory\n"
+        for stderr in (raw, raw + b"SENSITIVE"):
+            out, err = Mock(), Mock()
+            out.fileno.return_value = 10; err.fileno.return_value = 11
+            process = Mock(stdout=out, stderr=err, pid=12345)
+            process.poll.return_value = 127; process.wait.return_value = 127
+            selector = Mock(); active = {out: True, err: True}
+            selector.get_map.side_effect = lambda: active
+            selector.select.side_effect = lambda unused: [(Mock(fileobj=stream), None) for stream in list(active)]
+            selector.unregister.side_effect = lambda stream: active.pop(stream)
+            reads = {10: [b""], 11: [stderr, b""]}
+            with patch.object(M.subprocess, "Popen", return_value=process), \
+                 patch.object(M.selectors, "DefaultSelector", return_value=selector), \
+                 patch.object(M.os, "set_blocking"), \
+                 patch.object(M.os, "read", side_effect=lambda fd, count: reads[fd].pop(0)), \
+                 patch.object(M.os, "killpg", side_effect=ProcessLookupError), \
+                 patch.object(M.os, "listdir", return_value=["1"]), self.assertRaises(M.Held) as caught:
+                M.native_command("list", [0])
+            result = M.failure_metadata("execute-native", caught.exception)
+            self.assertEqual("nativeDiagnostic" in result, stderr == raw)
+            self.assertNotIn("SENSITIVE", json.dumps(result))
+            self.assertNotIn("/analyzer", json.dumps(result))
+            out.close.assert_called_once(); err.close.assert_called_once()
+
     def test_native_mocked_command_has_exact_args_and_owned_terminal(self):
         self.native_process_fixture("import os;os.write(1,b'fixture\\n')")
 
