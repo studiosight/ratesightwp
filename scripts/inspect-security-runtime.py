@@ -37,6 +37,21 @@ FAILURE_STAGES = ('phase-guard', 'acquisition-context', 'runner-load', 'manifest
 FAILURE_FUNCTIONS = ('need', 'canonical', 'sha', 'protected', 'runner', 'context', 'acquisition_context', 'manifest', 'download_alarm', 'acquire', 'member_name', 'inspect_tar', 'tar_command', 'ordered', 'execute_acquisition', 'execute_inspection', 'main')
 FAILURE_REASONS = ('acquired_set_changed', 'acquisition_directory_changed', 'acquisition_environment', 'acquisition_parent', 'acquisition_parent_required', 'archive_binding', 'archive_changed', 'archive_input_set_changed', 'archive_name', 'archive_overrun', 'archive_write', 'capabilities_present', 'content_encoding', 'download_deadline', 'dpkg_decode_failed', 'dpkg_pin', 'duplicate_member', 'environment_profile', 'escaping_link', 'expanded_byte_cap', 'host_view_exposed', 'http_length', 'http_status', 'inherited_environment', 'input_schema', 'inspection_deadline', 'inspection_parent_fixed', 'interrupted', 'invalid_root_entry', 'manifest_binding', 'manifest_bytes', 'manifest_changed', 'manifest_count', 'manifest_schema', 'member_ancestor', 'member_cap', 'member_collision', 'member_overrun', 'member_path', 'member_short', 'member_size', 'member_size_or_sparse', 'namespace_profile', 'no_new_privs_required', 'noncanonical_tool', 'nonregular_tool', 'owned_decoder_terminal_unknown', 'private_acquisition_parent', 'private_namespace_required', 'private_uid_pid_required', 'private_work_required', 'profile_contract', 'profile_schema', 'readonly_archive_inputs', 'readonly_root_required', 'redirect_refused', 'report_cap', 'report_not_confirmed', 'root_identity', 'runner_changed', 'runner_file', 'runner_pin', 'setid_member', 'special_member', 'tar_byte_cap', 'ubuntu_required', 'unknown_or_missing_archive_inputs', 'unprotected_tool', 'unsafe_link', 'whole_deadline', 'worker_pin')
 
+LINK_SUBTYPES = ("overlong", "absolute", "backslash", "nul")
+LINK_METADATA_FIELDS = {"manifestSha256", "package", "version", "architecture", "archiveSha256", "section",
+                        "memberOrdinal", "kind", "subtype", "member", "target"}
+
+
+def public_link_descriptor(value):
+    # Only signed-manifest public archive metadata reaches this path. No filesystem resolution.
+    raw = value.encode("utf-8")
+    safe = (len(raw) <= 192 and value.isascii() and
+            all(c.isalnum() or c in "._/+~-" for c in value) and
+            not any(word in value.lower() for word in
+                    (".env", ".ssh", ".npmrc", "secret", "password", "credential", "token", "private")))
+    return {"bytes": len(raw), "sha256": sha(raw), "text": value if safe else None}
+
+
 def failure_metadata(stage, error):
     # Closed source-only diagnostics; never format an exception or expose its arguments.
     categories = {Held: "guard-refused", PermissionError: "permission", FileNotFoundError: "missing-file",
@@ -53,8 +68,12 @@ def failure_metadata(stage, error):
             function = code.co_name
             line = frame.tb_lineno if 0 < frame.tb_lineno <= 10000 else 0
         frame = frame.tb_next
-    return {"stage": stage if stage in FAILURE_STAGES else "unknown", "function": function,
-            "line": line, "exceptionCategory": categories.get(type(error), "unknown"), "reason": reason}
+    result = {"stage": stage if stage in FAILURE_STAGES else "unknown", "function": function,
+              "line": line, "exceptionCategory": categories.get(type(error), "unknown"), "reason": reason}
+    link = getattr(error, "archive_link", None) if type(error) is Held and reason == "unsafe_link" else None
+    if type(link) is dict and set(link) == LINK_METADATA_FIELDS and link.get("manifestSha256") == MANIFEST_SHA:
+        result["archiveLink"] = link
+    return result
 
 
 class Held(Exception):
@@ -307,8 +326,16 @@ def inspect_tar(stream, budget):
                 kind, digest = "regular", digest_state.hexdigest()
             elif item.issym() or item.islnk():
                 target = item.linkname
-                need(len(target.encode()) <= 4096 and not target.startswith("/") and
-                     "\\" not in target and "\x00" not in target, "unsafe_link")
+                try:
+                    need(len(target.encode()) <= 4096 and not target.startswith("/") and
+                         "\\" not in target and "\x00" not in target, "unsafe_link")
+                except Held as error:
+                    subtype = ("overlong" if len(target.encode()) > 4096 else "absolute" if target.startswith("/")
+                               else "backslash" if "\\" in target else "nul")
+                    error.archive_link = {"kind": "symlink" if item.issym() else "hardlink", "subtype": subtype,
+                                          "memberOrdinal": budget["package_members"],
+                                          "member": public_link_descriptor(name), "target": public_link_descriptor(target)}
+                    raise
                 parts = name.split("/")[:-1] if item.issym() else []
                 for component in target.split("/"):
                     if component == "..":
@@ -409,7 +436,14 @@ def execute_inspection(rows, archive_parent, folder, shared):
         result = {"package": row["Package"], "version": row["Version"], "archiveSha256": row["SHA256"]}
         for kind in ("control", "data"):
             budget["dirs"] = set()
-            result[kind] = tar_command(path, kind, folder, deadline, budget)
+            try:
+                result[kind] = tar_command(path, kind, folder, deadline, budget)
+            except Held as error:
+                if type(error) is Held and type(getattr(error, "archive_link", None)) is dict:
+                    error.archive_link.update({"manifestSha256": MANIFEST_SHA, "package": row["Package"],
+                                               "version": row["Version"], "architecture": row["Architecture"],
+                                               "archiveSha256": row["SHA256"], "section": kind})
+                raise
         need(shared.read_regular(path, int(row["Size"]), deadline=deadline)[1] == pin, "archive_changed")
         reports.append(result)
     need(set(os.listdir(archive_parent)) == names, "archive_input_set_changed")

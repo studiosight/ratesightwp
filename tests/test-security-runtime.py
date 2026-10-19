@@ -434,5 +434,85 @@ class DiagnosticTests(unittest.TestCase):
             self.assertTrue((folder / "inspection-report.json").is_file())
 
 
+class LinkDiagnosticTests(unittest.TestCase):
+    def refused_item(self, target, hard=False):
+        item = tarfile.TarInfo("usr/lib/public-link")
+        item.type = tarfile.LNKTYPE if hard else tarfile.SYMTYPE
+        item.linkname = target
+        archive = unittest.mock.MagicMock()
+        archive.__enter__.return_value = [item]
+        with patch.object(M.tarfile, "open", return_value=archive):
+            try:
+                M.inspect_tar(None, budget())
+            except M.Held as error:
+                self.assertEqual(error.args, ("unsafe_link",))
+                return error
+        self.fail("unchanged unsafe_link guard must refuse")
+
+    def test_all_original_refusal_subtypes_are_preserved(self):
+        for target, subtype in [("x" * 4097, "overlong"), ("/usr/bin/tool", "absolute"),
+                                ("usr\\tool", "backslash"), ("usr\x00tool", "nul")]:
+            with self.subTest(subtype=subtype):
+                error = self.refused_item(target)
+                self.assertEqual(error.archive_link["subtype"], subtype)
+                self.assertEqual(error.archive_link["target"]["bytes"], len(target.encode()))
+                self.assertEqual(error.archive_link["target"]["sha256"], M.sha(target.encode()))
+                self.assertEqual(error.archive_link["kind"], "symlink")
+        self.assertEqual(self.refused_item("/usr/bin/tool", hard=True).archive_link["kind"], "hardlink")
+
+    def test_unsafe_member_is_not_followed_or_materialized(self):
+        with patch.object(M.os, "symlink") as symlink, patch.object(M.os, "link") as hardlink:
+            error = self.refused_item("/usr/bin/tool")
+        symlink.assert_not_called()
+        hardlink.assert_not_called()
+        self.assertEqual(error.archive_link["target"]["text"], "/usr/bin/tool")
+
+    def test_oversized_control_url_and_credential_shaped_metadata_is_not_echoed(self):
+        for value in ("x" * 4097, "usr\x00SENSITIVE", "https://user:SENSITIVE@host/?token=value",
+                      "/home/private/SENSITIVE", "/etc/secret-SENSITIVE", "usr\\SENSITIVE"):
+            with self.subTest(valueLength=len(value)):
+                descriptor = M.public_link_descriptor(value)
+                self.assertIsNone(descriptor["text"])
+                self.assertNotIn("SENSITIVE", json.dumps(descriptor))
+                self.assertEqual(descriptor["bytes"], len(value.encode()))
+                self.assertEqual(len(descriptor["sha256"]), 64)
+
+    def test_only_short_conservative_public_path_text_is_available(self):
+        self.assertEqual(M.public_link_descriptor("usr/bin/php")["text"], "usr/bin/php")
+        self.assertIsNone(M.public_link_descriptor("a" * 193)["text"])
+        self.assertIsNone(M.public_link_descriptor("usr/é")["text"])
+
+    def test_package_context_is_attached_only_on_existing_inspection_failure(self):
+        row = {"Package": "fixture-public", "Version": "1", "Architecture": "amd64",
+               "Filename": "pool/main/f/fixture.deb", "SHA256": M.sha(b"abc"), "Size": "3"}
+        error = self.refused_item("/usr/bin/tool")
+        shared = unittest.mock.Mock()
+        shared.read_regular.return_value = (b"abc", ("pin",))
+        with patch.object(M, "protected", side_effect=lambda path, **unused: Path(path)), \
+             patch.object(M.os, "statvfs", return_value=type("V", (), {"f_flag": os.ST_RDONLY})()), \
+             patch.object(M.os, "listdir", return_value=["fixture.deb"]), \
+             patch.object(M, "tar_command", side_effect=error) as decoder:
+            with self.assertRaises(M.Held) as caught:
+                M.execute_inspection([row], Path("/FIXTURE_INPUTS"), Path("/FIXTURE_WORK"), shared)
+        self.assertIs(caught.exception, error)
+        self.assertEqual(decoder.call_count, 1)
+        metadata = M.failure_metadata("execute-inspection", error)
+        self.assertEqual(metadata["archiveLink"]["package"], row["Package"])
+        self.assertEqual(metadata["archiveLink"]["archiveSha256"], row["SHA256"])
+        self.assertEqual(metadata["archiveLink"]["section"], "control")
+        self.assertEqual(metadata["archiveLink"]["memberOrdinal"], 1)
+        self.assertEqual(metadata["archiveLink"]["manifestSha256"], M.MANIFEST_SHA)
+        self.assertLess(len(json.dumps({"state": "HELD_RETAIN_OWNED_WORKSPACE",
+                                      "publicationAuthorized": False, "failure": metadata})), 4096)
+
+    def test_unbound_link_context_and_other_failures_do_not_echo_metadata(self):
+        error = self.refused_item("/usr/bin/tool")
+        self.assertNotIn("archiveLink", M.failure_metadata("execute-inspection", error))
+        unknown = RuntimeError("SENSITIVE")
+        unknown.archive_link = {"text": "SENSITIVE"}
+        self.assertNotIn("archiveLink", M.failure_metadata("unknown", unknown))
+        self.assertNotIn("SENSITIVE", json.dumps(M.failure_metadata("unknown", unknown)))
+
+
 if __name__ == "__main__":
     unittest.main()
