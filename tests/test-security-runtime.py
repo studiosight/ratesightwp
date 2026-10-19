@@ -731,5 +731,343 @@ class ReadelfProfileTests(unittest.TestCase):
         runner.assert_not_called()
 
 
+
+class MaterializationAndNativeTests(unittest.TestCase):
+    """Private source fixtures, never actual readelf/PHP/runtime evidence."""
+    setUp = InspectionTests.setUp
+    tearDown = InspectionTests.tearDown
+    row = InspectionTests.row
+    shared_reader = InspectionTests.shared_reader
+    synthetic_profile = ReadelfProfileTests.synthetic_profile
+
+    @contextlib.contextmanager
+    def materialization_fixture(self, decoder_failure=False):
+        inputs = self.root / "inputs"; inputs.mkdir()
+        (inputs / "toy.deb").write_bytes(b"abc")
+        tool = b"TOY_NO_NATIVE_CODE"
+        def decode(path, kind, folder, deadline, current, sink=None):
+            raw = (archive([("control", b"TOY_CONTROL_NOT_RUN", "file")]) if kind == "control" else
+                   archive([(M.READELF_MEMBER, tool, "file"),
+                            ("usr/bin/readelf", "x86_64-linux-gnu-readelf", "link")]))
+            result = M.inspect_tar(io.BytesIO(raw), current, sink)
+            if decoder_failure and kind == "data":
+                raise M.Held("dpkg_decode_failed")
+            return result
+        with self.synthetic_profile() as (row, binding), \
+             patch.object(M, "READELF_BYTES", len(tool)), patch.object(M, "READELF_SHA", M.sha(tool)), \
+             patch.object(M, "protected", side_effect=lambda path, **kw: Path(path)), \
+             patch.object(M.os, "statvfs", return_value=type("V", (), {"f_flag": os.ST_RDONLY})()), \
+             patch.object(M, "tar_command", side_effect=decode) as decoder:
+            yield row, inputs, tool, decoder
+
+    def test_fixed_materialization_only_one_nonexecutable_output_after_complete_stream(self):
+        with self.materialization_fixture() as (row, inputs, tool, decoder), \
+             patch.object(M.os, "symlink") as symlink, patch.object(M.os, "link") as hardlink:
+            result = M.execute_materialization([row], inputs, self.root, self.shared_reader())
+        output = self.root / M.READELF_OUTPUT
+        self.assertEqual(output.read_bytes(), tool)
+        self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(result["state"], "FIXED_READELF_MEMBER_PREPARED_PENDING_READONLY_HANDOFF")
+        self.assertFalse(result["materializedMember"]["executable"])
+        self.assertTrue(result["materializedMember"]["eligibleForReadonlyHandoff"])
+        self.assertEqual(len(result["materializedMember"]["inputIdentity"]), 7)
+        self.assertEqual(decoder.call_count, 2)
+        self.assertEqual(set(self.root.iterdir()), {inputs, output})
+        symlink.assert_not_called(); hardlink.assert_not_called()
+
+    def test_complete_member_but_failed_decoder_cannot_promote_or_claim_eligibility(self):
+        with self.materialization_fixture(True) as (row, inputs, tool, unused), \
+             self.assertRaisesRegex(M.Held, "dpkg_decode_failed"):
+            M.execute_materialization([row], inputs, self.root, self.shared_reader())
+        output = self.root / M.READELF_OUTPUT
+        self.assertEqual(output.read_bytes(), tool)
+        self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+        self.assertFalse((self.root / "inspection-report.json").exists())
+
+    def test_materialization_collision_preserves_unknown_file(self):
+        output = self.root / M.READELF_OUTPUT
+        output.write_bytes(b"PRESERVE")
+        with self.synthetic_profile() as (row, unused), patch.object(M, "execute_inspection") as inspect, \
+             self.assertRaises(FileExistsError):
+            M.execute_materialization([row], self.root, self.root, self.shared_reader())
+        self.assertEqual(output.read_bytes(), b"PRESERVE")
+        inspect.assert_not_called()
+
+    def test_materialization_wrong_digest_or_link_cannot_be_eligible(self):
+        for kind in ("file", "link"):
+            output = self.root / ("sink-" + kind)
+            fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                raw = archive([(M.READELF_MEMBER, b"BAD" if kind == "file" else "../other", kind)])
+                with self.assertRaisesRegex(M.Held, "materialized_member"):
+                    M.inspect_tar(io.BytesIO(raw), budget(), fd)
+            finally:
+                os.close(fd)
+
+    def test_default_tar_inspection_never_materializes_without_explicit_fixed_sink(self):
+        result = M.inspect_tar(io.BytesIO(archive([(M.READELF_MEMBER, b"TOY", "file")])), budget())
+        self.assertEqual(result["regularBytes"], 3)
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_cli_requires_readelf_profile_for_both_new_actions_before_any_work(self):
+        for phase in ("materialize-readelf", "probe-readelf"):
+            with patch.object(sys, "argv", ["inspection", phase, "--manifest", "/fixture"]), \
+                 patch.object(M, "runner") as runner, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(M.main(), 2)
+            runner.assert_not_called()
+
+    def test_materialization_main_source_change_prevents_success_report(self):
+        row = dict(M.READELF_ROW)
+        doc = json.dumps({"profile": {}, "packages": [row]}).encode()
+        reads = [0]
+        shared = unittest.mock.Mock()
+        shared.unique.side_effect = lambda pairs: dict(pairs)
+        def read(path, cap, **kw):
+            if str(path) == M.__file__:
+                reads[0] += 1
+                return b"fixture-source", (reads[0],)
+            return doc, ("manifest-pin",)
+        shared.read_regular.side_effect = read
+        folder = self.root / "work"
+        def temporary(**kw):
+            folder.mkdir()
+            return str(folder)
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["inspection", "materialize-readelf", "--artifact-profile",
+                                       "readelf-one-v1", "--manifest", "/fixture"]), \
+             patch.object(M, "runner", return_value=shared), patch.object(M, "context"), \
+             patch.object(M, "protected", side_effect=lambda path: Path(path)), \
+             patch.object(M.tempfile, "mkdtemp", side_effect=temporary), \
+             patch.object(M, "execute_materialization", return_value={"state": "FIXTURE_ONLY"}), \
+             contextlib.redirect_stdout(output):
+            self.assertEqual(M.main(), 2)
+        self.assertEqual(json.loads(output.getvalue())["failure"]["reason"], "worker_pin")
+        self.assertFalse((folder / "inspection-report.json").exists())
+
+    def loader_fixture(self):
+        return b"linux-vdso.so.1 (0x1234)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x5678)\n"
+    def inventory_fixture(self):
+        return {"/lib/x86_64-linux-gnu/libc.so.6": {"sha256": "a" * 64, "bytes": 1, "mode": 0o555}}
+
+    def test_loader_output_is_finite_diagnostic_not_mapping_proof(self):
+        result = M.parse_loader_output(self.loader_fixture(), self.inventory_fixture())
+        self.assertEqual(result[0]["path"], "/lib/x86_64-linux-gnu/libc.so.6")
+        self.assertNotIn("0x", json.dumps(result))
+        for raw in (b"", b"partial", b"libX.so => not found\n", b"UNKNOWN_SENTINEL\n",
+                    b"/outside/file (0x1234)\n", b"\xff\n"):
+            with self.subTest(raw=raw), self.assertRaises(M.Held):
+                M.parse_loader_output(raw, self.inventory_fixture())
+
+    def test_loader_absolute_alias_requires_both_exact_pinned_objects(self):
+        alias = "/lib64/ld-linux-x86-64.so.2"
+        resolved = "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+        row = {"sha256": M.LOADER_SHA, "bytes": 236616, "mode": 0o555}
+        inventory = {alias: dict(row), resolved: dict(row)}
+        raw = (alias + " => " + resolved + " (0x00007f1234500000)\n").encode()
+        self.assertEqual(M.parse_loader_output(raw, inventory),
+                         [{"path": resolved, "sha256": M.LOADER_SHA, "bytes": 236616}])
+        self.assertEqual(M.parse_loader_output((resolved + " (0x1234)\n").encode(), inventory)[0]["path"], resolved)
+        for field, value in (("bytes", 236617), ("sha256", "a" * 64)):
+            changed = {alias: dict(row), resolved: dict(row)}
+            changed[alias][field] = value
+            with self.subTest(field=field), self.assertRaises(M.Held):
+                M.parse_loader_output(raw, changed)
+        for bad in (raw.replace(alias.encode(), b"/outside/loader"),
+                    raw.replace(resolved.encode(), b"/outside/loader"), raw + raw,
+                    raw.replace(alias.encode(), b"/lib64/../ld-linux-x86-64.so.2"),
+                    raw.replace(alias.encode(), b"/lib64//ld-linux-x86-64.so.2")):
+            with self.subTest(raw=bad), self.assertRaises(M.Held):
+                M.parse_loader_output(bad, inventory)
+
+    def test_native_probe_lists_then_versions_and_preserves_all_file_inputs(self):
+        inventory = self.inventory_fixture(); ids = {"fixture": [1]}
+        doc = {"packages": [dict(M.READELF_ROW)], "profile": {},
+               "closedInputSha256": M.sha(M.canonical(inventory))}
+        with patch.object(M, "native_context"), \
+             patch.object(M, "native_inventory", return_value=(inventory, ids)), \
+             patch.object(M, "native_command", side_effect=[self.loader_fixture(), M.VERSION_OUTPUT]) as command:
+            result = M.execute_native_probe(doc, None)
+        self.assertEqual([c.args[0] for c in command.call_args_list], ["list", "version"])
+        self.assertTrue(result["potentialAcquiredCodeExecution"])
+        self.assertFalse(result["completeMappingHistoryProven"])
+        self.assertFalse(result["executableMemoryProvenanceProven"])
+        self.assertFalse(result["phpExecuted"])
+        self.assertFalse(result["securityGatePass"])
+        self.assertFalse(result["publicationAuthorized"])
+        self.assertTrue(result["runtimeAndToolchainExecution"])
+
+    def test_bad_list_missing_library_or_changed_inputs_never_reaches_version(self):
+        inventory = self.inventory_fixture(); ids = {"fixture": [1]}
+        doc = {"packages": [dict(M.READELF_ROW)], "profile": {},
+               "closedInputSha256": M.sha(M.canonical(inventory))}
+        for value in (b"UNKNOWN\n", M.Held("native_missing_library")):
+            with patch.object(M, "native_context"), \
+                 patch.object(M, "native_inventory", return_value=(inventory, ids)), \
+                 patch.object(M, "native_command", side_effect=[value] if isinstance(value, bytes) else value) as command, \
+                 self.assertRaises(M.Held):
+                M.execute_native_probe(doc, None)
+            self.assertEqual(command.call_count, 1)
+        changed = {**ids, "unexpected": [2]}
+        with patch.object(M, "native_context"), \
+             patch.object(M, "native_inventory", side_effect=[(inventory, ids), (inventory, changed)]), \
+             patch.object(M, "native_command", return_value=self.loader_fixture()) as command, \
+             self.assertRaisesRegex(M.Held, "native_inventory"):
+            M.execute_native_probe(doc, None)
+        self.assertEqual(command.call_count, 1)
+
+    def test_partial_unrecognized_version_or_after_change_is_held(self):
+        inventory = self.inventory_fixture(); ids = {"fixture": [1]}
+        doc = {"packages": [dict(M.READELF_ROW)], "profile": {},
+               "closedInputSha256": M.sha(M.canonical(inventory))}
+        for version in (b"GNU readelf 2.42\n", M.VERSION_OUTPUT[:-1], M.VERSION_OUTPUT + b"UNKNOWN\n"):
+            with patch.object(M, "native_context"), \
+                 patch.object(M, "native_inventory", return_value=(inventory, ids)), \
+                 patch.object(M, "native_command", side_effect=[self.loader_fixture(), version]), \
+                 self.assertRaisesRegex(M.Held, "native_output"):
+                M.execute_native_probe(doc, None)
+        with patch.object(M, "native_context"), \
+             patch.object(M, "native_inventory", side_effect=[(inventory, ids), (inventory, ids),
+                                                             (inventory, {"changed": [1]})]), \
+             patch.object(M, "native_command", side_effect=[self.loader_fixture(), M.VERSION_OUTPUT]), \
+             self.assertRaisesRegex(M.Held, "native_inventory"):
+            M.execute_native_probe(doc, None)
+
+    def native_process_fixture(self, code, expected=None, timeout=False, extra_pid=False):
+        real = subprocess.Popen
+        children, commands = [], []
+        def spawn(argv, **kw):
+            commands.append((argv, kw["env"], kw["cwd"]))
+            # Only the toy process runs in this private fixture directory, never host /work.
+            kw = dict(kw, cwd=self.root)
+            child = real([sys.executable, "-I", "-B", "-c", code], **kw)
+            children.append(child)
+            return child
+        with patch.object(M.subprocess, "Popen", side_effect=spawn), \
+             patch.object(M.os, "listdir", return_value=["1", "9"] if extra_pid else ["1"]):
+            if timeout:
+                with patch.object(M.time, "monotonic", side_effect=[0, 11]), \
+                     self.assertRaisesRegex(M.Held, "native_deadline"):
+                    M.native_command("list", [0])
+            elif expected:
+                with self.assertRaisesRegex(M.Held, expected):
+                    M.native_command("list", [0])
+            else:
+                self.assertEqual(M.native_command("list", [0]), b"fixture\n")
+        for child in children:
+            self.assertIsNotNone(child.poll())
+            with self.assertRaises(ProcessLookupError):
+                os.killpg(child.pid, 0)
+        argv, env, cwd = commands[0]
+        self.assertEqual(argv, [M.LOADER, "--inhibit-cache", "--library-path",
+                               "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu", "--list", "/analyzer/readelf"])
+        self.assertEqual(env, {"PATH": "/usr/bin:/bin", "HOME": "/work", "TMPDIR": "/tmp", "LC_ALL": "C"})
+        self.assertEqual(cwd, "/work")
+
+    def test_native_mocked_command_has_exact_args_and_owned_terminal(self):
+        self.native_process_fixture("import os;os.write(1,b'fixture\\n')")
+
+    def test_native_mocked_timeout_stderr_nonzero_and_output_cap_refuse_terminal(self):
+        self.native_process_fixture("import time;time.sleep(20)", timeout=True)
+        self.native_process_fixture("import os;os.write(2,b'libX.so: cannot open shared object')",
+                                    "native_missing_library")
+        self.native_process_fixture("raise SystemExit(1)", "native_nonzero")
+        self.native_process_fixture("import os;os.write(1,b'x'*70000)", "native_output_cap")
+        self.native_process_fixture("import os;os.write(1,b'fixture\\n')", "native_terminal", extra_pid=True)
+
+    def test_native_context_rejects_writable_work_or_executable_tmp(self):
+        for work, tmp in ((0, os.ST_NOEXEC), (os.ST_RDONLY, 0)):
+            with patch.object(M, "context"), \
+                 patch.object(M.os, "statvfs", side_effect=lambda path: type("V", (), {
+                     "f_flag": work if path == "/work" else tmp})()), \
+                 self.assertRaisesRegex(M.Held, "native_isolation"):
+                M.native_context({})
+
+
+    def test_closed_675_file_inventory_and_unknown_extra_or_link_refuse(self):
+        import types
+        walks = [("/", ["base", "analyzer", "usr"], []),
+                 ("/base", [], ["f" + str(i) for i in range(673)]),
+                 ("/analyzer", [], ["readelf"]),
+                 ("/usr/lib/x86_64-linux-gnu", [], ["ld-linux-x86-64.so.2"])]
+        names = ["/base/f" + str(i) for i in range(673)] + [M.NATIVE_TOOL, M.LOADER]
+        data = {name: b"x" for name in names}; data[M.NATIVE_TOOL] = b"TOY"; data[M.LOADER] = b"LOAD"
+        shared = unittest.mock.Mock()
+        shared.read_regular.side_effect = lambda path, cap: (data[path], ("pin-" + path,))
+        def metadata(path):
+            return types.SimpleNamespace(st_mode=(0o100555 if path in (M.NATIVE_TOOL, M.LOADER) else
+                                                  0o100444 if path in data else 0o040555),
+                                         st_uid=0, st_gid=0, st_nlink=1)
+        with patch.object(M, "READELF_BYTES", 3), patch.object(M, "READELF_SHA", M.sha(b"TOY")), \
+             patch.object(M, "LOADER_SHA", M.sha(b"LOAD")), \
+             patch.object(M.os, "walk", return_value=walks), patch.object(M.os, "lstat", side_effect=metadata):
+            inventory, identities = M.native_inventory(shared)
+            self.assertEqual(len(inventory), 675)
+            self.assertEqual(set(inventory), set(names))
+            self.assertEqual(set(identities), set(names))
+            extra = walks + [("/unexpected", [], ["file"])]
+            with patch.object(M.os, "walk", return_value=extra), self.assertRaisesRegex(M.Held, "native_inventory"):
+                M.native_inventory(shared)
+            def symlink(path):
+                value = metadata(path)
+                if path == M.NATIVE_TOOL:
+                    value.st_mode = 0o120777
+                return value
+            with patch.object(M.os, "lstat", side_effect=symlink), self.assertRaisesRegex(M.Held, "native_inventory"):
+                M.native_inventory(shared)
+
+    def test_inventory_walk_error_refuses_instead_of_silent_missing_subtree(self):
+        def denied(*args, **kwargs):
+            kwargs["onerror"](PermissionError("SENSITIVE"))
+            return []
+        with patch.object(M.os, "walk", side_effect=denied), self.assertRaisesRegex(M.Held, "native_inventory"):
+            M.native_inventory(None)
+
+    def test_native_namespace_guard_has_closed_fds_and_refuses_unknown_fstat_error(self):
+        import types
+        values = {"/proc/net/dev": "head\nhead\n lo: 0\n", "/proc/net/route": "head\n",
+                  "/proc/net/ipv6_route": ""}
+        def source(path, *args, **kwargs):
+            return io.StringIO(values[path])
+        def fd_stat(number):
+            if number == 3:
+                raise OSError(9, "closed listing FD")
+            return object()
+        with patch.object(M, "context"), patch("builtins.open", side_effect=source), \
+             patch.object(M.os, "statvfs", return_value=types.SimpleNamespace(f_flag=os.ST_RDONLY | os.ST_NOEXEC)), \
+             patch.object(M.os, "listdir", return_value=["0", "1", "2", "3"]), \
+             patch.object(M.os, "fstat", side_effect=fd_stat):
+            M.native_context({})
+            with patch.object(M.os, "fstat", side_effect=OSError(13, "SENSITIVE")), \
+                 self.assertRaisesRegex(M.Held, "native_isolation"):
+                M.native_context({})
+            with patch.object(M.os, "fstat", return_value=object()), self.assertRaisesRegex(M.Held, "native_isolation"):
+                M.native_context({})
+
+    def test_native_main_reports_to_trusted_outer_pipe_without_writing_readonly_work(self):
+        row = dict(M.READELF_ROW)
+        document = json.dumps({"profile": {}, "packages": [row], "closedInputSha256": "a" * 64}).encode()
+        shared = unittest.mock.Mock()
+        shared.unique.side_effect = lambda pairs: dict(pairs)
+        shared.read_regular.return_value = (document, ("unchanged",))
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["inspection", "probe-readelf", "--artifact-profile", "readelf-one-v1",
+                                       "--manifest", "/inputs/inspection-manifest.json"]), \
+             patch.object(M, "runner", return_value=shared), patch.object(M, "context"), \
+             patch.object(M, "protected", side_effect=lambda path: Path(path)), \
+             patch.object(M.tempfile, "mkdtemp") as workspace, \
+             patch.object(M, "execute_native_probe", return_value={
+                 "state": "SYNTHETIC_NATIVE_ONLY", "potentialAcquiredCodeExecution": True,
+                 "phpExecuted": False, "publicationAuthorized": False}), \
+             contextlib.redirect_stdout(output):
+            self.assertEqual(M.main(), 0)
+        workspace.assert_not_called()
+        result = json.loads(output.getvalue())
+        self.assertTrue(result["runtimeAndToolchainExecution"])
+        self.assertTrue(result["potentialAcquiredCodeExecution"])
+        self.assertEqual(result["phase"], "probe-readelf")
+        self.assertFalse(result["phpExecuted"])
+        self.assertFalse(result["publicationAuthorized"])
+
+
 if __name__ == "__main__":
     unittest.main()

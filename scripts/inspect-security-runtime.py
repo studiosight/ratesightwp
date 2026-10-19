@@ -13,6 +13,7 @@ import types
 import io
 import json
 import os
+import re
 from pathlib import Path
 import selectors
 import signal
@@ -38,6 +39,17 @@ READELF_ROW = {
 }
 READELF_MEMBER = "usr/bin/x86_64-linux-gnu-readelf"
 ARTIFACT_PROFILES = ("fixed32", "readelf-one-v1")
+READELF_BYTES = 789280
+READELF_SHA = "64c58e15274bbbb5153f31078e455e9e77ee5f51489e709bba5bb788ce9df2b0"
+READELF_OUTPUT = "readelf-member.bin"
+LOADER = "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+LOADER_SHA = "c20a2dc8917c755f02b94049356320fe1f62ac7d9f8994731f807d9df39302da"
+NATIVE_TOOL = "/analyzer/readelf"
+VERSION_OUTPUT = (b"GNU readelf (GNU Binutils for Ubuntu) 2.42\n"
+                  b"Copyright (C) 2024 Free Software Foundation, Inc.\n"
+                  b"This program is free software; you may redistribute it under the terms of\n"
+                  b"the GNU General Public License version 3 or (at your option) any later version.\n"
+                  b"This program has absolutely no warranty.\n")
 RUNNER_SHA = "ab9c3682712c94731435c96529029a7e38d0c94117a5e936c647de51ea6c66ff"
 DPKG_SHA = "fc9dde782ca8309b65ab92e61d13318bf463cd1aa71daa8967b87b81b48b63d2"
 DPKG = "/usr/bin/dpkg-deb"
@@ -46,9 +58,9 @@ MAX_TAR = 256 * 1024**2
 MAX_REGULAR = 192 * 1024**2
 
 
-FAILURE_STAGES = ('phase-guard', 'acquisition-context', 'runner-load', 'manifest-protection', 'manifest-read', 'manifest-schema', 'inspection-context', 'manifest-rows', 'workspace-create', 'execute-acquisition', 'execute-inspection', 'manifest-recheck', 'report-build', 'report-write', 'complete')
-FAILURE_FUNCTIONS = ('need', 'canonical', 'sha', 'protected', 'runner', 'context', 'acquisition_context', 'manifest', 'artifact_manifest_sha', 'require_readelf_member', 'download_alarm', 'acquire', 'member_name', 'inspect_tar', 'tar_command', 'ordered', 'execute_acquisition', 'execute_inspection', 'main')
-FAILURE_REASONS = ('artifact_profile', 'readelf_member', 'acquired_set_changed', 'acquisition_directory_changed', 'acquisition_environment', 'acquisition_parent', 'acquisition_parent_required', 'archive_binding', 'archive_changed', 'archive_input_set_changed', 'archive_name', 'archive_overrun', 'archive_write', 'capabilities_present', 'content_encoding', 'download_deadline', 'dpkg_decode_failed', 'dpkg_pin', 'duplicate_member', 'environment_profile', 'escaping_link', 'expanded_byte_cap', 'host_view_exposed', 'http_length', 'http_status', 'inherited_environment', 'input_schema', 'inspection_deadline', 'inspection_parent_fixed', 'interrupted', 'invalid_root_entry', 'manifest_binding', 'manifest_bytes', 'manifest_changed', 'manifest_count', 'manifest_schema', 'member_ancestor', 'member_cap', 'member_collision', 'member_overrun', 'member_path', 'member_short', 'member_size', 'member_size_or_sparse', 'namespace_profile', 'no_new_privs_required', 'noncanonical_tool', 'nonregular_tool', 'owned_decoder_terminal_unknown', 'private_acquisition_parent', 'private_namespace_required', 'private_uid_pid_required', 'private_work_required', 'profile_contract', 'profile_schema', 'readonly_archive_inputs', 'readonly_root_required', 'redirect_refused', 'report_cap', 'report_not_confirmed', 'root_identity', 'runner_changed', 'runner_file', 'runner_pin', 'setid_member', 'special_member', 'tar_byte_cap', 'ubuntu_required', 'unknown_or_missing_archive_inputs', 'unprotected_tool', 'unsafe_link', 'whole_deadline', 'worker_pin')
+FAILURE_STAGES = ('phase-guard', 'acquisition-context', 'runner-load', 'manifest-protection', 'manifest-read', 'manifest-schema', 'inspection-context', 'manifest-rows', 'workspace-create', 'execute-acquisition', 'execute-inspection', 'execute-materialization', 'execute-native', 'manifest-recheck', 'report-build', 'report-write', 'complete')
+FAILURE_FUNCTIONS = ('need', 'canonical', 'sha', 'protected', 'runner', 'context', 'acquisition_context', 'manifest', 'artifact_manifest_sha', 'require_readelf_member', 'download_alarm', 'acquire', 'member_name', 'inspect_tar', 'tar_command', 'ordered', 'execute_acquisition', 'execute_inspection', 'execute_materialization', 'native_inventory', 'native_context', 'native_command', 'parse_loader_output', 'execute_native_probe', 'main')
+FAILURE_REASONS = ('materialized_member', 'materialized_output', 'native_profile', 'native_inventory', 'native_isolation', 'native_deadline', 'native_output_cap', 'native_terminal', 'native_stderr', 'native_nonzero', 'native_missing_library', 'native_version_error', 'native_output', 'artifact_profile', 'readelf_member', 'acquired_set_changed', 'acquisition_directory_changed', 'acquisition_environment', 'acquisition_parent', 'acquisition_parent_required', 'archive_binding', 'archive_changed', 'archive_input_set_changed', 'archive_name', 'archive_overrun', 'archive_write', 'capabilities_present', 'content_encoding', 'download_deadline', 'dpkg_decode_failed', 'dpkg_pin', 'duplicate_member', 'environment_profile', 'escaping_link', 'expanded_byte_cap', 'host_view_exposed', 'http_length', 'http_status', 'inherited_environment', 'input_schema', 'inspection_deadline', 'inspection_parent_fixed', 'interrupted', 'invalid_root_entry', 'manifest_binding', 'manifest_bytes', 'manifest_changed', 'manifest_count', 'manifest_schema', 'member_ancestor', 'member_cap', 'member_collision', 'member_overrun', 'member_path', 'member_short', 'member_size', 'member_size_or_sparse', 'namespace_profile', 'no_new_privs_required', 'noncanonical_tool', 'nonregular_tool', 'owned_decoder_terminal_unknown', 'private_acquisition_parent', 'private_namespace_required', 'private_uid_pid_required', 'private_work_required', 'profile_contract', 'profile_schema', 'readonly_archive_inputs', 'readonly_root_required', 'redirect_refused', 'report_cap', 'report_not_confirmed', 'root_identity', 'runner_changed', 'runner_file', 'runner_pin', 'setid_member', 'special_member', 'tar_byte_cap', 'ubuntu_required', 'unknown_or_missing_archive_inputs', 'unprotected_tool', 'unsafe_link', 'whole_deadline', 'worker_pin')
 
 LINK_SUBTYPES = ("overlong", "absolute", "backslash", "nul")
 LINK_METADATA_FIELDS = {"manifestSha256", "package", "version", "architecture", "archiveSha256", "section",
@@ -319,7 +331,7 @@ def canonical_absolute_symlink(target):
             all(part not in ("", ".", "..") for part in target[1:].split("/")))
 
 
-def inspect_tar(stream, budget):
+def inspect_tar(stream, budget, readelf_fd=None):
     seen, links, entries, package_bytes = set(), [], [], 0
     with tarfile.open(fileobj=stream, mode="r|") as archive:
         for item in archive:
@@ -335,6 +347,8 @@ def inspect_tar(stream, budget):
                  ("/".join(name.split("/")[:i]) for i in range(1, len(name.split("/"))))), "member_ancestor")
             need(item.isdir() or not any(x.startswith(name + "/") for x in seen), "member_collision")
             seen.add(name)
+            if readelf_fd is not None and name == READELF_MEMBER:
+                need(item.isfile() and item.size == READELF_BYTES, "materialized_member")
             need(not item.issparse() and not item.pax_headers and item.size <= 32 * 1024**2, "member_size_or_sparse")
             need(not item.mode & 0o6000, "setid_member")
             if item.isdir():
@@ -356,9 +370,17 @@ def inspect_tar(stream, budget):
                     count += len(chunk)
                     need(count <= item.size, "member_overrun")
                     digest_state.update(chunk)
+                    if readelf_fd is not None and name == READELF_MEMBER:
+                        view = memoryview(chunk)
+                        while view:
+                            written = os.write(readelf_fd, view)
+                            need(written > 0, "materialized_output")
+                            view = view[written:]
                 file.close()
                 need(count == item.size, "member_short")
                 kind, digest = "regular", digest_state.hexdigest()
+                if readelf_fd is not None and name == READELF_MEMBER:
+                    need(count == READELF_BYTES and digest == READELF_SHA, "materialized_member")
             elif item.issym() or item.islnk():
                 target = item.linkname
                 try:
@@ -393,7 +415,7 @@ def inspect_tar(stream, budget):
     return {"entries": entries, "links": links, "regularBytes": package_bytes}
 
 
-def tar_command(path, kind, cwd, deadline, budget):
+def tar_command(path, kind, cwd, deadline, budget, readelf_fd=None):
     # Maintained dpkg-deb performs ar framing and xz/zstd decompression. No extraction flags.
     argv = [DPKG, "--ctrl-tarfile" if kind == "control" else "--fsys-tarfile", str(path)]
     with tempfile.TemporaryFile(dir=cwd) as errors:
@@ -409,7 +431,8 @@ def tar_command(path, kind, cwd, deadline, budget):
         pipe = Pipe(process.stdout.fileno(), min(deadline, time.monotonic() + 30), budget)
         terminal = False
         try:
-            result = inspect_tar(pipe, budget)
+            result = (inspect_tar(pipe, budget) if readelf_fd is None else
+                      inspect_tar(pipe, budget, readelf_fd))
             # Drain to actual EOF, including tar trailer; process exit0 is also required.
             while pipe.read(65536):
                 pass
@@ -475,8 +498,9 @@ def require_readelf_member(result):
          all(c in "0123456789abcdef" for c in members[0]["sha256"]), "readelf_member")
 
 
-def execute_inspection(rows, archive_parent, folder, shared, artifact_profile="fixed32"):
+def execute_inspection(rows, archive_parent, folder, shared, artifact_profile="fixed32", readelf_fd=None):
     binding = artifact_manifest_sha(artifact_profile)
+    need(readelf_fd is None or artifact_profile == "readelf-one-v1", "artifact_profile")
     if artifact_profile != "fixed32":
         manifest(rows, artifact_profile)
     deadline = time.monotonic() + 600
@@ -496,7 +520,8 @@ def execute_inspection(rows, archive_parent, folder, shared, artifact_profile="f
         for kind in ("control", "data"):
             budget["dirs"] = set()
             try:
-                result[kind] = tar_command(path, kind, folder, deadline, budget)
+                result[kind] = (tar_command(path, kind, folder, deadline, budget) if readelf_fd is None or kind == "control" else
+                                tar_command(path, kind, folder, deadline, budget, readelf_fd))
             except Held as error:
                 if type(error) is Held and type(getattr(error, "archive_link", None)) is dict:
                     error.archive_link.update({"manifestSha256": binding, "package": row["Package"],
@@ -516,9 +541,220 @@ def execute_inspection(rows, archive_parent, folder, shared, artifact_profile="f
     return report
 
 
+def execute_materialization(rows, archive_parent, folder, shared):
+    manifest(rows, "readelf-one-v1")
+    # A fixed owned nonexecutable output, not an archive-directed extraction path.
+    directory = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    parent = os.fstat(directory)
+    fd = None
+    try:
+        need((folder.lstat().st_dev, folder.lstat().st_ino) == (parent.st_dev, parent.st_ino),
+             "materialized_output")
+        fd = os.open(READELF_OUTPUT, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=directory)
+        created = os.fstat(fd)
+        need(stat.S_ISREG(created.st_mode) and created.st_uid == os.getuid() and
+             created.st_nlink == 1 and stat.S_IMODE(created.st_mode) == 0o600, "materialized_output")
+        # Both complete archive sections and tar_command's decoder terminal guard must return.
+        report = execute_inspection(rows, archive_parent, folder, shared, "readelf-one-v1", fd)
+        os.fsync(fd)
+        final = os.fstat(fd)
+        raw, pin = shared.read_regular(folder / READELF_OUTPUT, READELF_BYTES)
+        need((created.st_dev, created.st_ino) == (final.st_dev, final.st_ino) and
+             tuple(pin) == (final.st_dev, final.st_ino, final.st_mode, final.st_nlink,
+                            final.st_size, final.st_mtime_ns, final.st_ctime_ns) and
+             len(raw) == READELF_BYTES and sha(raw) == READELF_SHA and
+             stat.S_IMODE(final.st_mode) == 0o600 and final.st_nlink == 1, "materialized_output")
+        need((folder.lstat().st_dev, folder.lstat().st_ino) == (parent.st_dev, parent.st_ino),
+             "materialized_output")
+        # No rename/chmod/promotion. Partial bytes stay ineligible unless this full report is confirmed.
+        report["state"] = "FIXED_READELF_MEMBER_PREPARED_PENDING_READONLY_HANDOFF"
+        report["materializedMember"] = {"name": READELF_OUTPUT, "bytes": READELF_BYTES,
+                                       "sha256": READELF_SHA, "inputIdentity": list(pin),
+                                       "executable": False, "eligibleForReadonlyHandoff": True}
+        report["independentReadonlyInputHandoffRequired"] = True
+        return report
+    finally:
+        if fd is not None:
+            os.close(fd)
+        os.close(directory)
+
+
+def native_inventory(shared):
+    # These are closed FILE inputs, not a complete history of executable memory or mappings.
+    inventory, identities = {}, {}
+    ignored = {"/proc", "/sys", "/dev", "/run", "/tmp", "/root"}
+    count, total = 0, 0
+    def walk_error(error):
+        raise Held("native_inventory") from None
+    for directory, dirs, files in os.walk("/", followlinks=False, onerror=walk_error):
+        dirs[:] = [name for name in dirs if os.path.join(directory, name) not in ignored]
+        for name in list(dirs):
+            path = os.path.join(directory, name)
+            st = os.lstat(path)
+            if stat.S_ISLNK(st.st_mode):
+                need(path == "/bin" and os.readlink(path) == "usr/bin", "native_inventory")
+                dirs.remove(name)
+            else:
+                need(stat.S_ISDIR(st.st_mode), "native_inventory")
+        for name in files:
+            path = os.path.join(directory, name)
+            if path == "/inputs/inspection-manifest.json":
+                continue
+            count += 1
+            need(count <= 675, "native_inventory")
+            st = os.lstat(path)
+            need(stat.S_ISREG(st.st_mode) and st.st_uid == st.st_gid == 0 and st.st_nlink == 1 and
+                 stat.S_IMODE(st.st_mode) in (0o444, 0o555), "native_inventory")
+            raw, pin = shared.read_regular(path, 16 * 1024**2)
+            total += len(raw)
+            need(total < 128 * 1024**2, "native_inventory")
+            inventory[path] = {"sha256": sha(raw), "bytes": len(raw), "mode": stat.S_IMODE(st.st_mode)}
+            identities[path] = list(pin)
+    need(count == 675 and inventory.get(NATIVE_TOOL) ==
+         {"sha256": READELF_SHA, "bytes": READELF_BYTES, "mode": 0o555}, "native_inventory")
+    need(inventory.get(LOADER, {}).get("sha256") == LOADER_SHA, "native_inventory")
+    return inventory, identities
+
+
+def native_context(profile):
+    context(profile)
+    need(os.statvfs("/work").f_flag & os.ST_RDONLY and
+         os.statvfs("/tmp").f_flag & os.ST_NOEXEC, "native_isolation")
+    def text(path):
+        with open(path) as source:
+            value = source.read(65537)
+        need(len(value) <= 65536, "native_isolation")
+        return value
+    interfaces = [line.split(":", 1)[0].strip() for line in text("/proc/net/dev").splitlines()[2:]
+                  if ":" in line]
+    need(interfaces == ["lo"] and all(row.split()[0] == "lo" for row in
+         text("/proc/net/route").splitlines()[1:] if row.strip()) and
+         all(row.split()[-1] == "lo" for row in text("/proc/net/ipv6_route").splitlines() if row.strip()),
+         "native_isolation")
+    fds = set()
+    for value in os.listdir("/proc/self/fd"):
+        try:
+            os.fstat(int(value))
+        except OSError as error:
+            need(error.errno == 9, "native_isolation")  # Only a just-closed listing FD may disappear.
+            continue
+        fds.add(int(value))
+    need(fds == {0, 1, 2}, "native_isolation")
+
+
+def native_command(kind, output_budget):
+    need(kind in ("list", "version"), "native_profile")
+    # Even --list is potentially acquired-code execution (embedded audit modules).
+    argv = [LOADER, "--inhibit-cache", "--library-path",
+            "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu"]
+    argv += ["--list", NATIVE_TOOL] if kind == "list" else [NATIVE_TOOL, "--version"]
+    process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               cwd="/work", env={"PATH": "/usr/bin:/bin", "HOME": "/work",
+                               "TMPDIR": "/tmp", "LC_ALL": "C"}, start_new_session=True, close_fds=True)
+    selector = selectors.DefaultSelector()
+    buffers = {process.stdout: bytearray(), process.stderr: bytearray()}
+    end = time.monotonic() + 10
+    try:
+        for stream in buffers:
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ)
+        while selector.get_map() or process.poll() is None:
+            need(time.monotonic() < end, "native_deadline")
+            for key, unused in selector.select(min(.02, max(0, end - time.monotonic()))):
+                chunk = os.read(key.fileobj.fileno(), 4096)
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                else:
+                    buffers[key.fileobj].extend(chunk)
+                    output_budget[0] += len(chunk)
+                    need(output_budget[0] <= 65536, "native_output_cap")
+        native = process.wait(timeout=max(.001, end - time.monotonic()))
+        out, err = bytes(buffers[process.stdout]), bytes(buffers[process.stderr])
+        need(not err, "native_missing_library" if b"cannot open shared object" in err or b"not found" in err else
+             "native_version_error" if b"version" in err else "native_stderr")
+        need(native == 0, "native_nonzero")
+        return out
+    finally:
+        selector.close()
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(process.pid, sig)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass
+        terminal = process.poll() is not None
+        try:
+            os.killpg(process.pid, 0)
+            terminal = False
+        except ProcessLookupError:
+            pass
+        for stream in buffers:
+            stream.close()
+        # A detached namespace descendant must also prevent the next command.
+        need(terminal and {v for v in os.listdir("/proc") if v.isdecimal()} == {"1"}, "native_terminal")
+
+
+def parse_loader_output(raw, inventory):
+    need(type(raw) is bytes and 0 < len(raw) <= 65536 and raw.endswith(b"\n"), "native_output")
+    try:
+        lines = raw.decode("ascii").splitlines()
+    except UnicodeError:
+        raise Held("native_output") from None
+    need(0 < len(lines) <= 256, "native_output")
+    reported, seen = [], set()
+    for line in lines:
+        if re.fullmatch(r"\s*linux-vdso\.so\.1 \(0x[0-9a-f]+\)\s*", line):
+            continue  # Allowed kernel source, not a pinned regular file or mapping-history claim.
+        match = re.fullmatch(r"\s*(?:([A-Za-z0-9_.+-]{1,128}|/[A-Za-z0-9_./+-]{1,512})\s+=>\s+)?"
+                             r"(/[A-Za-z0-9_./+-]{1,512})\s+\(0x[0-9a-f]+\)\s*", line)
+        need(match is not None, "native_missing_library" if "not found" in line else "native_output")
+        path = match.group(2)
+        need(path in inventory and path not in seen, "native_output")
+        alias = match.group(1)
+        if alias is not None and alias.startswith("/"):
+            need(all(part not in ("", ".", "..") for part in alias.split("/")[1:])
+                 and alias in inventory, "native_output")
+            need(inventory[alias]["bytes"] == inventory[path]["bytes"]
+                 and inventory[alias]["sha256"] == inventory[path]["sha256"], "native_output")
+        seen.add(path)
+        reported.append({"path": path, "sha256": inventory[path]["sha256"],
+                         "bytes": inventory[path]["bytes"]})
+    need(bool(reported), "native_output")
+    return reported
+
+
+def execute_native_probe(document, shared):
+    manifest(document["packages"], "readelf-one-v1")
+    native_context(document["profile"])
+    before, identities = native_inventory(shared)
+    need(type(document["closedInputSha256"]) is str and
+         sha(canonical(before)) == document["closedInputSha256"], "native_inventory")
+    output_budget = [0]
+    # Candidate text corroborates a bounded diagnostic only; it is not actual mapping-history proof.
+    listed = parse_loader_output(native_command("list", output_budget), before)
+    middle, middle_ids = native_inventory(shared)
+    need(middle == before and middle_ids == identities, "native_inventory")
+    version = native_command("version", output_budget)
+    need(version == VERSION_OUTPUT, "native_output")
+    after, after_ids = native_inventory(shared)
+    need(after == before and after_ids == identities, "native_inventory")
+    return {"state": "FIXED_READELF_STARTUP_VERSION_OBSERVED_NOT_PHP_OR_SECURITY_PASS",
+            "artifactProfile": "readelf-one-v1", "manifestSha256": READELF_MANIFEST_SHA,
+            "closedInputSha256": document["closedInputSha256"], "regularFileInputs": 675,
+            "loaderDiagnosticObserved": True, "reportedObjects": listed, "version": "2.42",
+            "potentialAcquiredCodeExecution": True, "completeMappingHistoryProven": False,
+            "executableMemoryProvenanceProven": False, "runtimeAndToolchainExecution": True,
+            "phpExecuted": False, "securityGatePass": False, "publicationAuthorized": False,
+            "networkRequests": 0, "capturedOutputBytes": output_budget[0]}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=("acquire", "inspect"))
+    parser.add_argument("phase", choices=("acquire", "inspect", "materialize-readelf", "probe-readelf"))
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--artifact-profile", choices=ARTIFACT_PROFILES, default="fixed32")
     parser.add_argument("--work-parent")
@@ -526,6 +762,7 @@ def main():
     folder = None
     stage = "phase-guard"
     try:
+        need(args.phase in ("acquire", "inspect") or args.artifact_profile == "readelf-one-v1", "artifact_profile")
         if args.phase == "acquire":
             need(args.work_parent is not None, "acquisition_parent_required")
             stage = "acquisition-context"
@@ -543,28 +780,46 @@ def main():
         raw, pin = shared.read_regular(args.manifest, 32768)
         stage = "manifest-schema"
         document = json.loads(raw, object_pairs_hook=shared.unique)
-        expected = {"packages"} if args.phase == "acquire" else {"profile", "packages"}
+        expected = ({"packages"} if args.phase == "acquire" else
+                    {"profile", "packages", "closedInputSha256"} if args.phase == "probe-readelf" else
+                    {"profile", "packages"})
         need(isinstance(document, dict) and set(document) == expected, "input_schema")
-        if args.phase == "inspect":
+        if args.phase != "acquire":
             stage = "inspection-context"
             context(document["profile"])
         stage = "manifest-rows"
         rows = manifest(document["packages"], args.artifact_profile)
+        source_pin = shared.read_regular(Path(__file__), 65536)[1] if args.phase in ("materialize-readelf", "probe-readelf") else None
         stage = "workspace-create"
-        folder = Path(tempfile.mkdtemp(prefix="wp-artifacts-", dir=parent))
-        os.chmod(folder, 0o700)
+        if args.phase != "probe-readelf":
+            folder = Path(tempfile.mkdtemp(prefix="wp-artifacts-", dir=parent))
+            os.chmod(folder, 0o700)
         signal.signal(signal.SIGTERM, lambda *unused: (_ for _ in ()).throw(Held("interrupted")))
         signal.signal(signal.SIGALRM, lambda *unused: (_ for _ in ()).throw(Held("whole_deadline")))
         signal.alarm(600)
         stage = "execute-acquisition" if args.phase == "acquire" else "execute-inspection"
-        report = (execute_acquisition(rows, folder, shared, args.artifact_profile) if args.phase == "acquire" else
-                  execute_inspection(rows, Path("/inputs/archives"), folder, shared, args.artifact_profile))
+        if args.phase == "materialize-readelf":
+            stage = "execute-materialization"
+            report = execute_materialization(rows, Path("/inputs/archives"), folder, shared)
+        elif args.phase == "probe-readelf":
+            stage = "execute-native"
+            report = execute_native_probe(document, shared)
+        else:
+            report = (execute_acquisition(rows, folder, shared, args.artifact_profile) if args.phase == "acquire" else
+                      execute_inspection(rows, Path("/inputs/archives"), folder, shared, args.artifact_profile))
         stage = "manifest-recheck"
         need(shared.read_regular(args.manifest, 32768)[1] == pin, "manifest_changed")
+        if source_pin is not None:
+            need(shared.read_regular(Path(__file__), 65536)[1] == source_pin, "worker_pin")
         stage = "report-build"
-        report["runtimeAndToolchainExecution"] = False
+        report["runtimeAndToolchainExecution"] = args.phase == "probe-readelf"
         report["outerSourcePinAndTerminalSupervisionRequired"] = True
         report["phase"] = args.phase
+        if args.phase == "probe-readelf":
+            raw = canonical(report)
+            need(len(raw) <= 32768, "report_cap")
+            print(raw.decode("ascii"))
+            return 0  # Readonly /work: trusted outer parent owns the final receipt.
         output = folder / "inspection-report.json"
         raw = canonical(report)
         need(len(raw) <= 4 * 1024**2, "report_cap")
