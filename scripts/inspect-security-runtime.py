@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Two separate phases for ONE fixed PHP package set. No install or runtime assembly.
+"""Separate phases for the fixed32 set or ONE fixed readelf archive. No runtime assembly.
 
 Acquisition uses sanitized unprivileged Ubuntu HTTPS only, without an archive decoder.
 Inspection requires a protected readonly root, separate PID/network namespaces,
@@ -25,6 +25,19 @@ import time
 import urllib.request
 
 MANIFEST_SHA = "246968c8fc2565bc02ea545414447296320d25c236b9b17d8378ccfd227a4af7"
+READELF_MANIFEST_SHA = "7db12cf362407e6844695549ecc48165d3e1c6d53f5901b954bc0be13750e154"
+# Authenticated noble-updates index SHA256:
+# 1b79de5bbdc9bfffde72130dac32d60ce0a3c12d1c9d4295d9bf840462028c86
+# Complete metadata result SHA256:
+# 0e1d26823a829db2957422927e9b0286723e4879ec526171ad0b83d8bfb75109
+READELF_ROW = {
+    "Package": "binutils-x86-64-linux-gnu", "Version": "2.42-4ubuntu2.10", "Architecture": "amd64",
+    "Filename": "pool/main/b/binutils/binutils-x86-64-linux-gnu_2.42-4ubuntu2.10_amd64.deb",
+    "SHA256": "1e510a15f30208d39edcd840e48f26a77bbca7c417805eeccb1e3f7de198ef29",
+    "Size": "2462744",
+}
+READELF_MEMBER = "usr/bin/x86_64-linux-gnu-readelf"
+ARTIFACT_PROFILES = ("fixed32", "readelf-one-v1")
 RUNNER_SHA = "ab9c3682712c94731435c96529029a7e38d0c94117a5e936c647de51ea6c66ff"
 DPKG_SHA = "fc9dde782ca8309b65ab92e61d13318bf463cd1aa71daa8967b87b81b48b63d2"
 DPKG = "/usr/bin/dpkg-deb"
@@ -34,8 +47,8 @@ MAX_REGULAR = 192 * 1024**2
 
 
 FAILURE_STAGES = ('phase-guard', 'acquisition-context', 'runner-load', 'manifest-protection', 'manifest-read', 'manifest-schema', 'inspection-context', 'manifest-rows', 'workspace-create', 'execute-acquisition', 'execute-inspection', 'manifest-recheck', 'report-build', 'report-write', 'complete')
-FAILURE_FUNCTIONS = ('need', 'canonical', 'sha', 'protected', 'runner', 'context', 'acquisition_context', 'manifest', 'download_alarm', 'acquire', 'member_name', 'inspect_tar', 'tar_command', 'ordered', 'execute_acquisition', 'execute_inspection', 'main')
-FAILURE_REASONS = ('acquired_set_changed', 'acquisition_directory_changed', 'acquisition_environment', 'acquisition_parent', 'acquisition_parent_required', 'archive_binding', 'archive_changed', 'archive_input_set_changed', 'archive_name', 'archive_overrun', 'archive_write', 'capabilities_present', 'content_encoding', 'download_deadline', 'dpkg_decode_failed', 'dpkg_pin', 'duplicate_member', 'environment_profile', 'escaping_link', 'expanded_byte_cap', 'host_view_exposed', 'http_length', 'http_status', 'inherited_environment', 'input_schema', 'inspection_deadline', 'inspection_parent_fixed', 'interrupted', 'invalid_root_entry', 'manifest_binding', 'manifest_bytes', 'manifest_changed', 'manifest_count', 'manifest_schema', 'member_ancestor', 'member_cap', 'member_collision', 'member_overrun', 'member_path', 'member_short', 'member_size', 'member_size_or_sparse', 'namespace_profile', 'no_new_privs_required', 'noncanonical_tool', 'nonregular_tool', 'owned_decoder_terminal_unknown', 'private_acquisition_parent', 'private_namespace_required', 'private_uid_pid_required', 'private_work_required', 'profile_contract', 'profile_schema', 'readonly_archive_inputs', 'readonly_root_required', 'redirect_refused', 'report_cap', 'report_not_confirmed', 'root_identity', 'runner_changed', 'runner_file', 'runner_pin', 'setid_member', 'special_member', 'tar_byte_cap', 'ubuntu_required', 'unknown_or_missing_archive_inputs', 'unprotected_tool', 'unsafe_link', 'whole_deadline', 'worker_pin')
+FAILURE_FUNCTIONS = ('need', 'canonical', 'sha', 'protected', 'runner', 'context', 'acquisition_context', 'manifest', 'artifact_manifest_sha', 'require_readelf_member', 'download_alarm', 'acquire', 'member_name', 'inspect_tar', 'tar_command', 'ordered', 'execute_acquisition', 'execute_inspection', 'main')
+FAILURE_REASONS = ('artifact_profile', 'readelf_member', 'acquired_set_changed', 'acquisition_directory_changed', 'acquisition_environment', 'acquisition_parent', 'acquisition_parent_required', 'archive_binding', 'archive_changed', 'archive_input_set_changed', 'archive_name', 'archive_overrun', 'archive_write', 'capabilities_present', 'content_encoding', 'download_deadline', 'dpkg_decode_failed', 'dpkg_pin', 'duplicate_member', 'environment_profile', 'escaping_link', 'expanded_byte_cap', 'host_view_exposed', 'http_length', 'http_status', 'inherited_environment', 'input_schema', 'inspection_deadline', 'inspection_parent_fixed', 'interrupted', 'invalid_root_entry', 'manifest_binding', 'manifest_bytes', 'manifest_changed', 'manifest_count', 'manifest_schema', 'member_ancestor', 'member_cap', 'member_collision', 'member_overrun', 'member_path', 'member_short', 'member_size', 'member_size_or_sparse', 'namespace_profile', 'no_new_privs_required', 'noncanonical_tool', 'nonregular_tool', 'owned_decoder_terminal_unknown', 'private_acquisition_parent', 'private_namespace_required', 'private_uid_pid_required', 'private_work_required', 'profile_contract', 'profile_schema', 'readonly_archive_inputs', 'readonly_root_required', 'redirect_refused', 'report_cap', 'report_not_confirmed', 'root_identity', 'runner_changed', 'runner_file', 'runner_pin', 'setid_member', 'special_member', 'tar_byte_cap', 'ubuntu_required', 'unknown_or_missing_archive_inputs', 'unprotected_tool', 'unsafe_link', 'whole_deadline', 'worker_pin')
 
 LINK_SUBTYPES = ("overlong", "absolute", "backslash", "nul")
 LINK_METADATA_FIELDS = {"manifestSha256", "package", "version", "architecture", "archiveSha256", "section",
@@ -71,7 +84,11 @@ def failure_metadata(stage, error):
     result = {"stage": stage if stage in FAILURE_STAGES else "unknown", "function": function,
               "line": line, "exceptionCategory": categories.get(type(error), "unknown"), "reason": reason}
     link = getattr(error, "archive_link", None) if type(error) is Held and reason == "unsafe_link" else None
-    if type(link) is dict and set(link) == LINK_METADATA_FIELDS and link.get("manifestSha256") == MANIFEST_SHA:
+    if type(link) is dict and set(link) == LINK_METADATA_FIELDS and (link.get("manifestSha256") == MANIFEST_SHA or
+            link.get("manifestSha256") == READELF_MANIFEST_SHA and
+            all(link.get(key) == READELF_ROW[field] for key, field in
+                (("package", "Package"), ("version", "Version"), ("architecture", "Architecture"),
+                 ("archiveSha256", "SHA256")))):
         result["archiveLink"] = link
     return result
 
@@ -166,7 +183,18 @@ def acquisition_context(parent):
                              "TMPDIR": str(parent), "LC_ALL": "C"}, "acquisition_environment")
     return parent
 
-def manifest(rows):
+def artifact_manifest_sha(artifact_profile):
+    need(type(artifact_profile) is str and artifact_profile in ARTIFACT_PROFILES, "artifact_profile")
+    return MANIFEST_SHA if artifact_profile == "fixed32" else READELF_MANIFEST_SHA
+
+
+def manifest(rows, artifact_profile="fixed32"):
+    binding = artifact_manifest_sha(artifact_profile)
+    if artifact_profile == "readelf-one-v1":
+        need(isinstance(rows, list) and len(rows) == 1, "manifest_count")
+        need(type(rows[0]) is dict and set(rows[0]) == FIELDS, "manifest_schema")
+        need(rows == [READELF_ROW] and sha(canonical(rows)) == binding, "manifest_binding")
+        return rows
     need(isinstance(rows, list) and len(rows) == 32, "manifest_count")
     need(all(isinstance(x, dict) and set(x) == FIELDS for x in rows), "manifest_schema")
     need(sha(canonical(rows)) == MANIFEST_SHA, "manifest_binding")
@@ -413,7 +441,10 @@ def ordered(rows):
     return sorted(rows, key=lambda x: (x["Package"] != "php8.3-cli", x["Package"]))
 
 
-def execute_acquisition(rows, folder, shared):
+def execute_acquisition(rows, folder, shared, artifact_profile="fixed32"):
+    binding = artifact_manifest_sha(artifact_profile)
+    if artifact_profile != "fixed32":
+        manifest(rows, artifact_profile)
     deadline = time.monotonic() + 600
     archives = []
     for row in ordered(rows):
@@ -427,13 +458,27 @@ def execute_acquisition(rows, folder, shared):
     for item in archives:
         need(list(shared.read_regular(folder / item["name"], item["bytes"], deadline=deadline)[1]) ==
              item["inputIdentity"], "acquired_set_changed")
-    return {"state": "ARCHIVES_ACQUIRED_PENDING_SEPARATE_INERT_INSPECTION",
-            "manifestSha256": MANIFEST_SHA, "archives": archives,
-            "archiveDecoderInvoked": False, "independentReadonlyInputHandoffRequired": True,
-            "publicationAuthorized": False}
+    report = {"state": "ARCHIVES_ACQUIRED_PENDING_SEPARATE_INERT_INSPECTION",
+              "manifestSha256": binding, "archives": archives,
+              "archiveDecoderInvoked": False, "independentReadonlyInputHandoffRequired": True,
+              "publicationAuthorized": False}
+    if artifact_profile != "fixed32":
+        report["artifactProfile"] = artifact_profile
+    return report
 
 
-def execute_inspection(rows, archive_parent, folder, shared):
+def require_readelf_member(result):
+    members = [entry for entry in result["data"]["entries"] if entry["name"] == READELF_MEMBER]
+    need(len(members) == 1 and members[0]["kind"] == "regular" and
+         type(members[0]["bytes"]) is int and 0 < members[0]["bytes"] <= 32 * 1024**2 and
+         type(members[0]["sha256"]) is str and len(members[0]["sha256"]) == 64 and
+         all(c in "0123456789abcdef" for c in members[0]["sha256"]), "readelf_member")
+
+
+def execute_inspection(rows, archive_parent, folder, shared, artifact_profile="fixed32"):
+    binding = artifact_manifest_sha(artifact_profile)
+    if artifact_profile != "fixed32":
+        manifest(rows, artifact_profile)
     deadline = time.monotonic() + 600
     protected(archive_parent, directory=True)
     need(os.statvfs(archive_parent).f_flag & os.ST_RDONLY, "readonly_archive_inputs")
@@ -454,22 +499,28 @@ def execute_inspection(rows, archive_parent, folder, shared):
                 result[kind] = tar_command(path, kind, folder, deadline, budget)
             except Held as error:
                 if type(error) is Held and type(getattr(error, "archive_link", None)) is dict:
-                    error.archive_link.update({"manifestSha256": MANIFEST_SHA, "package": row["Package"],
+                    error.archive_link.update({"manifestSha256": binding, "package": row["Package"],
                                                "version": row["Version"], "architecture": row["Architecture"],
                                                "archiveSha256": row["SHA256"], "section": kind})
                 raise
         need(shared.read_regular(path, int(row["Size"]), deadline=deadline)[1] == pin, "archive_changed")
+        if artifact_profile == "readelf-one-v1":
+            require_readelf_member(result)
         reports.append(result)
     need(set(os.listdir(archive_parent)) == names, "archive_input_set_changed")
-    return {"state": "INERT_ARCHIVES_INSPECTED_NOT_RUNTIME_OR_SECURITY_PASS",
-            "manifestSha256": MANIFEST_SHA, "packages": reports,
-            "networkRequests": 0, "publicationAuthorized": False}
+    report = {"state": "INERT_ARCHIVES_INSPECTED_NOT_RUNTIME_OR_SECURITY_PASS",
+              "manifestSha256": binding, "packages": reports,
+              "networkRequests": 0, "publicationAuthorized": False}
+    if artifact_profile != "fixed32":
+        report["artifactProfile"] = artifact_profile
+    return report
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=("acquire", "inspect"))
     parser.add_argument("--manifest", required=True)
+    parser.add_argument("--artifact-profile", choices=ARTIFACT_PROFILES, default="fixed32")
     parser.add_argument("--work-parent")
     args = parser.parse_args()
     folder = None
@@ -498,7 +549,7 @@ def main():
             stage = "inspection-context"
             context(document["profile"])
         stage = "manifest-rows"
-        rows = manifest(document["packages"])
+        rows = manifest(document["packages"], args.artifact_profile)
         stage = "workspace-create"
         folder = Path(tempfile.mkdtemp(prefix="wp-artifacts-", dir=parent))
         os.chmod(folder, 0o700)
@@ -506,8 +557,8 @@ def main():
         signal.signal(signal.SIGALRM, lambda *unused: (_ for _ in ()).throw(Held("whole_deadline")))
         signal.alarm(600)
         stage = "execute-acquisition" if args.phase == "acquire" else "execute-inspection"
-        report = (execute_acquisition(rows, folder, shared) if args.phase == "acquire" else
-                  execute_inspection(rows, Path("/inputs/archives"), folder, shared))
+        report = (execute_acquisition(rows, folder, shared, args.artifact_profile) if args.phase == "acquire" else
+                  execute_inspection(rows, Path("/inputs/archives"), folder, shared, args.artifact_profile))
         stage = "manifest-recheck"
         need(shared.read_regular(args.manifest, 32768)[1] == pin, "manifest_changed")
         stage = "report-build"

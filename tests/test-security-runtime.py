@@ -1,4 +1,5 @@
 """Private synthetic archive/process fixtures only, never real Ubuntu/WP gate evidence."""
+import contextlib
 import hashlib
 import importlib.util
 import io
@@ -540,6 +541,194 @@ class LinkDiagnosticTests(unittest.TestCase):
         unknown.archive_link = {"text": "SENSITIVE"}
         self.assertNotIn("archiveLink", M.failure_metadata("unknown", unknown))
         self.assertNotIn("SENSITIVE", json.dumps(M.failure_metadata("unknown", unknown)))
+
+
+
+class ReadelfProfileTests(unittest.TestCase):
+    """Synthetic fixtures; never a real readelf archive or startup/security pass."""
+    setUp = InspectionTests.setUp
+    tearDown = InspectionTests.tearDown
+    row = InspectionTests.row
+    shared_reader = InspectionTests.shared_reader
+    fake_download = InspectionTests.fake_download
+
+    @contextlib.contextmanager
+    def synthetic_profile(self):
+        # Only in this fixture: replace compiled tuple with a tiny inert toy archive.
+        row = self.row()
+        binding = M.sha(M.canonical([row]))
+        with patch.object(M, "READELF_ROW", row), patch.object(M, "READELF_MANIFEST_SHA", binding):
+            yield row, binding
+
+    def test_literal_single_artifact_tuple_and_hash(self):
+        row = dict(M.READELF_ROW)
+        self.assertEqual(row, {
+            "Package": "binutils-x86-64-linux-gnu", "Version": "2.42-4ubuntu2.10", "Architecture": "amd64",
+            "Filename": "pool/main/b/binutils/binutils-x86-64-linux-gnu_2.42-4ubuntu2.10_amd64.deb",
+            "SHA256": "1e510a15f30208d39edcd840e48f26a77bbca7c417805eeccb1e3f7de198ef29",
+            "Size": "2462744",
+        })
+        self.assertEqual(M.sha(M.canonical([row])), M.READELF_MANIFEST_SHA)
+        self.assertEqual(M.manifest([row], "readelf-one-v1"), [row])
+        self.assertEqual(M.MANIFEST_SHA, "246968c8fc2565bc02ea545414447296320d25c236b9b17d8378ccfd227a4af7")
+        with self.assertRaisesRegex(M.Held, "manifest_count"):
+            M.manifest([row])  # Old/default32 profile cannot adopt the new archive.
+
+    def test_unknown_profile_and_changed_literal_fields_refuse(self):
+        for profile in ("readelf", "", "fixed14", None, [], True):
+            with self.subTest(profile=profile), self.assertRaisesRegex(M.Held, "artifact_profile"):
+                M.manifest([dict(M.READELF_ROW)], profile)
+        for key in M.FIELDS:
+            row = dict(M.READELF_ROW)
+            row[key] = "SENSITIVE_SENTINEL"
+            with self.subTest(field=key), self.assertRaisesRegex(M.Held, "manifest_binding"):
+                M.manifest([row], "readelf-one-v1")
+        for rows in ([], [dict(M.READELF_ROW)] * 2, [dict(M.READELF_ROW, Extra="refused")]):
+            with self.assertRaises(M.Held):
+                M.manifest(rows, "readelf-one-v1")
+        row = dict(M.READELF_ROW, Size=2462744)
+        with self.assertRaisesRegex(M.Held, "manifest_binding"):
+            M.manifest([row], "readelf-one-v1")
+
+    def test_default32_still_accepts_only_its_fixed_count_bytes_and_binding(self):
+        rows = [dict(self.row(), Package="toy" + str(i), Size="1") for i in range(32)]
+        rows[-1]["Size"] = str(23295740 - 31)
+        with patch.object(M, "MANIFEST_SHA", M.sha(M.canonical(rows))):
+            self.assertEqual(M.manifest(rows), rows)
+            with self.assertRaisesRegex(M.Held, "manifest_count"):
+                M.manifest(rows, "readelf-one-v1")
+            rows[-1]["Size"] = str(23295740 - 30)
+            with self.assertRaisesRegex(M.Held, "manifest_binding"):
+                M.manifest(rows)
+
+    def test_invalid_profile_refuses_before_fetch_decoder_or_input_access(self):
+        with patch.object(M, "acquire") as fetch, patch.object(M, "tar_command") as decode,              patch.object(M, "protected") as inputs:
+            with self.assertRaises(M.Held):
+                M.execute_acquisition([self.row()], self.root, None, "readelf-one-v1")
+            with self.assertRaises(M.Held):
+                M.execute_inspection([self.row()], self.root, self.root, None, "unknown")
+        fetch.assert_not_called(); decode.assert_not_called(); inputs.assert_not_called()
+
+    def test_one_acquisition_has_separate_profile_binding_and_never_decodes(self):
+        with self.synthetic_profile() as (row, binding), self.fake_download(Response()) as fetch,              patch.object(M, "tar_command") as decoder, patch.object(M, "context") as private:
+            report = M.execute_acquisition([row], self.root, self.shared_reader(), "readelf-one-v1")
+        self.assertEqual(report["artifactProfile"], "readelf-one-v1")
+        self.assertEqual(report["manifestSha256"], binding)
+        self.assertEqual(len(report["archives"]), 1)
+        self.assertEqual(fetch.return_value.open.call_count, 1)
+        self.assertFalse(report["archiveDecoderInvoked"])
+        self.assertFalse(report["publicationAuthorized"])
+        decoder.assert_not_called(); private.assert_not_called()
+
+    def test_failed_one_acquisition_retains_partial_and_never_inspects(self):
+        with self.synthetic_profile() as (row, unused), self.fake_download(Response(b"bad")),              patch.object(M, "execute_inspection") as inspect, self.assertRaisesRegex(M.Held, "archive_binding"):
+            M.execute_acquisition([row], self.root, self.shared_reader(), "readelf-one-v1")
+        self.assertEqual((self.root / "toy.deb").read_bytes(), b"bad")
+        inspect.assert_not_called()
+
+    def synthetic_sections(self):
+        data = archive([(M.READELF_MEMBER, b"TOY_NOT_EXECUTED", "file"),
+                        ("usr/bin/readelf", "x86_64-linux-gnu-readelf", "link"),
+                        ("usr/share/example", "/etc/example", "link")])
+        return ({"entries": [], "links": [], "regularBytes": 0},
+                M.inspect_tar(io.BytesIO(data), budget()))
+
+    def test_one_inert_report_hashes_regular_candidate_without_materialization(self):
+        inputs = self.root / "inputs"
+        inputs.mkdir()
+        (inputs / "toy.deb").write_bytes(b"abc")
+        control, data = self.synthetic_sections()
+        with self.synthetic_profile() as (row, binding),              patch.object(M, "protected", side_effect=lambda path, **unused: Path(path)),              patch.object(M.os, "statvfs", return_value=type("V", (), {"f_flag": os.ST_RDONLY})()),              patch.object(M, "tar_command", side_effect=[control, data]) as decode,              patch.object(M.urllib.request, "build_opener") as network,              patch.object(M.tarfile.TarFile, "extract") as extract,              patch.object(M.tarfile.TarFile, "extractall") as extractall,              patch.object(M.os, "symlink") as symlink, patch.object(M.os, "link") as hardlink:
+            report = M.execute_inspection([row], inputs, self.root, self.shared_reader(), "readelf-one-v1")
+        self.assertEqual(report["artifactProfile"], "readelf-one-v1")
+        self.assertEqual(report["manifestSha256"], binding)
+        self.assertEqual(len(report["packages"]), 1)
+        self.assertEqual(report["packages"][0]["data"], data)
+        entry = data["entries"][0]
+        self.assertEqual((entry["name"], entry["kind"], entry["bytes"], entry["sha256"]),
+                         (M.READELF_MEMBER, "regular", 16, M.sha(b"TOY_NOT_EXECUTED")))
+        self.assertEqual(data["links"][-1]["resolution"], "unresolved_absolute_symlink")
+        self.assertFalse(data["links"][-1]["materialized"])
+        self.assertEqual(report["networkRequests"], 0)
+        self.assertFalse(report["publicationAuthorized"])
+        self.assertEqual(decode.call_count, 2)
+        for forbidden in (network, extract, extractall, symlink, hardlink):
+            forbidden.assert_not_called()
+        self.assertEqual(set(self.root.iterdir()), {inputs})
+
+    def test_missing_nonregular_zero_or_invalid_readelf_candidate_is_held(self):
+        good = {"name": M.READELF_MEMBER, "kind": "regular", "bytes": 1, "sha256": M.sha(b"x")}
+        M.require_readelf_member({"data": {"entries": [good]}})
+        for entries in ([], [good, good], [dict(good, name="usr/bin/other")],
+                        [dict(good, kind="link_not_materialized")], [dict(good, bytes=0)],
+                        [dict(good, bytes=True)], [dict(good, bytes=32 * 1024**2 + 1)],
+                        [dict(good, sha256=None)], [dict(good, sha256="Z" * 64)]):
+            with self.subTest(entries=entries), self.assertRaisesRegex(M.Held, "readelf_member"):
+                M.require_readelf_member({"data": {"entries": entries}})
+
+    def test_missing_candidate_fails_actual_inspection_not_a_partial_success(self):
+        inputs = self.root / "inputs"; inputs.mkdir()
+        (inputs / "toy.deb").write_bytes(b"abc")
+        empty = {"entries": [], "links": [], "regularBytes": 0}
+        with self.synthetic_profile() as (row, unused),              patch.object(M, "protected", side_effect=lambda path, **unused: Path(path)),              patch.object(M.os, "statvfs", return_value=type("V", (), {"f_flag": os.ST_RDONLY})()),              patch.object(M, "tar_command", return_value=empty),              self.assertRaisesRegex(M.Held, "readelf_member"):
+            M.execute_inspection([row], inputs, self.root, self.shared_reader(), "readelf-one-v1")
+        self.assertEqual((inputs / "toy.deb").read_bytes(), b"abc")
+
+    def test_new_profile_link_failure_context_requires_exact_literal_binding(self):
+        error = M.Held("unsafe_link")
+        error.archive_link = {"manifestSha256": M.READELF_MANIFEST_SHA,
+                              "package": M.READELF_ROW["Package"], "version": M.READELF_ROW["Version"],
+                              "architecture": "amd64", "archiveSha256": M.READELF_ROW["SHA256"],
+                              "section": "data", "memberOrdinal": 1, "kind": "hardlink", "subtype": "absolute",
+                              "member": M.public_link_descriptor("usr/bin/readelf"),
+                              "target": M.public_link_descriptor("/usr/bin/target")}
+        self.assertIn("archiveLink", M.failure_metadata("execute-inspection", error))
+        error.archive_link["package"] = "SENSITIVE_SENTINEL"
+        self.assertNotIn("archiveLink", M.failure_metadata("execute-inspection", error))
+        self.assertNotIn("SENSITIVE", json.dumps(M.failure_metadata("execute-inspection", error)))
+
+    def test_new_profile_does_not_change_transport_archive_and_namespace_caps(self):
+        self.assertEqual((M.MAX_TAR, M.MAX_REGULAR), (256 * 1024**2, 192 * 1024**2))
+        self.assertEqual(M.DPKG, "/usr/bin/dpkg-deb")
+        self.assertEqual(M.DPKG_SHA, "fc9dde782ca8309b65ab92e61d13318bf463cd1aa71daa8967b87b81b48b63d2")
+        # Existing dangerous-input fixtures still exercise this same inspector.
+        raw = archive([("lib/link", "../../outside", "link")])
+        with self.assertRaisesRegex(M.Held, "escaping_link"):
+            M.inspect_tar(io.BytesIO(raw), budget())
+
+    def test_main_uses_explicit_profile_but_preserves_closed_success_schema(self):
+        with self.synthetic_profile() as (row, binding):
+            document = json.dumps({"profile": {}, "packages": [row]}).encode()
+            shared = unittest.mock.Mock()
+            shared.read_regular.return_value = (document, ("pin",))
+            shared.unique.side_effect = lambda pairs: dict(pairs)
+            folder = self.root / "result"
+            def temporary(**unused):
+                folder.mkdir()
+                return str(folder)
+            report = {"state": "INERT_ARCHIVES_INSPECTED_NOT_RUNTIME_OR_SECURITY_PASS",
+                      "manifestSha256": binding, "artifactProfile": "readelf-one-v1", "packages": [],
+                      "networkRequests": 0, "publicationAuthorized": False}
+            output = io.StringIO()
+            with patch.object(sys, "argv", ["inspection", "inspect", "--artifact-profile", "readelf-one-v1",
+                                           "--manifest", "/inputs/inspection-manifest.json"]),                  patch.object(M, "runner", return_value=shared), patch.object(M, "context"),                  patch.object(M, "protected", side_effect=lambda path: Path(path)),                  patch.object(M.tempfile, "mkdtemp", side_effect=temporary),                  patch.object(M, "execute_inspection", return_value=report) as inspect,                  patch.object(M.urllib.request, "build_opener") as network, contextlib.redirect_stdout(output):
+                result = M.main()
+            self.assertEqual(result, 0)
+            self.assertEqual(inspect.call_args.args[-1], "readelf-one-v1")
+            value = json.loads(output.getvalue())
+            self.assertEqual(set(value), {"state", "reportSha256", "publicationAuthorized"})
+            saved = json.loads((folder / "inspection-report.json").read_bytes())
+            self.assertEqual(saved["artifactProfile"], "readelf-one-v1")
+            self.assertFalse(saved["runtimeAndToolchainExecution"])
+            network.assert_not_called()
+
+    def test_unknown_cli_profile_refuses_before_work(self):
+        with patch.object(sys, "argv", ["inspection", "acquire", "--manifest", "/fixture",
+                                       "--artifact-profile", "caller-choice"]),              patch.object(M, "runner") as runner, contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as exited:
+                M.main()
+        self.assertEqual(exited.exception.code, 2)
+        runner.assert_not_called()
 
 
 if __name__ == "__main__":
