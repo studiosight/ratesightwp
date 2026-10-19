@@ -113,9 +113,37 @@ class InspectionTests(unittest.TestCase):
         for name in ("../../outside", "/outside", r"a\outside", "a//outside", "a/./outside", "a/C:outside"):
             with self.subTest(name=name), self.assertRaises(M.Held):
                 self.inspect(archive([(name, b"SENSITIVE", "file")]))
-        for target in ("/usr/name", "../../outside", r"a\outside"):
+        for target in ("/usr/../name", "../../outside", r"a\outside"):
             with self.subTest(target=target), self.assertRaises(M.Held):
                 self.inspect(archive([("lib/name", target, "link")]))
+
+
+    def test_absolute_symlink_is_unresolved_never_materialized_or_resolved(self):
+        with patch.object(M.os, "symlink") as symlink, patch.object(M.os, "link") as hardlink, \
+             patch.object(Path, "resolve", side_effect=AssertionError("no resolution")), \
+             patch.object(M.os.path, "realpath", side_effect=AssertionError("no resolution")):
+            result = self.inspect(archive([("usr/share/zoneinfo/localtime", "/etc/localtime", "link")]))
+        self.assertEqual(result["links"], [{"name": "usr/share/zoneinfo/localtime", "target": "/etc/localtime",
+                                          "resolution": "unresolved_absolute_symlink", "materialized": False}])
+        self.assertEqual(result["entries"][0]["kind"], "absolute_symlink_unresolved_not_materialized")
+        self.assertIsNone(result["entries"][0]["sha256"])
+        symlink.assert_not_called(); hardlink.assert_not_called()
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_noncanonical_absolute_symlink_and_absolute_hardlinks_remain_refused(self):
+        for target in ("/", "//etc/localtime", "/etc//localtime", "/etc/./localtime", "/etc/../localtime",
+                       "/etc/", "/etc\\localtime", "/" + "a" * 4096):
+            with self.subTest(targetLength=len(target)), self.assertRaises(M.Held):
+                self.inspect(archive([("usr/link", target, "link")])) if len(target)<100 else self.refuse_long(target)
+        item = tarfile.TarInfo("usr/hardlink"); item.type=tarfile.LNKTYPE; item.linkname="/etc/localtime"
+        fake=unittest.mock.MagicMock(); fake.__enter__.return_value=[item]
+        with patch.object(M.tarfile,"open",return_value=fake), self.assertRaisesRegex(M.Held,"unsafe_link"):
+            M.inspect_tar(None,budget())
+
+    def refuse_long(self, target):
+        item=tarfile.TarInfo("usr/link");item.type=tarfile.SYMTYPE;item.linkname=target
+        fake=unittest.mock.MagicMock();fake.__enter__.return_value=[item]
+        with patch.object(M.tarfile,"open",return_value=fake):M.inspect_tar(None,budget())
 
     def test_duplicate_special_and_ancestor_collisions_refused(self):
         for entries in ([("a", b"1", "file"), ("a", b"2", "file")],
@@ -453,16 +481,16 @@ class LinkDiagnosticTests(unittest.TestCase):
         for target, subtype in [("x" * 4097, "overlong"), ("/usr/bin/tool", "absolute"),
                                 ("usr\\tool", "backslash"), ("usr\x00tool", "nul")]:
             with self.subTest(subtype=subtype):
-                error = self.refused_item(target)
+                error = self.refused_item(target, hard=target.startswith("/"))
                 self.assertEqual(error.archive_link["subtype"], subtype)
                 self.assertEqual(error.archive_link["target"]["bytes"], len(target.encode()))
                 self.assertEqual(error.archive_link["target"]["sha256"], M.sha(target.encode()))
-                self.assertEqual(error.archive_link["kind"], "symlink")
+                self.assertEqual(error.archive_link["kind"], "hardlink" if target.startswith("/") else "symlink")
         self.assertEqual(self.refused_item("/usr/bin/tool", hard=True).archive_link["kind"], "hardlink")
 
     def test_unsafe_member_is_not_followed_or_materialized(self):
         with patch.object(M.os, "symlink") as symlink, patch.object(M.os, "link") as hardlink:
-            error = self.refused_item("/usr/bin/tool")
+            error = self.refused_item("/usr/bin/tool", hard=True)
         symlink.assert_not_called()
         hardlink.assert_not_called()
         self.assertEqual(error.archive_link["target"]["text"], "/usr/bin/tool")
@@ -485,7 +513,7 @@ class LinkDiagnosticTests(unittest.TestCase):
     def test_package_context_is_attached_only_on_existing_inspection_failure(self):
         row = {"Package": "fixture-public", "Version": "1", "Architecture": "amd64",
                "Filename": "pool/main/f/fixture.deb", "SHA256": M.sha(b"abc"), "Size": "3"}
-        error = self.refused_item("/usr/bin/tool")
+        error = self.refused_item("/usr/bin/tool", hard=True)
         shared = unittest.mock.Mock()
         shared.read_regular.return_value = (b"abc", ("pin",))
         with patch.object(M, "protected", side_effect=lambda path, **unused: Path(path)), \
@@ -506,7 +534,7 @@ class LinkDiagnosticTests(unittest.TestCase):
                                       "publicationAuthorized": False, "failure": metadata})), 4096)
 
     def test_unbound_link_context_and_other_failures_do_not_echo_metadata(self):
-        error = self.refused_item("/usr/bin/tool")
+        error = self.refused_item("/usr/bin/tool", hard=True)
         self.assertNotIn("archiveLink", M.failure_metadata("execute-inspection", error))
         unknown = RuntimeError("SENSITIVE")
         unknown.archive_link = {"text": "SENSITIVE"}

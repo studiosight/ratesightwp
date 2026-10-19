@@ -284,6 +284,13 @@ def member_name(name):
     return "/".join(parts)
 
 
+def canonical_absolute_symlink(target):
+    # Inert metadata only: this does not authorize assembly, target lookup or link creation.
+    return (target.startswith("/") and len(target.encode()) <= 4096 and
+            "\\" not in target and "\x00" not in target and
+            all(part not in ("", ".", "..") for part in target[1:].split("/")))
+
+
 def inspect_tar(stream, budget):
     seen, links, entries, package_bytes = set(), [], [], 0
     with tarfile.open(fileobj=stream, mode="r|") as archive:
@@ -327,7 +334,8 @@ def inspect_tar(stream, budget):
             elif item.issym() or item.islnk():
                 target = item.linkname
                 try:
-                    need(len(target.encode()) <= 4096 and not target.startswith("/") and
+                    need(len(target.encode()) <= 4096 and (not target.startswith("/") or
+                         item.issym() and canonical_absolute_symlink(target)) and
                          "\\" not in target and "\x00" not in target, "unsafe_link")
                 except Held as error:
                     subtype = ("overlong" if len(target.encode()) > 4096 else "absolute" if target.startswith("/")
@@ -336,15 +344,21 @@ def inspect_tar(stream, budget):
                                           "memberOrdinal": budget["package_members"],
                                           "member": public_link_descriptor(name), "target": public_link_descriptor(target)}
                     raise
-                parts = name.split("/")[:-1] if item.issym() else []
-                for component in target.split("/"):
-                    if component == "..":
-                        need(bool(parts), "escaping_link")
-                        parts.pop()
-                    elif component not in ("", "."):
-                        parts.append(component)
-                links.append({"name": name, "target": target})
-                kind, digest = "link_not_materialized", None
+                if target.startswith("/"):
+                    # Unresolved absolute symlinks are report data, never filesystem authority.
+                    links.append({"name": name, "target": target,
+                                  "resolution": "unresolved_absolute_symlink", "materialized": False})
+                    kind, digest = "absolute_symlink_unresolved_not_materialized", None
+                else:
+                    parts = name.split("/")[:-1] if item.issym() else []
+                    for component in target.split("/"):
+                        if component == "..":
+                            need(bool(parts), "escaping_link")
+                            parts.pop()
+                        elif component not in ("", "."):
+                            parts.append(component)
+                    links.append({"name": name, "target": target})
+                    kind, digest = "link_not_materialized", None
             else:
                 raise Held("special_member")
             entries.append({"name": name, "kind": kind, "bytes": item.size, "sha256": digest})
