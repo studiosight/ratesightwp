@@ -33,6 +33,30 @@ MAX_TAR = 256 * 1024**2
 MAX_REGULAR = 192 * 1024**2
 
 
+FAILURE_STAGES = ('phase-guard', 'acquisition-context', 'runner-load', 'manifest-protection', 'manifest-read', 'manifest-schema', 'inspection-context', 'manifest-rows', 'workspace-create', 'execute-acquisition', 'execute-inspection', 'manifest-recheck', 'report-build', 'report-write', 'complete')
+FAILURE_FUNCTIONS = ('need', 'canonical', 'sha', 'protected', 'runner', 'context', 'acquisition_context', 'manifest', 'download_alarm', 'acquire', 'member_name', 'inspect_tar', 'tar_command', 'ordered', 'execute_acquisition', 'execute_inspection', 'main')
+FAILURE_REASONS = ('acquired_set_changed', 'acquisition_directory_changed', 'acquisition_environment', 'acquisition_parent', 'acquisition_parent_required', 'archive_binding', 'archive_changed', 'archive_input_set_changed', 'archive_name', 'archive_overrun', 'archive_write', 'capabilities_present', 'content_encoding', 'download_deadline', 'dpkg_decode_failed', 'dpkg_pin', 'duplicate_member', 'environment_profile', 'escaping_link', 'expanded_byte_cap', 'host_view_exposed', 'http_length', 'http_status', 'inherited_environment', 'input_schema', 'inspection_deadline', 'inspection_parent_fixed', 'interrupted', 'invalid_root_entry', 'manifest_binding', 'manifest_bytes', 'manifest_changed', 'manifest_count', 'manifest_schema', 'member_ancestor', 'member_cap', 'member_collision', 'member_overrun', 'member_path', 'member_short', 'member_size', 'member_size_or_sparse', 'namespace_profile', 'no_new_privs_required', 'noncanonical_tool', 'nonregular_tool', 'owned_decoder_terminal_unknown', 'private_acquisition_parent', 'private_namespace_required', 'private_uid_pid_required', 'private_work_required', 'profile_contract', 'profile_schema', 'readonly_archive_inputs', 'readonly_root_required', 'redirect_refused', 'report_cap', 'report_not_confirmed', 'root_identity', 'runner_changed', 'runner_file', 'runner_pin', 'setid_member', 'special_member', 'tar_byte_cap', 'ubuntu_required', 'unknown_or_missing_archive_inputs', 'unprotected_tool', 'unsafe_link', 'whole_deadline', 'worker_pin')
+
+def failure_metadata(stage, error):
+    # Closed source-only diagnostics; never format an exception or expose its arguments.
+    categories = {Held: "guard-refused", PermissionError: "permission", FileNotFoundError: "missing-file",
+                  OSError: "os-error", ValueError: "value-error", TypeError: "type-error",
+                  RuntimeError: "runtime-error", ImportError: "import-error",
+                  ModuleNotFoundError: "module-missing", json.JSONDecodeError: "json-invalid"}
+    reason = error.args[0] if type(error) is Held and len(error.args) == 1 else None
+    reason = reason if type(reason) is str and reason in FAILURE_REASONS else "unknown"
+    function, line = "unknown", 0
+    frame = error.__traceback__
+    while frame is not None:
+        code = frame.tb_frame.f_code
+        if code.co_filename == __file__ and code.co_name in FAILURE_FUNCTIONS and code.co_name != "need":
+            function = code.co_name
+            line = frame.tb_lineno if 0 < frame.tb_lineno <= 10000 else 0
+        frame = frame.tb_next
+    return {"stage": stage if stage in FAILURE_STAGES else "unknown", "function": function,
+            "line": line, "exceptionCategory": categories.get(type(error), "unknown"), "reason": reason}
+
+
 class Held(Exception):
     pass
 
@@ -401,37 +425,51 @@ def main():
     parser.add_argument("--work-parent")
     args = parser.parse_args()
     folder = None
+    stage = "phase-guard"
     try:
         if args.phase == "acquire":
             need(args.work_parent is not None, "acquisition_parent_required")
+            stage = "acquisition-context"
             parent = acquisition_context(args.work_parent)
+            stage = "runner-load"
             shared = runner(private=False)
         else:
             need(args.work_parent is None, "inspection_parent_fixed")
+            stage = "runner-load"
             shared = runner()
+            stage = "manifest-protection"
             protected(args.manifest)
             parent = Path("/work")
+        stage = "manifest-read"
         raw, pin = shared.read_regular(args.manifest, 32768)
+        stage = "manifest-schema"
         document = json.loads(raw, object_pairs_hook=shared.unique)
         expected = {"packages"} if args.phase == "acquire" else {"profile", "packages"}
         need(isinstance(document, dict) and set(document) == expected, "input_schema")
         if args.phase == "inspect":
+            stage = "inspection-context"
             context(document["profile"])
+        stage = "manifest-rows"
         rows = manifest(document["packages"])
+        stage = "workspace-create"
         folder = Path(tempfile.mkdtemp(prefix="wp-artifacts-", dir=parent))
         os.chmod(folder, 0o700)
         signal.signal(signal.SIGTERM, lambda *unused: (_ for _ in ()).throw(Held("interrupted")))
         signal.signal(signal.SIGALRM, lambda *unused: (_ for _ in ()).throw(Held("whole_deadline")))
         signal.alarm(600)
+        stage = "execute-acquisition" if args.phase == "acquire" else "execute-inspection"
         report = (execute_acquisition(rows, folder, shared) if args.phase == "acquire" else
                   execute_inspection(rows, Path("/inputs/archives"), folder, shared))
+        stage = "manifest-recheck"
         need(shared.read_regular(args.manifest, 32768)[1] == pin, "manifest_changed")
+        stage = "report-build"
         report["runtimeAndToolchainExecution"] = False
         report["outerSourcePinAndTerminalSupervisionRequired"] = True
         report["phase"] = args.phase
         output = folder / "inspection-report.json"
         raw = canonical(report)
         need(len(raw) <= 4 * 1024**2, "report_cap")
+        stage = "report-write"
         fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         try:
             with os.fdopen(fd, "wb") as target:
@@ -440,11 +478,13 @@ def main():
                 os.fsync(target.fileno())
         except BaseException:
             raise Held("report_not_confirmed") from None
+        stage = "complete"
         print(json.dumps({"state": report["state"], "reportSha256": sha(raw), "publicationAuthorized": False}))
         return 0
-    except BaseException:
+    except BaseException as error:
         # Never delete own workspace on failure/unknown child state or echo exceptions.
-        print(json.dumps({"state": "HELD_RETAIN_OWNED_WORKSPACE", "publicationAuthorized": False}))
+        print(json.dumps({"state": "HELD_RETAIN_OWNED_WORKSPACE", "publicationAuthorized": False,
+                          "failure": failure_metadata(stage, error)}))
         return 2
     finally:
         signal.alarm(0)

@@ -332,5 +332,107 @@ class InspectionTests(unittest.TestCase):
         self.assertNotIn('"--raw-extract"', source)
 
 
+class DiagnosticTests(unittest.TestCase):
+    def capture_main(self):
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["inspection", "inspect", "--manifest", "/inputs/inspection-manifest.json"]), \
+             __import__("contextlib").redirect_stdout(output):
+            result = M.main()
+        return result, json.loads(output.getvalue())
+
+    def test_known_guard_reason_and_real_source_location(self):
+        try:
+            with patch.object(M.os, "getuid", return_value=0):
+                M.context({})
+        except M.Held as error:
+            value = M.failure_metadata("inspection-context", error)
+        self.assertEqual(value["reason"], "private_uid_pid_required")
+        self.assertEqual(value["function"], "context")
+        self.assertEqual(value["exceptionCategory"], "guard-refused")
+        self.assertTrue(0 < value["line"] <= 10000)
+        self.assertNotIn("/", json.dumps(value))
+
+    def test_unknown_reason_stage_and_exception_text_never_echoed(self):
+        for error in (M.Held("SENSITIVE_PATH_TOKEN"), RuntimeError("SENSITIVE_PATH_TOKEN"),
+                      PermissionError("SENSITIVE_PATH_TOKEN")):
+            value = M.failure_metadata("SENSITIVE_PATH_TOKEN", error)
+            self.assertEqual(value["reason"], "unknown")
+            self.assertEqual(value["stage"], "unknown")
+            self.assertNotIn("SENSITIVE", json.dumps(value))
+            self.assertEqual(set(value), {"stage", "function", "line", "exceptionCategory", "reason"})
+            self.assertLess(len(json.dumps(value)), 256)
+
+    def test_exception_formatting_is_never_invoked(self):
+        class PrivateError(Exception):
+            def __str__(self):
+                raise AssertionError("must not format exception")
+        value = M.failure_metadata("runner-load", PrivateError("SENSITIVE"))
+        self.assertEqual(value["exceptionCategory"], "unknown")
+        self.assertEqual(value["reason"], "unknown")
+        self.assertNotIn("PrivateError", json.dumps(value))
+
+    def test_actual_main_runner_refusal_has_no_downstream_work(self):
+        with patch.object(M, "runner", side_effect=M.Held("runner_pin")), \
+             patch.object(M, "context") as context, patch.object(M, "execute_inspection") as inspect, \
+             patch.object(M, "execute_acquisition") as acquire, patch.object(M.tempfile, "mkdtemp") as temp:
+            result, value = self.capture_main()
+        self.assertEqual(result, 2)
+        self.assertEqual(value["state"], "HELD_RETAIN_OWNED_WORKSPACE")
+        self.assertFalse(value["publicationAuthorized"])
+        self.assertEqual(value["failure"]["stage"], "runner-load")
+        self.assertEqual(value["failure"]["reason"], "runner_pin")
+        for downstream in (context, inspect, acquire, temp):
+            downstream.assert_not_called()
+
+    def shared(self):
+        document = json.dumps({"packages": [], "profile": {}}).encode()
+        shared = unittest.mock.Mock()
+        shared.read_regular.return_value = (document, ("fixture-pin",))
+        shared.unique.side_effect = lambda pairs: dict(pairs)
+        return shared
+
+    def test_actual_main_context_guard_is_visible_before_workspace(self):
+        with patch.object(M, "runner", return_value=self.shared()), \
+             patch.object(M, "protected", side_effect=lambda path: Path(path)), \
+             patch.object(M.os, "getuid", return_value=0), patch.object(M.tempfile, "mkdtemp") as temp, \
+             patch.object(M, "execute_inspection") as inspect, patch.object(M.urllib.request, "build_opener") as network:
+            result, value = self.capture_main()
+        self.assertEqual(result, 2)
+        self.assertEqual(value["failure"]["stage"], "inspection-context")
+        self.assertEqual(value["failure"]["function"], "context")
+        self.assertEqual(value["failure"]["reason"], "private_uid_pid_required")
+        for downstream in (temp, inspect, network):
+            downstream.assert_not_called()
+
+    def test_actual_main_unknown_failure_has_no_private_exception(self):
+        with patch.object(M, "runner", side_effect=RuntimeError("SENSITIVE_PATH_TOKEN")):
+            result, value = self.capture_main()
+        self.assertEqual(result, 2)
+        self.assertEqual(value["failure"]["reason"], "unknown")
+        self.assertNotIn("SENSITIVE", json.dumps(value))
+
+    def test_synthetic_success_output_schema_unchanged(self):
+        # Existing guards are mocked ONLY in this private source fixture. No real archives/runtime.
+        with tempfile.TemporaryDirectory(prefix="wp-diagnostic-fixture-", dir=SCRATCH) as own:
+            folder = Path(own) / "owned-result"
+            def temporary(**unused):
+                folder.mkdir()
+                return str(folder)
+            with patch.object(M, "runner", return_value=self.shared()), \
+                 patch.object(M, "protected", side_effect=lambda path: Path(path)), \
+                 patch.object(M, "context"), patch.object(M, "manifest", return_value=[]), \
+                 patch.object(M.tempfile, "mkdtemp", side_effect=temporary), \
+                 patch.object(M, "execute_inspection", return_value={"state": "SYNTHETIC_ONLY"}), \
+                 patch.object(M.urllib.request, "build_opener") as network:
+                result, value = self.capture_main()
+            self.assertEqual(result, 0)
+            self.assertEqual(set(value), {"state", "reportSha256", "publicationAuthorized"})
+            self.assertEqual(value["state"], "SYNTHETIC_ONLY")
+            self.assertFalse(value["publicationAuthorized"])
+            self.assertEqual(len(value["reportSha256"]), 64)
+            network.assert_not_called()
+            self.assertTrue((folder / "inspection-report.json").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()
