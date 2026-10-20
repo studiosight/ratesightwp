@@ -1088,13 +1088,17 @@ class MaterializationAndNativeTests(unittest.TestCase):
                 M.native_context({})
 
 
-    def test_closed_677_file_inventory_and_unknown_extra_or_link_refuse(self):
+    def test_closed_679_file_inventory_and_missing_or_unsafe_copies_refuse(self):
         import types
+        import copy
         walks = [("/", ["base", "analyzer", "usr"], []),
                  ("/base", [], ["f" + str(i) for i in range(673)]),
                  ("/analyzer", [], ["readelf"]),
-                 ("/usr/lib/x86_64-linux-gnu", [], ["ld-linux-x86-64.so.2", "libctf-nobfd.so.0.0.0", "libctf-nobfd.so.0"])]
-        names = ["/base/f" + str(i) for i in range(673)] + [M.NATIVE_TOOL, M.LOADER] + list(M.CTF_COPY_DESTINATIONS)
+                 ("/usr/lib/x86_64-linux-gnu", [],
+                  ["ld-linux-x86-64.so.2", "libctf-nobfd.so.0.0.0", "libctf-nobfd.so.0",
+                   "libsframe.so.1.0.0", "libsframe.so.1"])]
+        names = (["/base/f" + str(i) for i in range(673)] + [M.NATIVE_TOOL, M.LOADER] +
+                 list(M.CTF_COPY_DESTINATIONS) + list(M.LIBSFRAME_NATIVE_COPY_DESTINATIONS))
         data = {name: b"x" for name in names}; data[M.NATIVE_TOOL] = b"TOY"; data[M.LOADER] = b"LOAD"
         shared = unittest.mock.Mock()
         shared.read_regular.side_effect = lambda path, cap: (data[path], ("pin-" + path,))
@@ -1105,21 +1109,72 @@ class MaterializationAndNativeTests(unittest.TestCase):
         with patch.object(M, "READELF_BYTES", 3), patch.object(M, "READELF_SHA", M.sha(b"TOY")), \
              patch.object(M, "LOADER_SHA", M.sha(b"LOAD")), \
              patch.object(M, "CTF_BYTES", 1), patch.object(M, "CTF_SHA", M.sha(b"x")), \
+             patch.object(M, "LIBSFRAME_BYTES", 1), patch.object(M, "LIBSFRAME_SHA", M.sha(b"x")), \
              patch.object(M.os, "walk", return_value=walks), patch.object(M.os, "lstat", side_effect=metadata):
             inventory, identities = M.native_inventory(shared)
-            self.assertEqual(len(inventory), 677)
+            self.assertEqual(len(inventory), 679)
             self.assertEqual(set(inventory), set(names))
             self.assertEqual(set(identities), set(names))
+            for path in M.LIBSFRAME_NATIVE_COPY_DESTINATIONS:
+                self.assertEqual(inventory[path], {"sha256": M.sha(b"x"), "bytes": 1, "mode": 0o444})
+                for failure in ("absent", "wrong-hash", "executable", "symlink", "hardlink"):
+                    with self.subTest(path=path, failure=failure):
+                        altered = copy.deepcopy(walks)
+                        if failure == "absent":
+                            altered[-1][2].remove(path.rsplit("/", 1)[-1])
+                        def unsafe(candidate):
+                            value = metadata(candidate)
+                            if candidate == path:
+                                if failure == "executable": value.st_mode = 0o100555
+                                elif failure == "symlink": value.st_mode = 0o120777
+                                elif failure == "hardlink": value.st_nlink = 2
+                            return value
+                        previous = data[path]
+                        if failure == "wrong-hash": data[path] = b"y"
+                        try:
+                            with patch.object(M.os, "walk", return_value=altered), \
+                                 patch.object(M.os, "lstat", side_effect=unsafe), \
+                                 self.assertRaisesRegex(M.Held, "native_inventory"):
+                                M.native_inventory(shared)
+                        finally:
+                            data[path] = previous
             extra = walks + [("/unexpected", [], ["file"])]
             with patch.object(M.os, "walk", return_value=extra), self.assertRaisesRegex(M.Held, "native_inventory"):
                 M.native_inventory(shared)
             def symlink(path):
                 value = metadata(path)
-                if path == M.NATIVE_TOOL:
-                    value.st_mode = 0o120777
+                if path == M.NATIVE_TOOL: value.st_mode = 0o120777
                 return value
             with patch.object(M.os, "lstat", side_effect=symlink), self.assertRaisesRegex(M.Held, "native_inventory"):
                 M.native_inventory(shared)
+
+    def test_native_679_report_keeps_fixed_list_inventory_version_inventory_order(self):
+        # Synthetic inventories/commands only; no acquired ELF or actual native startup.
+        inventory = self.inventory_fixture()
+        inventory.update({"/fixture/input" + str(i): {"sha256": "b" * 64, "bytes": 1, "mode": 0o444}
+                          for i in range(678)})
+        identities = {"fixture": [1]}; events = []
+        def inventory_read(shared):
+            events.append("inventory")
+            return inventory, identities
+        def command(kind, budget):
+            events.append(kind)
+            raw = self.loader_fixture() if kind == "list" else M.VERSION_OUTPUT
+            budget[0] += len(raw)
+            return raw
+        document = {"packages": [dict(M.READELF_ROW)], "profile": {},
+                    "closedInputSha256": M.sha(M.canonical(inventory))}
+        with patch.object(M, "native_context", side_effect=lambda profile: events.append("context")), \
+             patch.object(M, "native_inventory", side_effect=inventory_read), \
+             patch.object(M, "native_command", side_effect=command):
+            report = M.execute_native_probe(document, None)
+        self.assertEqual(events, ["context", "inventory", "list", "inventory", "version", "inventory"])
+        self.assertEqual(report["regularFileInputs"], 679)
+        self.assertFalse(report["completeMappingHistoryProven"])
+        self.assertFalse(report["executableMemoryProvenanceProven"])
+        self.assertFalse(report["phpExecuted"])
+        self.assertFalse(report["securityGatePass"])
+        self.assertFalse(report["publicationAuthorized"])
 
     def test_inventory_walk_error_refuses_instead_of_silent_missing_subtree(self):
         def denied(*args, **kwargs):

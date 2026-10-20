@@ -47,6 +47,7 @@ LIBSFRAME_ALIAS_MEMBER = "usr/lib/x86_64-linux-gnu/libsframe.so.1"
 LIBSFRAME_BYTES = 35168
 LIBSFRAME_SHA = "1693a2dbd77c909d279ae34aa9b5d8d08d97f116f8d0ed724063df11151b3c69"
 LIBSFRAME_OUTPUT = "libsframe-member.bin"
+LIBSFRAME_NATIVE_COPY_DESTINATIONS = ("/" + LIBSFRAME_MEMBER, "/" + LIBSFRAME_ALIAS_MEMBER)
 ARTIFACT_PROFILES = ("fixed32", "readelf-one-v1", "ctf-one-v1", "libsframe-one-v1")
 READELF_BYTES = 789280
 READELF_SHA = "64c58e15274bbbb5153f31078e455e9e77ee5f51489e709bba5bb788ce9df2b0"
@@ -682,7 +683,7 @@ def native_inventory(shared):
             if path == "/inputs/inspection-manifest.json":
                 continue
             count += 1
-            need(count <= 677, "native_inventory")
+            need(count <= 679, "native_inventory")
             st = os.lstat(path)
             need(stat.S_ISREG(st.st_mode) and st.st_uid == st.st_gid == 0 and st.st_nlink == 1 and
                  stat.S_IMODE(st.st_mode) in (0o444, 0o555), "native_inventory")
@@ -691,10 +692,12 @@ def native_inventory(shared):
             need(total < 128 * 1024**2, "native_inventory")
             inventory[path] = {"sha256": sha(raw), "bytes": len(raw), "mode": stat.S_IMODE(st.st_mode)}
             identities[path] = list(pin)
-    need(count == 677 and inventory.get(NATIVE_TOOL) ==
+    need(count == 679 and inventory.get(NATIVE_TOOL) ==
          {"sha256": READELF_SHA, "bytes": READELF_BYTES, "mode": 0o555}, "native_inventory")
     need(inventory.get(LOADER, {}).get("sha256") == LOADER_SHA, "native_inventory")
     require_ctf_regular_copies(inventory)
+    expected = {"sha256": LIBSFRAME_SHA, "bytes": LIBSFRAME_BYTES, "mode": 0o444}
+    need(all(inventory.get(path) == expected for path in LIBSFRAME_NATIVE_COPY_DESTINATIONS), "native_inventory")
     return inventory, identities
 
 
@@ -849,7 +852,7 @@ def execute_native_probe(document, shared):
     need(after == before and after_ids == identities, "native_inventory")
     return {"state": "FIXED_READELF_STARTUP_VERSION_OBSERVED_NOT_PHP_OR_SECURITY_PASS",
             "artifactProfile": "readelf-one-v1", "manifestSha256": READELF_MANIFEST_SHA,
-            "closedInputSha256": document["closedInputSha256"], "regularFileInputs": 677,
+            "closedInputSha256": document["closedInputSha256"], "regularFileInputs": 679,
             "loaderDiagnosticObserved": True, "reportedObjects": listed, "version": "2.42",
             "potentialAcquiredCodeExecution": True, "completeMappingHistoryProven": False,
             "executableMemoryProvenanceProven": False, "runtimeAndToolchainExecution": True,
