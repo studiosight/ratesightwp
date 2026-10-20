@@ -544,6 +544,43 @@ class LinkDiagnosticTests(unittest.TestCase):
 
 
 
+class CtfProfileTests(unittest.TestCase):
+    """Pure binding/refusal checks; no acquisition, decoder, namespace or native startup."""
+    def test_exact_tuple_and_profile_separation(self):
+        expected = {'Package': 'libctf-nobfd0', 'Version': '2.42-4ubuntu2.10', 'Architecture': 'amd64', 'Filename': 'pool/main/b/binutils/libctf-nobfd0_2.42-4ubuntu2.10_amd64.deb', 'SHA256': 'da352eb7fa6c4369d2a6c1e5e680f574eda2e38576563326b18d9e47e61c4078', 'Size': '98012'}
+        self.assertEqual(M.CTF_ROW, expected)
+        self.assertEqual(M.sha(M.canonical([expected])), M.CTF_MANIFEST_SHA)
+        self.assertEqual(M.CTF_MANIFEST_SHA, "f63599229e0964931b6dece97a6ecadfd3e98c4d221aacf86797b22f5e587e5e")
+        self.assertEqual(M.manifest([expected], "ctf-one-v1"), [expected])
+        for profile in ("fixed32", "readelf-one-v1"):
+            with self.subTest(profile=profile), self.assertRaises(M.Held):
+                M.manifest([expected], profile)
+        with self.assertRaises(M.Held):
+            M.manifest([dict(M.READELF_ROW)], "ctf-one-v1")
+
+    def test_modified_fields_types_count_and_schema_refuse(self):
+        for key in M.FIELDS:
+            changed = dict(M.CTF_ROW)
+            changed[key] = "changed"
+            with self.subTest(field=key), self.assertRaises(M.Held):
+                M.manifest([changed], "ctf-one-v1")
+        for rows in ([], [dict(M.CTF_ROW)] * 2, [dict(M.CTF_ROW, Extra="no")],
+                     [dict(M.CTF_ROW, Size=98012)]):
+            with self.assertRaises(M.Held):
+                M.manifest(rows, "ctf-one-v1")
+
+    def test_ctf_cannot_materialize_or_execute_before_any_work(self):
+        for phase in ("materialize-readelf", "probe-readelf"):
+            with patch.object(sys, "argv", ["inspection", phase, "--manifest", "/fixture",
+                                           "--artifact-profile", "ctf-one-v1"]), \
+                 patch.object(M, "runner") as runner, \
+                 patch.object(M, "acquisition_context") as acquisition, \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(M.main(), 2)
+            runner.assert_not_called()
+            acquisition.assert_not_called()
+
+
 class ReadelfProfileTests(unittest.TestCase):
     """Synthetic fixtures; never a real readelf archive or startup/security pass."""
     setUp = InspectionTests.setUp
