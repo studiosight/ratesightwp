@@ -782,11 +782,11 @@ class MaterializationAndNativeTests(unittest.TestCase):
         inputs = self.root / "inputs"; inputs.mkdir()
         (inputs / "toy.deb").write_bytes(b"abc")
         tool = b"TOY_NO_NATIVE_CODE"
-        def decode(path, kind, folder, deadline, current, sink=None):
+        def decode(path, kind, folder, deadline, current, sink=None, member_profile="readelf-one-v1"):
             raw = (archive([("control", b"TOY_CONTROL_NOT_RUN", "file")]) if kind == "control" else
                    archive([(M.READELF_MEMBER, tool, "file"),
                             ("usr/bin/readelf", "x86_64-linux-gnu-readelf", "link")]))
-            result = M.inspect_tar(io.BytesIO(raw), current, sink)
+            result = M.inspect_tar(io.BytesIO(raw), current, sink, member_profile)
             if decoder_failure and kind == "data":
                 raise M.Held("dpkg_decode_failed")
             return result
@@ -1088,13 +1088,13 @@ class MaterializationAndNativeTests(unittest.TestCase):
                 M.native_context({})
 
 
-    def test_closed_675_file_inventory_and_unknown_extra_or_link_refuse(self):
+    def test_closed_677_file_inventory_and_unknown_extra_or_link_refuse(self):
         import types
         walks = [("/", ["base", "analyzer", "usr"], []),
                  ("/base", [], ["f" + str(i) for i in range(673)]),
                  ("/analyzer", [], ["readelf"]),
-                 ("/usr/lib/x86_64-linux-gnu", [], ["ld-linux-x86-64.so.2"])]
-        names = ["/base/f" + str(i) for i in range(673)] + [M.NATIVE_TOOL, M.LOADER]
+                 ("/usr/lib/x86_64-linux-gnu", [], ["ld-linux-x86-64.so.2", "libctf-nobfd.so.0.0.0", "libctf-nobfd.so.0"])]
+        names = ["/base/f" + str(i) for i in range(673)] + [M.NATIVE_TOOL, M.LOADER] + list(M.CTF_COPY_DESTINATIONS)
         data = {name: b"x" for name in names}; data[M.NATIVE_TOOL] = b"TOY"; data[M.LOADER] = b"LOAD"
         shared = unittest.mock.Mock()
         shared.read_regular.side_effect = lambda path, cap: (data[path], ("pin-" + path,))
@@ -1104,9 +1104,10 @@ class MaterializationAndNativeTests(unittest.TestCase):
                                          st_uid=0, st_gid=0, st_nlink=1)
         with patch.object(M, "READELF_BYTES", 3), patch.object(M, "READELF_SHA", M.sha(b"TOY")), \
              patch.object(M, "LOADER_SHA", M.sha(b"LOAD")), \
+             patch.object(M, "CTF_BYTES", 1), patch.object(M, "CTF_SHA", M.sha(b"x")), \
              patch.object(M.os, "walk", return_value=walks), patch.object(M.os, "lstat", side_effect=metadata):
             inventory, identities = M.native_inventory(shared)
-            self.assertEqual(len(inventory), 675)
+            self.assertEqual(len(inventory), 677)
             self.assertEqual(set(inventory), set(names))
             self.assertEqual(set(identities), set(names))
             extra = walks + [("/unexpected", [], ["file"])]
@@ -1172,6 +1173,112 @@ class MaterializationAndNativeTests(unittest.TestCase):
         self.assertEqual(result["phase"], "probe-readelf")
         self.assertFalse(result["phpExecuted"])
         self.assertFalse(result["publicationAuthorized"])
+
+
+
+class CtfClosureTests(unittest.TestCase):
+    setUp = InspectionTests.setUp
+    tearDown = InspectionTests.tearDown
+    shared_reader = InspectionTests.shared_reader
+
+    @contextlib.contextmanager
+    def fixture(self, decoder_failure=False):
+        inputs = self.root / "inputs"; inputs.mkdir()
+        (inputs / "toy.deb").write_bytes(b"abc")
+        member = b"SYNTHETIC_CTF_DATA_NEVER_LOADED"
+        row = dict(M.CTF_ROW, Filename="pool/main/t/toy.deb", Size="3", SHA256=M.sha(b"abc"))
+        def decode(path, kind, folder, deadline, current, sink=None, member_profile="readelf-one-v1"):
+            raw = (archive([("control", b"fixture", "file")]) if kind == "control" else
+                   archive([(M.CTF_MEMBER, member, "file"),
+                            (M.CTF_ALIAS_MEMBER, "libctf-nobfd.so.0.0.0", "link")]))
+            result = M.inspect_tar(io.BytesIO(raw), current, sink, member_profile)
+            if decoder_failure and kind == "data":
+                raise M.Held("dpkg_decode_failed")
+            return result
+        with patch.object(M, "CTF_ROW", row), patch.object(M, "CTF_MANIFEST_SHA", M.sha(M.canonical([row]))), \
+             patch.object(M, "CTF_BYTES", len(member)), patch.object(M, "CTF_SHA", M.sha(member)), \
+             patch.object(M, "protected", side_effect=lambda path, **kw: Path(path)), \
+             patch.object(M.os, "statvfs", return_value=type("V", (), {"f_flag": os.ST_RDONLY})()), \
+             patch.object(M, "tar_command", side_effect=decode):
+            yield row, inputs, member
+
+    def test_ctf_fixed_member_alias_record_and_single_nonexecutable_output(self):
+        with self.fixture() as (row, inputs, member), patch.object(M.os, "symlink") as symlink, \
+             patch.object(M.os, "link") as hardlink:
+            result = M.execute_materialization([row], inputs, self.root, self.shared_reader(), "ctf-one-v1")
+        output = self.root / M.CTF_OUTPUT
+        self.assertEqual(output.read_bytes(), member)
+        self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(set(self.root.iterdir()), {inputs, output})
+        self.assertEqual(result["state"], "FIXED_CTF_MEMBER_PREPARED_PENDING_READONLY_HANDOFF")
+        self.assertTrue(result["materializedMember"]["eligibleForReadonlyHandoff"])
+        self.assertFalse(result["materializedMember"]["executable"])
+        symlink.assert_not_called(); hardlink.assert_not_called()
+
+    def test_ctf_digest_size_link_and_duplicate_member_refuse(self):
+        for entries in ([(M.CTF_MEMBER, b"BAD", "file")],
+                        [(M.CTF_MEMBER, b"x" * M.CTF_BYTES, "file")],
+                        [(M.CTF_MEMBER, "../other", "link")],
+                        [(M.CTF_MEMBER, b"TOY", "file"), (M.CTF_MEMBER, b"TOY", "file")]):
+            output = self.root / ("sink-" + str(len(list(self.root.iterdir()))))
+            fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                with self.assertRaises(M.Held):
+                    M.inspect_tar(io.BytesIO(archive(entries)), budget(), fd, "ctf-one-v1")
+            finally:
+                os.close(fd)
+
+    def test_ctf_exact_unresolved_alias_required(self):
+        member={"name":M.CTF_MEMBER,"kind":"regular","bytes":M.CTF_BYTES,"sha256":M.CTF_SHA}
+        alias={"name":M.CTF_ALIAS_MEMBER,"kind":"link_not_materialized","bytes":0,"sha256":None}
+        valid={"data":{"entries":[member,alias],"links":[{"name":M.CTF_ALIAS_MEMBER,"target":"libctf-nobfd.so.0.0.0"}]}}
+        M.require_ctf_member(valid)
+        import copy
+        for bad in (copy.deepcopy(valid),copy.deepcopy(valid),copy.deepcopy(valid),copy.deepcopy(valid)):
+            index = getattr(self, "_alias_case", 0); self._alias_case=index+1
+            if index==0:bad["data"]["links"][0]["target"]="../other"
+            elif index==1:bad["data"]["entries"][1]["kind"]="regular"
+            elif index==2:bad["data"]["entries"].pop()
+            else:bad["data"]["entries"].append(dict(member))
+            with self.assertRaises(M.Held):M.require_ctf_member(bad)
+
+    def test_ctf_decoder_failure_retains_partial_and_collision_then_fresh_recovery(self):
+        with self.fixture(True) as (row, inputs, member):
+            with self.assertRaisesRegex(M.Held,"dpkg_decode_failed"):
+                M.execute_materialization([row],inputs,self.root,self.shared_reader(),"ctf-one-v1")
+            self.assertEqual((self.root/M.CTF_OUTPUT).read_bytes(),member)
+            self.assertFalse((self.root/"inspection-report.json").exists())
+            with self.assertRaises(FileExistsError):
+                M.execute_materialization([row],inputs,self.root,self.shared_reader(),"ctf-one-v1")
+        retained=(self.root/M.CTF_OUTPUT).read_bytes()
+        previous=self.root;self.root=previous/"recovery";self.root.mkdir()
+        try:
+            with self.fixture() as (row,inputs,member):
+                result=M.execute_materialization([row],inputs,self.root,self.shared_reader(),"ctf-one-v1")
+            self.assertTrue(result["materializedMember"]["eligibleForReadonlyHandoff"])
+            self.assertEqual((previous/M.CTF_OUTPUT).read_bytes(),retained)
+        finally:self.root=previous
+
+    def test_ctf_both_regular_readonly_copy_destinations_are_exact(self):
+        good={name:{"sha256":M.CTF_SHA,"bytes":M.CTF_BYTES,"mode":0o444} for name in M.CTF_COPY_DESTINATIONS}
+        M.require_ctf_regular_copies(good)
+        import copy
+        for path in M.CTF_COPY_DESTINATIONS:
+            for field,value in (("sha256","0"*64),("bytes",1),("mode",0o555)):
+                bad=copy.deepcopy(good);bad[path][field]=value
+                with self.assertRaises(M.Held):M.require_ctf_regular_copies(bad)
+            bad=copy.deepcopy(good);del bad[path]
+            with self.assertRaises(M.Held):M.require_ctf_regular_copies(bad)
+
+    def test_ctf_closed_action_profile_before_any_work(self):
+        for profile in ("fixed32","readelf-one-v1"):
+            with patch.object(sys,"argv",["inspection","materialize-ctf","--manifest","/fixture",
+                                         "--artifact-profile",profile]),patch.object(M,"runner") as runner, \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(M.main(),2)
+            runner.assert_not_called()
+        for profile in ("fixed32","anything",None):
+            with self.assertRaises(M.Held):M.fixed_member_contract(profile)
 
 
 if __name__ == "__main__":

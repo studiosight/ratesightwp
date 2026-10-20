@@ -44,6 +44,12 @@ ARTIFACT_PROFILES = ("fixed32", "readelf-one-v1", "ctf-one-v1")
 READELF_BYTES = 789280
 READELF_SHA = "64c58e15274bbbb5153f31078e455e9e77ee5f51489e709bba5bb788ce9df2b0"
 READELF_OUTPUT = "readelf-member.bin"
+CTF_MEMBER = "usr/lib/x86_64-linux-gnu/libctf-nobfd.so.0.0.0"
+CTF_ALIAS_MEMBER = "usr/lib/x86_64-linux-gnu/libctf-nobfd.so.0"
+CTF_BYTES = 216096
+CTF_SHA = "1c16e8ac316c5cd952fe3544d2f7faea49b79a85b8f9e405f77c2a0059aefeae"
+CTF_OUTPUT = "ctf-member.bin"
+CTF_COPY_DESTINATIONS = ("/" + CTF_MEMBER, "/" + CTF_ALIAS_MEMBER)
 LOADER = "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
 LOADER_SHA = "c20a2dc8917c755f02b94049356320fe1f62ac7d9f8994731f807d9df39302da"
 NATIVE_TOOL = "/analyzer/readelf"
@@ -61,7 +67,7 @@ MAX_REGULAR = 192 * 1024**2
 
 
 FAILURE_STAGES = ('phase-guard', 'acquisition-context', 'runner-load', 'manifest-protection', 'manifest-read', 'manifest-schema', 'inspection-context', 'manifest-rows', 'workspace-create', 'execute-acquisition', 'execute-inspection', 'execute-materialization', 'execute-native', 'manifest-recheck', 'report-build', 'report-write', 'complete')
-FAILURE_FUNCTIONS = ('need', 'canonical', 'sha', 'protected', 'runner', 'context', 'acquisition_context', 'manifest', 'artifact_manifest_sha', 'require_readelf_member', 'download_alarm', 'acquire', 'member_name', 'inspect_tar', 'tar_command', 'ordered', 'execute_acquisition', 'execute_inspection', 'execute_materialization', 'native_inventory', 'native_context', 'native_command', 'parse_loader_output', 'execute_native_probe', 'main')
+FAILURE_FUNCTIONS = ('need', 'canonical', 'sha', 'protected', 'runner', 'context', 'acquisition_context', 'manifest', 'artifact_manifest_sha', 'require_readelf_member', 'fixed_member_contract', 'require_ctf_member', 'require_ctf_regular_copies', 'download_alarm', 'acquire', 'member_name', 'inspect_tar', 'tar_command', 'ordered', 'execute_acquisition', 'execute_inspection', 'execute_materialization', 'native_inventory', 'native_context', 'native_command', 'parse_loader_output', 'execute_native_probe', 'main')
 FAILURE_REASONS = ('materialized_member', 'materialized_output', 'native_profile', 'native_inventory', 'native_isolation', 'native_deadline', 'native_output_cap', 'native_terminal', 'native_stderr', 'native_nonzero', 'native_missing_library', 'native_version_error', 'native_output', 'artifact_profile', 'readelf_member', 'acquired_set_changed', 'acquisition_directory_changed', 'acquisition_environment', 'acquisition_parent', 'acquisition_parent_required', 'archive_binding', 'archive_changed', 'archive_input_set_changed', 'archive_name', 'archive_overrun', 'archive_write', 'capabilities_present', 'content_encoding', 'download_deadline', 'dpkg_decode_failed', 'dpkg_pin', 'duplicate_member', 'environment_profile', 'escaping_link', 'expanded_byte_cap', 'host_view_exposed', 'http_length', 'http_status', 'inherited_environment', 'input_schema', 'inspection_deadline', 'inspection_parent_fixed', 'interrupted', 'invalid_root_entry', 'manifest_binding', 'manifest_bytes', 'manifest_changed', 'manifest_count', 'manifest_schema', 'member_ancestor', 'member_cap', 'member_collision', 'member_overrun', 'member_path', 'member_short', 'member_size', 'member_size_or_sparse', 'namespace_profile', 'no_new_privs_required', 'noncanonical_tool', 'nonregular_tool', 'owned_decoder_terminal_unknown', 'private_acquisition_parent', 'private_namespace_required', 'private_uid_pid_required', 'private_work_required', 'profile_contract', 'profile_schema', 'readonly_archive_inputs', 'readonly_root_required', 'redirect_refused', 'report_cap', 'report_not_confirmed', 'root_identity', 'runner_changed', 'runner_file', 'runner_pin', 'setid_member', 'special_member', 'tar_byte_cap', 'ubuntu_required', 'unknown_or_missing_archive_inputs', 'unprotected_tool', 'unsafe_link', 'whole_deadline', 'worker_pin')
 
 LINK_SUBTYPES = ("overlong", "absolute", "backslash", "nul")
@@ -343,7 +349,34 @@ def canonical_absolute_symlink(target):
             all(part not in ("", ".", "..") for part in target[1:].split("/")))
 
 
-def inspect_tar(stream, budget, readelf_fd=None):
+def fixed_member_contract(profile):
+    need(type(profile) is str and profile in ("readelf-one-v1", "ctf-one-v1"), "artifact_profile")
+    if profile == "ctf-one-v1":
+        return {"member": CTF_MEMBER, "bytes": CTF_BYTES, "sha256": CTF_SHA, "output": CTF_OUTPUT,
+                "state": "FIXED_CTF_MEMBER_PREPARED_PENDING_READONLY_HANDOFF"}
+    return {"member": READELF_MEMBER, "bytes": READELF_BYTES, "sha256": READELF_SHA, "output": READELF_OUTPUT,
+            "state": "FIXED_READELF_MEMBER_PREPARED_PENDING_READONLY_HANDOFF"}
+
+
+def require_ctf_member(result):
+    entries = result["data"]["entries"]
+    member = [e for e in entries if e["name"] == CTF_MEMBER]
+    need(len(member) == 1 and member[0] == {"name": CTF_MEMBER, "kind": "regular",
+         "bytes": CTF_BYTES, "sha256": CTF_SHA}, "materialized_member")
+    alias = [e for e in entries if e["name"] == CTF_ALIAS_MEMBER]
+    need(len(alias) == 1 and alias[0]["kind"] == "link_not_materialized" and
+         alias[0]["bytes"] == 0 and alias[0]["sha256"] is None, "materialized_member")
+    links = [e for e in result["data"]["links"] if e["name"] == CTF_ALIAS_MEMBER]
+    need(links == [{"name": CTF_ALIAS_MEMBER, "target": "libctf-nobfd.so.0.0.0"}], "materialized_member")
+
+
+def require_ctf_regular_copies(inventory):
+    expected = {"sha256": CTF_SHA, "bytes": CTF_BYTES, "mode": 0o444}
+    need(all(inventory.get(path) == expected for path in CTF_COPY_DESTINATIONS), "native_inventory")
+
+
+def inspect_tar(stream, budget, readelf_fd=None, member_profile="readelf-one-v1"):
+    member = fixed_member_contract(member_profile) if readelf_fd is not None else None
     seen, links, entries, package_bytes = set(), [], [], 0
     with tarfile.open(fileobj=stream, mode="r|") as archive:
         for item in archive:
@@ -359,8 +392,8 @@ def inspect_tar(stream, budget, readelf_fd=None):
                  ("/".join(name.split("/")[:i]) for i in range(1, len(name.split("/"))))), "member_ancestor")
             need(item.isdir() or not any(x.startswith(name + "/") for x in seen), "member_collision")
             seen.add(name)
-            if readelf_fd is not None and name == READELF_MEMBER:
-                need(item.isfile() and item.size == READELF_BYTES, "materialized_member")
+            if readelf_fd is not None and name == member["member"]:
+                need(item.isfile() and item.size == member["bytes"], "materialized_member")
             need(not item.issparse() and not item.pax_headers and item.size <= 32 * 1024**2, "member_size_or_sparse")
             need(not item.mode & 0o6000, "setid_member")
             if item.isdir():
@@ -382,7 +415,7 @@ def inspect_tar(stream, budget, readelf_fd=None):
                     count += len(chunk)
                     need(count <= item.size, "member_overrun")
                     digest_state.update(chunk)
-                    if readelf_fd is not None and name == READELF_MEMBER:
+                    if readelf_fd is not None and name == member["member"]:
                         view = memoryview(chunk)
                         while view:
                             written = os.write(readelf_fd, view)
@@ -391,8 +424,8 @@ def inspect_tar(stream, budget, readelf_fd=None):
                 file.close()
                 need(count == item.size, "member_short")
                 kind, digest = "regular", digest_state.hexdigest()
-                if readelf_fd is not None and name == READELF_MEMBER:
-                    need(count == READELF_BYTES and digest == READELF_SHA, "materialized_member")
+                if readelf_fd is not None and name == member["member"]:
+                    need(count == member["bytes"] and digest == member["sha256"], "materialized_member")
             elif item.issym() or item.islnk():
                 target = item.linkname
                 try:
@@ -427,7 +460,7 @@ def inspect_tar(stream, budget, readelf_fd=None):
     return {"entries": entries, "links": links, "regularBytes": package_bytes}
 
 
-def tar_command(path, kind, cwd, deadline, budget, readelf_fd=None):
+def tar_command(path, kind, cwd, deadline, budget, readelf_fd=None, member_profile="readelf-one-v1"):
     # Maintained dpkg-deb performs ar framing and xz/zstd decompression. No extraction flags.
     argv = [DPKG, "--ctrl-tarfile" if kind == "control" else "--fsys-tarfile", str(path)]
     with tempfile.TemporaryFile(dir=cwd) as errors:
@@ -444,7 +477,7 @@ def tar_command(path, kind, cwd, deadline, budget, readelf_fd=None):
         terminal = False
         try:
             result = (inspect_tar(pipe, budget) if readelf_fd is None else
-                      inspect_tar(pipe, budget, readelf_fd))
+                      inspect_tar(pipe, budget, readelf_fd, member_profile))
             # Drain to actual EOF, including tar trailer; process exit0 is also required.
             while pipe.read(65536):
                 pass
@@ -512,7 +545,7 @@ def require_readelf_member(result):
 
 def execute_inspection(rows, archive_parent, folder, shared, artifact_profile="fixed32", readelf_fd=None):
     binding = artifact_manifest_sha(artifact_profile)
-    need(readelf_fd is None or artifact_profile == "readelf-one-v1", "artifact_profile")
+    need(readelf_fd is None or artifact_profile in ("readelf-one-v1", "ctf-one-v1"), "artifact_profile")
     if artifact_profile != "fixed32":
         manifest(rows, artifact_profile)
     deadline = time.monotonic() + 600
@@ -533,7 +566,7 @@ def execute_inspection(rows, archive_parent, folder, shared, artifact_profile="f
             budget["dirs"] = set()
             try:
                 result[kind] = (tar_command(path, kind, folder, deadline, budget) if readelf_fd is None or kind == "control" else
-                                tar_command(path, kind, folder, deadline, budget, readelf_fd))
+                                tar_command(path, kind, folder, deadline, budget, readelf_fd, artifact_profile))
             except Held as error:
                 if type(error) is Held and type(getattr(error, "archive_link", None)) is dict:
                     error.archive_link.update({"manifestSha256": binding, "package": row["Package"],
@@ -543,6 +576,8 @@ def execute_inspection(rows, archive_parent, folder, shared, artifact_profile="f
         need(shared.read_regular(path, int(row["Size"]), deadline=deadline)[1] == pin, "archive_changed")
         if artifact_profile == "readelf-one-v1":
             require_readelf_member(result)
+        elif artifact_profile == "ctf-one-v1":
+            require_ctf_member(result)
         reports.append(result)
     need(set(os.listdir(archive_parent)) == names, "archive_input_set_changed")
     report = {"state": "INERT_ARCHIVES_INSPECTED_NOT_RUNTIME_OR_SECURITY_PASS",
@@ -553,8 +588,9 @@ def execute_inspection(rows, archive_parent, folder, shared, artifact_profile="f
     return report
 
 
-def execute_materialization(rows, archive_parent, folder, shared):
-    manifest(rows, "readelf-one-v1")
+def execute_materialization(rows, archive_parent, folder, shared, artifact_profile="readelf-one-v1"):
+    member = fixed_member_contract(artifact_profile)
+    manifest(rows, artifact_profile)
     # A fixed owned nonexecutable output, not an archive-directed extraction path.
     directory = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     parent = os.fstat(directory)
@@ -562,27 +598,27 @@ def execute_materialization(rows, archive_parent, folder, shared):
     try:
         need((folder.lstat().st_dev, folder.lstat().st_ino) == (parent.st_dev, parent.st_ino),
              "materialized_output")
-        fd = os.open(READELF_OUTPUT, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        fd = os.open(member["output"], os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                      0o600, dir_fd=directory)
         created = os.fstat(fd)
         need(stat.S_ISREG(created.st_mode) and created.st_uid == os.getuid() and
              created.st_nlink == 1 and stat.S_IMODE(created.st_mode) == 0o600, "materialized_output")
         # Both complete archive sections and tar_command's decoder terminal guard must return.
-        report = execute_inspection(rows, archive_parent, folder, shared, "readelf-one-v1", fd)
+        report = execute_inspection(rows, archive_parent, folder, shared, artifact_profile, fd)
         os.fsync(fd)
         final = os.fstat(fd)
-        raw, pin = shared.read_regular(folder / READELF_OUTPUT, READELF_BYTES)
+        raw, pin = shared.read_regular(folder / member["output"], member["bytes"])
         need((created.st_dev, created.st_ino) == (final.st_dev, final.st_ino) and
              tuple(pin) == (final.st_dev, final.st_ino, final.st_mode, final.st_nlink,
                             final.st_size, final.st_mtime_ns, final.st_ctime_ns) and
-             len(raw) == READELF_BYTES and sha(raw) == READELF_SHA and
+             len(raw) == member["bytes"] and sha(raw) == member["sha256"] and
              stat.S_IMODE(final.st_mode) == 0o600 and final.st_nlink == 1, "materialized_output")
         need((folder.lstat().st_dev, folder.lstat().st_ino) == (parent.st_dev, parent.st_ino),
              "materialized_output")
         # No rename/chmod/promotion. Partial bytes stay ineligible unless this full report is confirmed.
-        report["state"] = "FIXED_READELF_MEMBER_PREPARED_PENDING_READONLY_HANDOFF"
-        report["materializedMember"] = {"name": READELF_OUTPUT, "bytes": READELF_BYTES,
-                                       "sha256": READELF_SHA, "inputIdentity": list(pin),
+        report["state"] = member["state"]
+        report["materializedMember"] = {"name": member["output"], "bytes": member["bytes"],
+                                       "sha256": member["sha256"], "inputIdentity": list(pin),
                                        "executable": False, "eligibleForReadonlyHandoff": True}
         report["independentReadonlyInputHandoffRequired"] = True
         return report
@@ -614,7 +650,7 @@ def native_inventory(shared):
             if path == "/inputs/inspection-manifest.json":
                 continue
             count += 1
-            need(count <= 675, "native_inventory")
+            need(count <= 677, "native_inventory")
             st = os.lstat(path)
             need(stat.S_ISREG(st.st_mode) and st.st_uid == st.st_gid == 0 and st.st_nlink == 1 and
                  stat.S_IMODE(st.st_mode) in (0o444, 0o555), "native_inventory")
@@ -623,9 +659,10 @@ def native_inventory(shared):
             need(total < 128 * 1024**2, "native_inventory")
             inventory[path] = {"sha256": sha(raw), "bytes": len(raw), "mode": stat.S_IMODE(st.st_mode)}
             identities[path] = list(pin)
-    need(count == 675 and inventory.get(NATIVE_TOOL) ==
+    need(count == 677 and inventory.get(NATIVE_TOOL) ==
          {"sha256": READELF_SHA, "bytes": READELF_BYTES, "mode": 0o555}, "native_inventory")
     need(inventory.get(LOADER, {}).get("sha256") == LOADER_SHA, "native_inventory")
+    require_ctf_regular_copies(inventory)
     return inventory, identities
 
 
@@ -780,7 +817,7 @@ def execute_native_probe(document, shared):
     need(after == before and after_ids == identities, "native_inventory")
     return {"state": "FIXED_READELF_STARTUP_VERSION_OBSERVED_NOT_PHP_OR_SECURITY_PASS",
             "artifactProfile": "readelf-one-v1", "manifestSha256": READELF_MANIFEST_SHA,
-            "closedInputSha256": document["closedInputSha256"], "regularFileInputs": 675,
+            "closedInputSha256": document["closedInputSha256"], "regularFileInputs": 677,
             "loaderDiagnosticObserved": True, "reportedObjects": listed, "version": "2.42",
             "potentialAcquiredCodeExecution": True, "completeMappingHistoryProven": False,
             "executableMemoryProvenanceProven": False, "runtimeAndToolchainExecution": True,
@@ -790,7 +827,7 @@ def execute_native_probe(document, shared):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=("acquire", "inspect", "materialize-readelf", "probe-readelf"))
+    parser.add_argument("phase", choices=("acquire", "inspect", "materialize-readelf", "materialize-ctf", "probe-readelf"))
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--artifact-profile", choices=ARTIFACT_PROFILES, default="fixed32")
     parser.add_argument("--work-parent")
@@ -798,7 +835,9 @@ def main():
     folder = None
     stage = "phase-guard"
     try:
-        need(args.phase in ("acquire", "inspect") or args.artifact_profile == "readelf-one-v1", "artifact_profile")
+        need(args.phase in ("acquire", "inspect") or
+             args.phase in ("materialize-readelf", "probe-readelf") and args.artifact_profile == "readelf-one-v1" or
+             args.phase == "materialize-ctf" and args.artifact_profile == "ctf-one-v1", "artifact_profile")
         if args.phase == "acquire":
             need(args.work_parent is not None, "acquisition_parent_required")
             stage = "acquisition-context"
@@ -825,7 +864,7 @@ def main():
             context(document["profile"])
         stage = "manifest-rows"
         rows = manifest(document["packages"], args.artifact_profile)
-        source_pin = shared.read_regular(Path(__file__), 65536)[1] if args.phase in ("materialize-readelf", "probe-readelf") else None
+        source_pin = shared.read_regular(Path(__file__), 65536)[1] if args.phase in ("materialize-readelf", "materialize-ctf", "probe-readelf") else None
         stage = "workspace-create"
         if args.phase != "probe-readelf":
             folder = Path(tempfile.mkdtemp(prefix="wp-artifacts-", dir=parent))
@@ -834,9 +873,9 @@ def main():
         signal.signal(signal.SIGALRM, lambda *unused: (_ for _ in ()).throw(Held("whole_deadline")))
         signal.alarm(600)
         stage = "execute-acquisition" if args.phase == "acquire" else "execute-inspection"
-        if args.phase == "materialize-readelf":
+        if args.phase in ("materialize-readelf", "materialize-ctf"):
             stage = "execute-materialization"
-            report = execute_materialization(rows, Path("/inputs/archives"), folder, shared)
+            report = execute_materialization(rows, Path("/inputs/archives"), folder, shared, args.artifact_profile)
         elif args.phase == "probe-readelf":
             stage = "execute-native"
             report = execute_native_probe(document, shared)
