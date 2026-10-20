@@ -1408,5 +1408,137 @@ class LibsframeProfileTests(unittest.TestCase):
         self.assertIsNone(report);self.assertEqual(calls,["control"])
 
 
+
+class LibsframeMaterializationTests(unittest.TestCase):
+    """Toy fixed-member sink checks, never actual libsframe decoding/materialization."""
+    setUp = InspectionTests.setUp
+    tearDown = InspectionTests.tearDown
+    shared_reader = InspectionTests.shared_reader
+
+    @contextlib.contextmanager
+    def fixture(self, failure=None):
+        inputs = self.root / "inputs"; inputs.mkdir()
+        (inputs / "toy.deb").write_bytes(b"abc")
+        member = b"SYNTHETIC_MEMBER_DATA_NOT_ELF"
+        row = dict(M.LIBSFRAME_ROW, Filename="pool/main/t/toy.deb", Size="3", SHA256=M.sha(b"abc"))
+        calls = []
+        def decode(path, kind, folder, deadline, current, sink=None, member_profile="readelf-one-v1"):
+            calls.append(kind)
+            target = "wrong.so" if failure == "alias" else "libsframe.so.1.0.0"
+            raw = (archive([("control", b"TOY_CONTROL", "file")]) if kind == "control" else
+                   archive([(M.LIBSFRAME_MEMBER, member, "file"),
+                            (M.LIBSFRAME_ALIAS_MEMBER, target, "link")]))
+            result = M.inspect_tar(io.BytesIO(raw), current, sink, member_profile)
+            if failure == kind:
+                raise M.Held("dpkg_decode_failed")
+            return result
+        with patch.object(M, "LIBSFRAME_ROW", row), \
+             patch.object(M, "LIBSFRAME_MANIFEST_SHA", M.sha(M.canonical([row]))), \
+             patch.object(M, "LIBSFRAME_BYTES", len(member)), patch.object(M, "LIBSFRAME_SHA", M.sha(member)), \
+             patch.object(M, "protected", side_effect=lambda path, **kw: Path(path)), \
+             patch.object(M.os, "statvfs", return_value=type("V", (), {"f_flag": os.ST_RDONLY})()), \
+             patch.object(M, "tar_command", side_effect=decode):
+            yield row, inputs, member, calls
+
+    def test_fixed_contract_binds_actual_member_and_nonexec_name(self):
+        contract = M.fixed_member_contract("libsframe-one-v1")
+        self.assertEqual(contract, {
+            "member":"usr/lib/x86_64-linux-gnu/libsframe.so.1.0.0",
+            "bytes":35168,"sha256":"1693a2dbd77c909d279ae34aa9b5d8d08d97f116f8d0ed724063df11151b3c69",
+            "output":"libsframe-member.bin","state":"FIXED_LIBSFRAME_MEMBER_PREPARED_PENDING_READONLY_HANDOFF"})
+        with self.assertRaises(M.Held):M.fixed_member_contract("libsframe")
+
+    def test_complete_fixed_member_and_alias_yield_one_owned_nonexec_output(self):
+        with self.fixture() as (row, inputs, member, calls), \
+             patch.object(M.os, "symlink") as symlink, patch.object(M.os, "link") as hardlink:
+            result=M.execute_materialization([row],inputs,self.root,self.shared_reader(),"libsframe-one-v1")
+            self.assertEqual(calls,["control","data"])
+        output=self.root/M.LIBSFRAME_OUTPUT
+        self.assertEqual(output.read_bytes(),member)
+        self.assertEqual(output.stat().st_mode&0o777,0o600)
+        self.assertEqual(output.stat().st_nlink,1)
+        self.assertEqual(set(self.root.iterdir()),{inputs,output})
+        self.assertEqual(result["state"],"FIXED_LIBSFRAME_MEMBER_PREPARED_PENDING_READONLY_HANDOFF")
+        self.assertFalse(result["materializedMember"]["executable"])
+        self.assertTrue(result["materializedMember"]["eligibleForReadonlyHandoff"])
+        symlink.assert_not_called();hardlink.assert_not_called()
+
+    def test_wrong_digest_length_link_and_duplicate_refuse(self):
+        entries=([(M.LIBSFRAME_MEMBER,b"BAD","file")],
+                 [(M.LIBSFRAME_MEMBER,b"SHORT","file")],
+                 [(M.LIBSFRAME_MEMBER,"other","link")],
+                 [(M.LIBSFRAME_MEMBER,b"TOY","file"),(M.LIBSFRAME_MEMBER,b"TOY","file")])
+        for index,items in enumerate(entries):
+            output=self.root/("sink-"+str(index))
+            fd=os.open(output,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+            try:
+                with patch.object(M,"LIBSFRAME_BYTES",3),patch.object(M,"LIBSFRAME_SHA",M.sha(b"TOY")), \
+                     self.assertRaises(M.Held):
+                    M.inspect_tar(io.BytesIO(archive(items)),budget(),fd,"libsframe-one-v1")
+            finally:os.close(fd)
+
+    def test_wrong_alias_retains_output_but_cannot_be_eligible(self):
+        with self.fixture("alias") as (row,inputs,member,calls),self.assertRaisesRegex(M.Held,"materialized_member"):
+            M.execute_materialization([row],inputs,self.root,self.shared_reader(),"libsframe-one-v1")
+        self.assertEqual((self.root/M.LIBSFRAME_OUTPUT).read_bytes(),member)
+        self.assertFalse((self.root/"inspection-report.json").exists())
+
+    def test_failed_decoder_retains_partial_collision_and_fresh_workspace_recovery(self):
+        with self.fixture("data") as (row,inputs,member,calls):
+            with self.assertRaisesRegex(M.Held,"dpkg_decode_failed"):
+                M.execute_materialization([row],inputs,self.root,self.shared_reader(),"libsframe-one-v1")
+            self.assertEqual(calls,["control","data"])
+            self.assertEqual((self.root/M.LIBSFRAME_OUTPUT).read_bytes(),member)
+            with self.assertRaises(FileExistsError):
+                M.execute_materialization([row],inputs,self.root,self.shared_reader(),"libsframe-one-v1")
+        previous=self.root;retained=(previous/M.LIBSFRAME_OUTPUT).read_bytes()
+        self.root=previous/"fresh-owned";self.root.mkdir()
+        try:
+            with self.fixture() as (row,inputs,member,calls):
+                report=M.execute_materialization([row],inputs,self.root,self.shared_reader(),"libsframe-one-v1")
+            self.assertTrue(report["materializedMember"]["eligibleForReadonlyHandoff"])
+            self.assertEqual((previous/M.LIBSFRAME_OUTPUT).read_bytes(),retained)
+        finally:self.root=previous
+
+    def test_phase_guard_wrong_profiles_refuses_before_work(self):
+        for profile in ("fixed32","readelf-one-v1","ctf-one-v1"):
+            with patch.object(sys,"argv",["inspection","materialize-libsframe","--manifest","/fixture",
+                                         "--artifact-profile",profile]), \
+                 patch.object(M,"runner") as runner,patch.object(M,"execute_materialization") as materialize, \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(M.main(),2)
+            runner.assert_not_called();materialize.assert_not_called()
+
+    def test_inert_profile_still_has_no_sink_and_no_materialized_output(self):
+        with self.fixture() as (row,inputs,member,calls),patch.object(M,"execute_materialization") as materialize:
+            result=M.execute_inspection([row],inputs,self.root,self.shared_reader(),"libsframe-one-v1")
+            self.assertEqual(calls,["control","data"])
+        self.assertEqual(result["state"],"INERT_ARCHIVES_INSPECTED_NOT_RUNTIME_OR_SECURITY_PASS")
+        self.assertFalse((self.root/M.LIBSFRAME_OUTPUT).exists())
+        materialize.assert_not_called()
+
+    def test_materializer_source_change_prevents_success_report(self):
+        row=dict(M.LIBSFRAME_ROW);document=json.dumps({"profile":{},"packages":[row]}).encode();reads=[0]
+        shared=unittest.mock.Mock();shared.unique.side_effect=lambda pairs:dict(pairs)
+        def read(path,cap,**kw):
+            if str(path)==M.__file__:
+                reads[0]+=1;return b"source",("source",reads[0])
+            return document,("manifest",)
+        shared.read_regular.side_effect=read
+        folder=self.root/"work"
+        def temporary(**kw):folder.mkdir();return str(folder)
+        out=io.StringIO()
+        with patch.object(sys,"argv",["inspection","materialize-libsframe","--artifact-profile","libsframe-one-v1",
+                                     "--manifest","/fixture"]),patch.object(M,"runner",return_value=shared), \
+             patch.object(M,"context"),patch.object(M,"protected",side_effect=lambda path:Path(path)), \
+             patch.object(M.tempfile,"mkdtemp",side_effect=temporary), \
+             patch.object(M,"execute_materialization",return_value={"state":"TOY_ONLY"}) as materialize, \
+             contextlib.redirect_stdout(out):
+            self.assertEqual(M.main(),2)
+        self.assertEqual(materialize.call_args.args[-1],"libsframe-one-v1")
+        self.assertEqual(json.loads(out.getvalue())["failure"]["reason"],"worker_pin")
+        self.assertFalse((folder/"inspection-report.json").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -42,6 +42,11 @@ CTF_MANIFEST_SHA = 'f63599229e0964931b6dece97a6ecadfd3e98c4d221aacf86797b22f5e58
 CTF_ROW = {'Package': 'libctf-nobfd0', 'Version': '2.42-4ubuntu2.10', 'Architecture': 'amd64', 'Filename': 'pool/main/b/binutils/libctf-nobfd0_2.42-4ubuntu2.10_amd64.deb', 'SHA256': 'da352eb7fa6c4369d2a6c1e5e680f574eda2e38576563326b18d9e47e61c4078', 'Size': '98012'}
 LIBSFRAME_MANIFEST_SHA = 'b1363f597ec439b34d6eb1b6393bb337bca7cfcad5e2a2241137c5ae64fe6e4d'
 LIBSFRAME_ROW = {'Package': 'libsframe1', 'Version': '2.42-4ubuntu2.10', 'Architecture': 'amd64', 'Filename': 'pool/main/b/binutils/libsframe1_2.42-4ubuntu2.10_amd64.deb', 'SHA256': '72093fb456864db55f1352bfa5e952a94f7abaff64e71dff1fbf001db1984564', 'Size': '15724'}
+LIBSFRAME_MEMBER = "usr/lib/x86_64-linux-gnu/libsframe.so.1.0.0"
+LIBSFRAME_ALIAS_MEMBER = "usr/lib/x86_64-linux-gnu/libsframe.so.1"
+LIBSFRAME_BYTES = 35168
+LIBSFRAME_SHA = "1693a2dbd77c909d279ae34aa9b5d8d08d97f116f8d0ed724063df11151b3c69"
+LIBSFRAME_OUTPUT = "libsframe-member.bin"
 ARTIFACT_PROFILES = ("fixed32", "readelf-one-v1", "ctf-one-v1", "libsframe-one-v1")
 READELF_BYTES = 789280
 READELF_SHA = "64c58e15274bbbb5153f31078e455e9e77ee5f51489e709bba5bb788ce9df2b0"
@@ -69,7 +74,7 @@ MAX_REGULAR = 192 * 1024**2
 
 
 FAILURE_STAGES = ('phase-guard', 'acquisition-context', 'runner-load', 'manifest-protection', 'manifest-read', 'manifest-schema', 'inspection-context', 'manifest-rows', 'workspace-create', 'execute-acquisition', 'execute-inspection', 'execute-materialization', 'execute-native', 'manifest-recheck', 'report-build', 'report-write', 'complete')
-FAILURE_FUNCTIONS = ('need', 'canonical', 'sha', 'protected', 'runner', 'context', 'acquisition_context', 'manifest', 'artifact_manifest_sha', 'require_readelf_member', 'fixed_member_contract', 'require_ctf_member', 'require_ctf_regular_copies', 'download_alarm', 'acquire', 'member_name', 'inspect_tar', 'tar_command', 'ordered', 'execute_acquisition', 'execute_inspection', 'execute_materialization', 'native_inventory', 'native_context', 'native_command', 'parse_loader_output', 'execute_native_probe', 'main')
+FAILURE_FUNCTIONS = ('need', 'canonical', 'sha', 'protected', 'runner', 'context', 'acquisition_context', 'manifest', 'artifact_manifest_sha', 'require_readelf_member', 'fixed_member_contract', 'require_ctf_member', 'require_libsframe_member', 'require_ctf_regular_copies', 'download_alarm', 'acquire', 'member_name', 'inspect_tar', 'tar_command', 'ordered', 'execute_acquisition', 'execute_inspection', 'execute_materialization', 'native_inventory', 'native_context', 'native_command', 'parse_loader_output', 'execute_native_probe', 'main')
 FAILURE_REASONS = ('materialized_member', 'materialized_output', 'native_profile', 'native_inventory', 'native_isolation', 'native_deadline', 'native_output_cap', 'native_terminal', 'native_stderr', 'native_nonzero', 'native_missing_library', 'native_version_error', 'native_output', 'artifact_profile', 'readelf_member', 'acquired_set_changed', 'acquisition_directory_changed', 'acquisition_environment', 'acquisition_parent', 'acquisition_parent_required', 'archive_binding', 'archive_changed', 'archive_input_set_changed', 'archive_name', 'archive_overrun', 'archive_write', 'capabilities_present', 'content_encoding', 'download_deadline', 'dpkg_decode_failed', 'dpkg_pin', 'duplicate_member', 'environment_profile', 'escaping_link', 'expanded_byte_cap', 'host_view_exposed', 'http_length', 'http_status', 'inherited_environment', 'input_schema', 'inspection_deadline', 'inspection_parent_fixed', 'interrupted', 'invalid_root_entry', 'manifest_binding', 'manifest_bytes', 'manifest_changed', 'manifest_count', 'manifest_schema', 'member_ancestor', 'member_cap', 'member_collision', 'member_overrun', 'member_path', 'member_short', 'member_size', 'member_size_or_sparse', 'namespace_profile', 'no_new_privs_required', 'noncanonical_tool', 'nonregular_tool', 'owned_decoder_terminal_unknown', 'private_acquisition_parent', 'private_namespace_required', 'private_uid_pid_required', 'private_work_required', 'profile_contract', 'profile_schema', 'readonly_archive_inputs', 'readonly_root_required', 'redirect_refused', 'report_cap', 'report_not_confirmed', 'root_identity', 'runner_changed', 'runner_file', 'runner_pin', 'setid_member', 'special_member', 'tar_byte_cap', 'ubuntu_required', 'unknown_or_missing_archive_inputs', 'unprotected_tool', 'unsafe_link', 'whole_deadline', 'worker_pin')
 
 LINK_SUBTYPES = ("overlong", "absolute", "backslash", "nul")
@@ -359,7 +364,10 @@ def canonical_absolute_symlink(target):
 
 
 def fixed_member_contract(profile):
-    need(type(profile) is str and profile in ("readelf-one-v1", "ctf-one-v1"), "artifact_profile")
+    need(type(profile) is str and profile in ("readelf-one-v1", "ctf-one-v1", "libsframe-one-v1"), "artifact_profile")
+    if profile == "libsframe-one-v1":
+        return {"member": LIBSFRAME_MEMBER, "bytes": LIBSFRAME_BYTES, "sha256": LIBSFRAME_SHA,
+                "output": LIBSFRAME_OUTPUT, "state": "FIXED_LIBSFRAME_MEMBER_PREPARED_PENDING_READONLY_HANDOFF"}
     if profile == "ctf-one-v1":
         return {"member": CTF_MEMBER, "bytes": CTF_BYTES, "sha256": CTF_SHA, "output": CTF_OUTPUT,
                 "state": "FIXED_CTF_MEMBER_PREPARED_PENDING_READONLY_HANDOFF"}
@@ -377,6 +385,19 @@ def require_ctf_member(result):
          alias[0]["bytes"] == 0 and alias[0]["sha256"] is None, "materialized_member")
     links = [e for e in result["data"]["links"] if e["name"] == CTF_ALIAS_MEMBER]
     need(links == [{"name": CTF_ALIAS_MEMBER, "target": "libctf-nobfd.so.0.0.0"}], "materialized_member")
+
+
+def require_libsframe_member(result):
+    entries = result["data"]["entries"]
+    member = [e for e in entries if e["name"] == LIBSFRAME_MEMBER]
+    need(len(member) == 1 and member[0] == {"name": LIBSFRAME_MEMBER, "kind": "regular",
+         "bytes": LIBSFRAME_BYTES, "sha256": LIBSFRAME_SHA}, "materialized_member")
+    alias = [e for e in entries if e["name"] == LIBSFRAME_ALIAS_MEMBER]
+    need(len(alias) == 1 and alias[0]["kind"] == "link_not_materialized" and
+         alias[0]["bytes"] == 0 and alias[0]["sha256"] is None, "materialized_member")
+    links = [e for e in result["data"]["links"] if e["name"] == LIBSFRAME_ALIAS_MEMBER]
+    need(links == [{"name": LIBSFRAME_ALIAS_MEMBER, "target": "libsframe.so.1.0.0"}], "materialized_member")
+
 
 
 def require_ctf_regular_copies(inventory):
@@ -554,7 +575,7 @@ def require_readelf_member(result):
 
 def execute_inspection(rows, archive_parent, folder, shared, artifact_profile="fixed32", readelf_fd=None):
     binding = artifact_manifest_sha(artifact_profile)
-    need(readelf_fd is None or artifact_profile in ("readelf-one-v1", "ctf-one-v1"), "artifact_profile")
+    need(readelf_fd is None or artifact_profile in ("readelf-one-v1", "ctf-one-v1", "libsframe-one-v1"), "artifact_profile")
     if artifact_profile != "fixed32":
         manifest(rows, artifact_profile)
     deadline = time.monotonic() + 600
@@ -587,6 +608,8 @@ def execute_inspection(rows, archive_parent, folder, shared, artifact_profile="f
             require_readelf_member(result)
         elif artifact_profile == "ctf-one-v1":
             require_ctf_member(result)
+        elif artifact_profile == "libsframe-one-v1" and readelf_fd is not None:
+            require_libsframe_member(result)
         reports.append(result)
     need(set(os.listdir(archive_parent)) == names, "archive_input_set_changed")
     report = {"state": "INERT_ARCHIVES_INSPECTED_NOT_RUNTIME_OR_SECURITY_PASS",
@@ -836,7 +859,7 @@ def execute_native_probe(document, shared):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=("acquire", "inspect", "materialize-readelf", "materialize-ctf", "probe-readelf"))
+    parser.add_argument("phase", choices=("acquire", "inspect", "materialize-readelf", "materialize-ctf", "materialize-libsframe", "probe-readelf"))
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--artifact-profile", choices=ARTIFACT_PROFILES, default="fixed32")
     parser.add_argument("--work-parent")
@@ -846,7 +869,8 @@ def main():
     try:
         need(args.phase in ("acquire", "inspect") or
              args.phase in ("materialize-readelf", "probe-readelf") and args.artifact_profile == "readelf-one-v1" or
-             args.phase == "materialize-ctf" and args.artifact_profile == "ctf-one-v1", "artifact_profile")
+             args.phase == "materialize-ctf" and args.artifact_profile == "ctf-one-v1" or
+             args.phase == "materialize-libsframe" and args.artifact_profile == "libsframe-one-v1", "artifact_profile")
         if args.phase == "acquire":
             need(args.work_parent is not None, "acquisition_parent_required")
             stage = "acquisition-context"
@@ -873,7 +897,7 @@ def main():
             context(document["profile"])
         stage = "manifest-rows"
         rows = manifest(document["packages"], args.artifact_profile)
-        source_pin = shared.read_regular(Path(__file__), 65536)[1] if args.phase in ("materialize-readelf", "materialize-ctf", "probe-readelf") else None
+        source_pin = shared.read_regular(Path(__file__), 65536)[1] if args.phase in ("materialize-readelf", "materialize-ctf", "materialize-libsframe", "probe-readelf") else None
         stage = "workspace-create"
         if args.phase != "probe-readelf":
             folder = Path(tempfile.mkdtemp(prefix="wp-artifacts-", dir=parent))
@@ -882,7 +906,7 @@ def main():
         signal.signal(signal.SIGALRM, lambda *unused: (_ for _ in ()).throw(Held("whole_deadline")))
         signal.alarm(600)
         stage = "execute-acquisition" if args.phase == "acquire" else "execute-inspection"
-        if args.phase in ("materialize-readelf", "materialize-ctf"):
+        if args.phase in ("materialize-readelf", "materialize-ctf", "materialize-libsframe"):
             stage = "execute-materialization"
             report = execute_materialization(rows, Path("/inputs/archives"), folder, shared, args.artifact_profile)
         elif args.phase == "probe-readelf":
