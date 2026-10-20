@@ -144,8 +144,44 @@ check_uninstall_case( 'uninstall retention gate precedes every destructive famil
 $archive_one = sys_get_temp_dir() . '/ratesight-phase1a2-' . getmypid() . '-one.zip';
 $archive_two = sys_get_temp_dir() . '/ratesight-phase1a2-' . getmypid() . '-two.zip';
 $builder = escapeshellarg( __DIR__ . '/../scripts/build-release-package.sh' );
-shell_exec( $builder . ' ' . escapeshellarg( $archive_one ) );
-shell_exec( $builder . ' ' . escapeshellarg( $archive_two ) );
+$release_root = realpath( __DIR__ . '/..' );
+$release_head = trim( (string) shell_exec( 'git --no-optional-locks -C ' . escapeshellarg( $release_root ) . ' rev-parse HEAD' ) );
+if ( ! preg_match( '/^[a-f0-9]{40}$/D', $release_head ) ) {
+	fwrite( STDERR, "Exact clean release commit required for package fixture.\n" );
+	exit( 1 );
+}
+// Preparation is not a security-report pass or permission to publish.
+$prepare = $builder . ' prepare --source-commit ' . escapeshellarg( $release_head ) . ' --output ';
+// Never inspect or remove a stale archive after a refused preparation.
+foreach ( array( $archive_one, $archive_two ) as $archive ) {
+	if ( file_exists( $archive ) || is_link( $archive ) ) {
+		fwrite( STDERR, "Refusing pre-existing package fixture output.\n" );
+		exit( 1 );
+	}
+}
+$owned_archives = array();
+register_shutdown_function( static function () use ( &$owned_archives ): void {
+	foreach ( $owned_archives as $archive => $owned ) {
+		clearstatcache( true, $archive );
+		if ( ! file_exists( $archive ) && ! is_link( $archive ) ) continue;
+		$current = lstat( $archive );
+		if ( $current && $owned && $current['dev'] === $owned['dev'] && $current['ino'] === $owned['ino'] && ! is_link( $archive ) ) unlink( $archive );
+	}
+} );
+foreach ( array( $archive_one, $archive_two ) as $archive ) {
+	$prepare_lines = array();
+	$prepare_exit = 1;
+	exec( $prepare . escapeshellarg( $archive ), $prepare_lines, $prepare_exit );
+	$prepared = count( $prepare_lines ) === 1 ? json_decode( $prepare_lines[0], true ) : null;
+	$prepare_ok = $prepare_exit === 0 && is_array( $prepared ) && is_file( $archive ) && ! is_link( $archive )
+		&& ( $prepared['sourceCommit'] ?? null ) === $release_head
+		&& ( $prepared['archive'] ?? null ) === $archive
+		&& ( $prepared['state'] ?? null ) === 'PREPARED_UNVERIFIED_PUBLICATION_HELD'
+		&& ( $prepared['humanPublicationApproved'] ?? null ) === false;
+	check_uninstall_case( 'prepare succeeds for exact clean source without publication approval', $prepare_ok );
+	if ( ! $prepare_ok ) exit( 1 );
+	$owned_archives[ $archive ] = lstat( $archive );
+}
 $entries = array_values( array_filter( explode( "\n", trim( (string) shell_exec( 'unzip -Z1 ' . escapeshellarg( $archive_one ) ) ) ) ) );
 $forbidden = array_filter( $entries, static fn( string $entry ): bool => preg_match( '#(^|/)(\.git|\.env|tests|docs|scripts)(/|$)|README\.md$#', $entry ) === 1 );
 $top_levels = array_values( array_unique( array_map( static fn( string $entry ): string => explode( '/', $entry )[0], $entries ) ) );
@@ -155,8 +191,7 @@ check_uninstall_case( 'release package excludes development, test, git, env, doc
 check_uninstall_case( 'release package contains the runtime uninstall policy', in_array( 'ratesight/uninstall.php', $entries, true ) && in_array( 'ratesight/includes/class-ratesight-installation.php', $entries, true ) );
 check_uninstall_case( 'release package contains every referenced runtime image', in_array( 'ratesight/admin/images/rs-icon.png', $entries, true ) && in_array( 'ratesight/admin/images/rs-pin.png', $entries, true ) );
 check_uninstall_case( 'release manifest is sorted and contains runtime files only', $entries === array_values( array_unique( $entries ) ) && count( $entries ) > 50 );
-@unlink( $archive_one );
-@unlink( $archive_two );
+
 
 if ( $failures ) {
 	echo "\nFAIL — {$checks} checks, {$failures} failure(s)\n";
