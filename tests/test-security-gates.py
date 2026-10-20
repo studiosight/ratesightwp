@@ -71,7 +71,7 @@ class GateFixtures(unittest.TestCase):
         else:
             files = {name: {'errors': 0, 'warnings': 0, 'messages': []} for name in argv if name.endswith('.php')}
             raw = json.dumps({'totals': {'errors': 0, 'warnings': 0, 'fixable': 0}, 'files': files}).encode()
-        return {'exit': 0, 'stdout': raw, 'complete': True, 'timedOut': False, 'ownedGroupTerminal': True}
+        return {'exit': 0, 'stdout': raw, 'stderr': b'', 'complete': True, 'timedOut': False, 'ownedGroupTerminal': True}
     def test_missing_tools_are_unavailable_and_report_is_not_approval(self):
         result = self.run_gate()
         self.assertFalse(result['allMandatoryPassed'])
@@ -140,7 +140,8 @@ class GateFixtures(unittest.TestCase):
     def test_native_result_refuses_exit0_findings_truncation_unknown_or_incomplete(self):
         valid = {'totals': {'errors': 0, 'warnings': 0, 'fixable': 0}, 'files': {'a.php': {'errors': 0, 'warnings': 0, 'messages': []}}}
         def result(doc, **extra):
-            return dict({'exit': 0, 'stdout': json.dumps(doc).encode(), 'complete': True}, **extra)
+            return dict({'exit': 0, 'stdout': json.dumps(doc).encode(), 'stderr': b'', 'complete': True,
+                         'ownedGroupTerminal': True, 'timedOut': False}, **extra)
         self.assertEqual(gates.native_result('wpcs', result(valid), ['a.php'])[0], 'pass')
         cases = [result({}), result(valid, complete=False), result(valid, exit=1),
                  result({'totals': {'errors': 1, 'warnings': 0, 'fixable': 0}, 'files': valid['files']}),
@@ -151,7 +152,8 @@ class GateFixtures(unittest.TestCase):
         phpstan = {'totals': {'errors': 0, 'file_errors': 0}, 'files': {}, 'errors': []}
         self.assertEqual(gates.native_result('phpstan', result(phpstan), ['a.php']), ('held', 'phpstan_complete_coverage_adapter_required'))
     def test_unknown_tool_versions_or_schema_and_boolean_counts_hold(self):
-        result = lambda data: {'complete': True, 'exit': 0, 'stdout': json.dumps(data).encode()}
+        result = lambda data: {'complete': True, 'exit': 0, 'stdout': json.dumps(data).encode(),
+                               'stderr': b'', 'ownedGroupTerminal': True, 'timedOut': False}
         semgrep = {'version': '1.2.3', 'results': [], 'errors': [], 'paths': {'scanned': ['a.php'], 'skipped': []}, 'skipped_rules': []}
         self.assertEqual(gates.native_result('static-security', result(semgrep), ['a.php'], '1.2.3')[0], 'pass')
         self.assertNotEqual(gates.native_result('static-security', result(semgrep), ['a.php'], '9.0.0')[0], 'pass')
@@ -175,7 +177,8 @@ class GateFixtures(unittest.TestCase):
         missing = dict(good)
         del missing['skipped_rules']
         cases.append(missing)
-        result = lambda data: {'complete': True, 'exit': 0, 'stdout': json.dumps(data).encode()}
+        result = lambda data: {'complete': True, 'exit': 0, 'stdout': json.dumps(data).encode(),
+                               'stderr': b'', 'ownedGroupTerminal': True, 'timedOut': False}
         self.assertEqual(gates.native_result('static-security', result(good), ['a.php'], '1.2.3')[0], 'pass')
         for data in cases:
             self.assertNotEqual(gates.native_result('static-security', result(data), ['a.php'], '1.2.3')[0], 'pass')
@@ -329,6 +332,102 @@ class GateFixtures(unittest.TestCase):
         self.assertFalse(result['complete'])
         self.assertEqual(result['stdout'], b'')
         self.assertTrue(result['ownedGroupTerminal'])
+
+    def test_native_result_requires_explicit_empty_stderr_and_process_acknowledgments(self):
+        doc = {'totals': {'errors': 0, 'warnings': 0, 'fixable': 0},
+               'files': {'a.php': {'errors': 0, 'warnings': 0, 'messages': []}}}
+        good = {'exit': 0, 'stdout': json.dumps(doc).encode(), 'stderr': b'',
+                'complete': True, 'ownedGroupTerminal': True, 'timedOut': False}
+        self.assertEqual(gates.native_result('wpcs', good, ['a.php']),
+                         ('pass', 'complete_zero_findings'))
+        cases = [('stderr-diagnostic', 'stderr', b'SENSITIVE_TEST_DIAGNOSTIC'),
+                 ('stderr-text', 'stderr', ''), ('stderr-none', 'stderr', None),
+                 ('stderr-bytearray', 'stderr', bytearray()),
+                 ('nonterminal', 'ownedGroupTerminal', False),
+                 ('wrong-terminal-type', 'ownedGroupTerminal', 1),
+                 ('timeout', 'timedOut', True), ('unknown-timeout', 'timedOut', None),
+                 ('wrong-timeout-type', 'timedOut', 0),
+                 ('unknown-complete', 'complete', None), ('wrong-complete-type', 'complete', 1),
+                 ('unknown-exit', 'exit', None), ('wrong-exit-type', 'exit', False),
+                 ('wrong-exit-float', 'exit', 0.0), ('wrong-stdout-type', 'stdout', '{}')]
+        for name, key, value in cases:
+            with self.subTest(name=name):
+                result = dict(good); result[key] = value
+                status = gates.native_result('wpcs', result, ['a.php'])
+                self.assertEqual(status, ('held', 'incomplete_timeout_or_cleanup'))
+                self.assertNotIn('SENSITIVE_TEST_DIAGNOSTIC', str(status))
+        for key in ('stderr', 'ownedGroupTerminal', 'timedOut', 'complete', 'exit', 'stdout'):
+            with self.subTest(missing=key):
+                result = dict(good); del result[key]
+                self.assertEqual(gates.native_result('wpcs', result, ['a.php'])[0], 'held')
+
+    def test_version_stderr_or_unknown_acknowledgment_never_reaches_scan(self):
+        chain = self.toolchain()
+        cases = [('diagnostic', 'stderr', b'SENSITIVE_VERSION_TEST_DIAGNOSTIC'),
+                 ('missing-stderr', 'stderr', None), ('wrong-stderr', 'stderr', ''),
+                 ('nonterminal', 'ownedGroupTerminal', False),
+                 ('missing-terminal', 'ownedGroupTerminal', None),
+                 ('timeout', 'timedOut', True), ('missing-timeout', 'timedOut', None)]
+        for index, (name, key, value) in enumerate(cases):
+            with self.subTest(name=name):
+                self.calls = []
+                def execute(argv, cwd, seconds):
+                    result = self.execute(argv, cwd, seconds)
+                    if '--version' in argv:
+                        if name.startswith('missing-'): result.pop(key)
+                        else: result[key] = value
+                    return result
+                output = self.base / ('version-refusal-' + str(index) + '.json')
+                try:
+                    result = self.run_gate(toolchain=chain, execute=execute, output=output)
+                except gates.Held:
+                    self.assertFalse(output.exists())
+                else:
+                    self.assertFalse(result['allMandatoryPassed'])
+                    self.assertNotEqual(result['gateResults']['wpcs']['code'], 'fixture_pass')
+                    self.assertNotIn(b'SENSITIVE_VERSION_TEST_DIAGNOSTIC', output.read_bytes())
+                self.assertTrue(self.calls)
+                self.assertTrue(all('--version' in argv for argv in self.calls))
+
+    def test_scan_stderr_or_unknown_timeout_holds_without_persisting_diagnostics(self):
+        chain = self.toolchain()
+        for index, mode in enumerate(('diagnostic', 'missing-stderr', 'missing-timeout', 'wrong-timeout')):
+            with self.subTest(mode=mode):
+                def execute(argv, cwd, seconds):
+                    result = self.execute(argv, cwd, seconds)
+                    if '--version' not in argv:
+                        if mode == 'diagnostic': result['stderr'] = b'SENSITIVE_SCAN_TEST_DIAGNOSTIC'
+                        elif mode == 'missing-stderr': result.pop('stderr')
+                        elif mode == 'missing-timeout': result.pop('timedOut')
+                        else: result['timedOut'] = 'SENSITIVE_SCAN_TEST_DIAGNOSTIC'
+                    return result
+                output = self.base / ('scan-refusal-' + str(index) + '.json')
+                result = self.run_gate(toolchain=chain, execute=execute, output=output)
+                self.assertFalse(result['allMandatoryPassed'])
+                self.assertNotEqual(result['gateResults']['wpcs']['code'], 'fixture_pass')
+                self.assertNotIn(b'SENSITIVE_SCAN_TEST_DIAGNOSTIC', output.read_bytes())
+
+    def test_benign_toy_stderr_capture_and_combined_overflow_blank_both_streams(self):
+        with mock.patch.object(gates, 'MAX_OUTPUT', 64):
+            captured = gates.run_process(
+                ['/usr/bin/python3', '-I', '-B', '-S', '-c',
+                 "import os;os.write(1,b'toy-out');os.write(2,b'toy-warning')"], self.base, 2)
+            self.assertEqual(captured['stdout'], b'toy-out')
+            self.assertEqual(captured['stderr'], b'toy-warning')
+            self.assertTrue(captured['complete'])
+            self.assertTrue(captured['ownedGroupTerminal'])
+            self.assertIs(captured['timedOut'], False)
+            self.assertFalse(gates.complete_process_result(captured))
+            overflow = gates.run_process(
+                ['/usr/bin/python3', '-I', '-B', '-S', '-c',
+                 "import os;os.write(1,b'a'*40);os.write(2,b'b'*40)"], self.base, 2)
+            self.assertEqual(overflow['exit'], 0)
+            self.assertEqual(overflow['stdout'], b'')
+            self.assertEqual(overflow['stderr'], b'')
+            self.assertFalse(overflow['complete'])
+            self.assertTrue(overflow['ownedGroupTerminal'])
+            self.assertIs(overflow['timedOut'], False)
+
     def test_report_and_source_bytes_untouched_when_no_tools(self):
         before = {p: p.read_bytes() for p in [self.prepared, self.archive, self.repo/'ratesight.php']}
         self.run_gate()

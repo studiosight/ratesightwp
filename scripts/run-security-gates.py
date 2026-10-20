@@ -147,10 +147,13 @@ def run_process(argv, cwd, seconds=90):
         if failed:
             raise ProcessFailure(terminal) from None
         sizes = [os.fstat(f.fileno()).st_size for f in (output, errors)]
-        bounded = all(size < MAX_OUTPUT for size in sizes)
+        bounded = sum(sizes) < MAX_OUTPUT
         output.seek(0)
         raw = output.read(MAX_OUTPUT) if bounded else b''
-        return {'exit': child.returncode, 'stdout': raw, 'complete': bounded and terminal and not timed_out,
+        errors.seek(0)
+        raw_errors = errors.read(MAX_OUTPUT) if bounded else b''
+        return {'exit': child.returncode, 'stdout': raw, 'stderr': raw_errors,
+                'complete': bounded and terminal and not timed_out,
                 'timedOut': timed_out, 'ownedGroupTerminal': terminal}
 
 class ScanWork:
@@ -180,8 +183,15 @@ class ScanWork:
             raise Held('owned_scan_workspace_retained_for_recovery')
         shutil.rmtree(self.path)
 
+def complete_process_result(result):
+    # Unknown acknowledgments or diagnostics never become clean tool evidence.
+    return (type(result) is dict and result.get('complete') is True
+            and result.get('ownedGroupTerminal') is True and result.get('timedOut') is False
+            and type(result.get('exit')) is int and type(result.get('stdout')) is bytes
+            and type(result.get('stderr')) is bytes and result['stderr'] == b'')
+
 def native_result(gate, result, expected, version=None):
-    if not result['complete'] or result['exit'] is None:
+    if not complete_process_result(result):
         return 'held', 'incomplete_timeout_or_cleanup'
     try:
         data = json.loads(result['stdout'], object_pairs_hook=unique)
@@ -305,7 +315,8 @@ def orchestrate(root, commit, tree, archive, prepared, toolchain, review_referen
                 need(config_raw == bounded_git('show', commit + ':' + config_names[gate]), 'config_not_exact_git')
                 details[gate].update({'toolSha256': spec['sha256'], 'configSha256': digest(config_raw), 'version': spec['version'], 'profile': gate + '-native-v1'})
                 version_result = workspace.invoke(invoke, execute, [str(tool), '--version'], Path(work), 10)
-                need(version_result['complete'] and version_result['exit'] == 0 and len(version_result['stdout']) <= 4096, 'tool_version_unavailable')
+                need(complete_process_result(version_result) and version_result['exit'] == 0
+                     and len(version_result['stdout']) <= 4096, 'tool_version_unavailable')
                 version_text = version_result['stdout'].decode('utf8', errors='strict').strip()
                 patterns = {'wpcs': r'PHP_CodeSniffer version ' + re.escape(spec['version']) + r'(?:\s|$)',
                             'phpstan': r'PHPStan - PHP Static Analysis Tool ' + re.escape(spec['version']) + r'(?:\s|$)',
@@ -323,6 +334,8 @@ def orchestrate(root, commit, tree, archive, prepared, toolchain, review_referen
                 result = workspace.invoke(invoke, execute, argv, Path(work), 90)
                 details[gate]['versionExit'] = version_result['exit']
                 status, code = native_result(gate, result, targets, spec['version'])
+                # Only typed, explicit process fields may enter the nonsecret provenance record.
+                need(complete_process_result(result), 'tool_result_unavailable')
                 need(bounded_read(tool, 67108864)[1] == tool_pin and bounded_read(config)[1] == config_pin, 'tool_or_config_changed')
                 details[gate].update({'status': 'held' if fixture else status, 'code': 'fixture_' + status if fixture else code,
                                  'toolSha256': spec['sha256'], 'configSha256': digest(config_raw), 'version': spec['version'],
