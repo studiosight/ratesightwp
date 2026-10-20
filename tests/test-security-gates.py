@@ -493,6 +493,49 @@ class LocalSecuritySourceContracts(unittest.TestCase):
         # The local .yml intentionally uses JSON syntax, a YAML-compatible subset.
         return json.loads((ROOT / 'security/semgrep.yml').read_text())['rules']
 
+    def test_composer_declares_exact_development_tools_without_execution_hooks(self):
+        manifest = json.loads((ROOT / 'composer.json').read_text())
+        self.assertEqual(set(manifest), {'name', 'type', 'require-dev', 'config'})
+        self.assertEqual(manifest['name'], 'studiosight/ratesightwp-dev-tools')
+        self.assertEqual(manifest['type'], 'project')
+        self.assertEqual(manifest['require-dev'], {
+            'wp-coding-standards/wpcs': '3.4.1',
+            'phpstan/phpstan': '2.3.1',
+            'szepeviktor/phpstan-wordpress': '2.0.4'})
+        # This is the future QA resolution target, not gpserver installability.
+        self.assertEqual(manifest['config'], {
+            'allow-plugins': False, 'platform': {'php': '8.3.6'}, 'sort-packages': True})
+
+    def test_phpstan_declares_extension_maximum_level_and_plugin_php_target_only(self):
+        # Closed declaration check only; no NEON parser/vendor/engine acceptance.
+        lines = [line.rstrip() for line in (ROOT / 'phpstan.neon.dist').read_text().splitlines()
+                 if line.strip()]
+        self.assertEqual(lines, [
+            'includes:', '    - vendor/szepeviktor/phpstan-wordpress/extension.neon',
+            'parameters:', '    level: max', '    phpVersion: 80000'])
+        source = subprocess.check_output(['git', '-C', str(ROOT), 'show', 'HEAD:ratesight.php']).decode()
+        self.assertIn(' * Requires PHP:      8.0', source)
+        # No paths: the existing runner supplies exact extracted package PHP files.
+        # No baseline/ignoreErrors/exclusions or application bootstrap is configured.
+
+    def test_development_configs_and_tests_stay_outside_plugin_package_allowlist(self):
+        import ast
+        import pathlib
+        builder = subprocess.check_output(
+            ['git', '-C', str(ROOT), 'show', 'HEAD:scripts/build-release-package.sh'])
+        self.assertEqual(hashlib.sha256(builder).hexdigest(), gates.BUILDER_SHA)
+        code = builder.split(b"<<'PY'\n", 1)[1][:-4].decode()
+        allowed = next(node for node in ast.parse(code).body
+                       if isinstance(node, ast.FunctionDef) and node.name == 'allowed')
+        namespace = {'pathlib': pathlib}
+        exec(compile(ast.Module(body=[allowed], type_ignores=[]),
+                     '<pinned-package-allowlist-only>', 'exec'), namespace)
+        self.assertTrue(namespace['allowed']('ratesight.php'))
+        self.assertTrue(namespace['allowed']('includes/example.php'))
+        for path in ('composer.json', 'composer.lock', 'phpstan.neon.dist',
+                     'vendor/autoload.php', 'tests/test-security-gates.py'):
+            self.assertFalse(namespace['allowed'](path), path)
+
     def test_full_wordpress_standard_without_exclusions_or_suppressions(self):
         import xml.etree.ElementTree as ET
         root = ET.parse(ROOT / 'phpcs.xml.dist').getroot()

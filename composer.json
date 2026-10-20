@@ -1,0 +1,16 @@
+{
+    "name": "studiosight/ratesightwp-dev-tools",
+    "type": "project",
+    "require-dev": {
+        "wp-coding-standards/wpcs": "3.4.1",
+        "phpstan/phpstan": "2.3.1",
+        "szepeviktor/phpstan-wordpress": "2.0.4"
+    },
+    "config": {
+        "allow-plugins": false,
+        "platform": {
+            "php": "8.3.6"
+        },
+        "sort-packages": true
+    }
+}
