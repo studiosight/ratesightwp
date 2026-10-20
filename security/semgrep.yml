@@ -1,0 +1,131 @@
+{
+  "rules": [
+    {
+      "id": "ratesight.php.dynamic-code",
+      "languages": [
+        "php"
+      ],
+      "severity": "ERROR",
+      "message": "Avoid PHP eval and create_function; use explicit reviewed functions.",
+      "pattern-either": [
+        {
+          "pattern": "eval(...)"
+        },
+        {
+          "pattern": "create_function(...)"
+        }
+      ],
+      "metadata": {
+        "scope": "bounded-local-source-patterns-not-complete-security-coverage",
+        "engine-validation": "pending"
+      }
+    },
+    {
+      "id": "ratesight.php.shell-execution",
+      "languages": [
+        "php"
+      ],
+      "severity": "ERROR",
+      "message": "Direct shell/process execution needs an explicitly reviewed design.",
+      "pattern-either": [
+        {
+          "pattern": "exec(...)"
+        },
+        {
+          "pattern": "shell_exec(...)"
+        },
+        {
+          "pattern": "system(...)"
+        },
+        {
+          "pattern": "passthru(...)"
+        },
+        {
+          "pattern": "proc_open(...)"
+        },
+        {
+          "pattern": "popen(...)"
+        },
+        {
+          "pattern": "pcntl_exec(...)"
+        }
+      ],
+      "metadata": {
+        "scope": "bounded-local-source-patterns-not-complete-security-coverage",
+        "engine-validation": "pending"
+      }
+    },
+    {
+      "id": "ratesight.php.unsafe-unserialize",
+      "languages": [
+        "php"
+      ],
+      "severity": "ERROR",
+      "message": "Avoid unserialize or use an exact literal allowed_classes=false options array.",
+      "patterns": [
+        {
+          "pattern": "unserialize(...)"
+        },
+        {
+          "pattern-not": "unserialize($DATA, ['allowed_classes' => false])"
+        },
+        {
+          "pattern-not": "unserialize($DATA, array('allowed_classes' => false))"
+        }
+      ],
+      "metadata": {
+        "scope": "bounded-local-source-patterns-not-complete-security-coverage",
+        "engine-validation": "pending"
+      }
+    },
+    {
+      "id": "ratesight.javascript.dynamic-code",
+      "languages": [
+        "javascript"
+      ],
+      "severity": "ERROR",
+      "message": "Avoid eval and Function constructors/calls; use explicit reviewed functions.",
+      "pattern-either": [
+        {
+          "pattern": "eval(...)"
+        },
+        {
+          "pattern": "new Function(...)"
+        },
+        {
+          "pattern": "Function(...)"
+        }
+      ],
+      "metadata": {
+        "scope": "bounded-local-source-patterns-not-complete-security-coverage",
+        "engine-validation": "pending"
+      }
+    },
+    {
+      "id": "ratesight.javascript.string-timer",
+      "languages": [
+        "javascript"
+      ],
+      "severity": "ERROR",
+      "message": "Use function callbacks instead of string timer bodies.",
+      "pattern-either": [
+        {
+          "pattern": "setTimeout(\"...\", ...)"
+        },
+        {
+          "pattern": "setInterval(\"...\", ...)"
+        },
+        {
+          "pattern": "window.setTimeout(\"...\", ...)"
+        },
+        {
+          "pattern": "window.setInterval(\"...\", ...)"
+        }
+      ],
+      "metadata": {
+        "scope": "bounded-local-source-patterns-not-complete-security-coverage",
+        "engine-validation": "pending"
+      }
+    }
+  ]
+}

@@ -355,5 +355,128 @@ class GateFixtures(unittest.TestCase):
         with self.assertRaises(Exception): self.run_gate()
         self.assertFalse(self.output.exists())
 
+
+
+# Declarative engine expectations kept in the existing test module, not executable PHP/JS.
+# No Semgrep engine is available or invoked by these source-contract tests.
+LOCAL_SECURITY_FIXTURES = (
+    ("php_eval", "php", "<?php eval($code);", ("ratesight.php.dynamic-code",)),
+    ("php_create_function", "php", "<?php create_function('$x', $body);", ("ratesight.php.dynamic-code",)),
+    ("php_exec", "php", "<?php exec($command);", ("ratesight.php.shell-execution",)),
+    ("php_shell_exec", "php", "<?php shell_exec($command);", ("ratesight.php.shell-execution",)),
+    ("php_system", "php", "<?php system($command);", ("ratesight.php.shell-execution",)),
+    ("php_passthru", "php", "<?php passthru($command);", ("ratesight.php.shell-execution",)),
+    ("php_proc_open", "php", "<?php proc_open($command, $spec, $pipes);", ("ratesight.php.shell-execution",)),
+    ("php_popen", "php", "<?php popen($command, 'r');", ("ratesight.php.shell-execution",)),
+    ("php_pcntl_exec", "php", "<?php pcntl_exec($path, $args);", ("ratesight.php.shell-execution",)),
+    ("php_pdo_method_negative", "php", "<?php $pdo->exec($sql);", ()),
+    ("php_unserialize_default", "php", "<?php unserialize($payload);", ("ratesight.php.unsafe-unserialize",)),
+    ("php_unserialize_true", "php", "<?php unserialize($payload, ['allowed_classes' => true]);", ("ratesight.php.unsafe-unserialize",)),
+    ("php_unserialize_variable_options", "php", "<?php unserialize($payload, $options);", ("ratesight.php.unsafe-unserialize",)),
+    ("php_unserialize_variable_flag", "php", "<?php unserialize($payload, ['allowed_classes' => $allow]);", ("ratesight.php.unsafe-unserialize",)),
+    ("php_unserialize_false_negative", "php", "<?php unserialize($payload, ['allowed_classes' => false]);", ()),
+    ("php_unserialize_array_false_negative", "php", "<?php unserialize($payload, array('allowed_classes' => false));", ()),
+    ("php_unserialize_duplicate_key_refused", "php", "<?php unserialize($payload, ['allowed_classes' => false, 'allowed_classes' => true]);", ("ratesight.php.unsafe-unserialize",)),
+    ("js_eval", "javascript", "eval(source);", ("ratesight.javascript.dynamic-code",)),
+    ("js_new_function", "javascript", "new Function('return 1');", ("ratesight.javascript.dynamic-code",)),
+    ("js_direct_function", "javascript", "Function('return 1');", ("ratesight.javascript.dynamic-code",)),
+    ("js_timeout_string", "javascript", "setTimeout('run()', 10);", ("ratesight.javascript.string-timer",)),
+    ("js_interval_string", "javascript", "setInterval('run()', 10);", ("ratesight.javascript.string-timer",)),
+    ("js_window_timeout_string", "javascript", "window.setTimeout('run()', 10);", ("ratesight.javascript.string-timer",)),
+    ("js_window_interval_string", "javascript", "window.setInterval('run()', 10);", ("ratesight.javascript.string-timer",)),
+    ("js_callback_timer_negative", "javascript", "setTimeout(() => run(), 10); setInterval(run, 10);", ()),
+)
+
+class LocalSecuritySourceContracts(unittest.TestCase):
+    """Config/fixture source contracts only; never real engine/schema/effectiveness acceptance."""
+
+    def rules(self):
+        # The local .yml intentionally uses JSON syntax, a YAML-compatible subset.
+        return json.loads((ROOT / 'security/semgrep.yml').read_text())['rules']
+
+    def test_full_wordpress_standard_without_exclusions_or_suppressions(self):
+        import xml.etree.ElementTree as ET
+        root = ET.parse(ROOT / 'phpcs.xml.dist').getroot()
+        self.assertEqual(root.tag, 'ruleset')
+        self.assertEqual([r.attrib for r in root.findall('rule') if r.get('ref') == 'WordPress'],
+                         [{'ref': 'WordPress'}])
+        for forbidden in ('exclude', 'exclude-pattern', 'include-pattern', 'severity', 'type'):
+            self.assertEqual(root.findall('.//' + forbidden), [])
+        self.assertFalse(root.findall('.//property[@name="exclude"]'))
+
+    def test_wpcs_identity_uses_documented_array_and_version_properties(self):
+        import xml.etree.ElementTree as ET
+        root = ET.parse(ROOT / 'phpcs.xml.dist').getroot()
+        self.assertEqual([n.attrib for n in root.findall('config')],
+                         [{'name': 'minimum_wp_version', 'value': '5.9'}])
+        for ref, prop in (('WordPress.WP.I18n', 'text_domain'),
+                          ('WordPress.NamingConventions.PrefixAllGlobals', 'prefixes')):
+            node = root.find('./rule[@ref="' + ref + '"]/properties/property')
+            self.assertEqual(node.attrib, {'name': prop, 'type': 'array'})
+            self.assertEqual([n.attrib for n in node.findall('element')], [{'value': 'ratesight'}])
+        # WPCS alone does not implement PHPCompatibilityWP; no invented PHP-version setting.
+        self.assertIsNone(root.find('./config[@name="testVersion"]'))
+        self.assertIn('PHP 8.0', root.find('description').text)
+
+    def test_local_rules_are_closed_error_rules_without_remote_or_path_exclusions(self):
+        rules = self.rules()
+        self.assertEqual({r['id'] for r in rules}, {
+            'ratesight.php.dynamic-code', 'ratesight.php.shell-execution',
+            'ratesight.php.unsafe-unserialize', 'ratesight.javascript.dynamic-code',
+            'ratesight.javascript.string-timer'})
+        for rule in rules:
+            self.assertEqual(rule['severity'], 'ERROR')
+            self.assertIn(rule['languages'], (['php'], ['javascript']))
+            self.assertEqual(set(rule) - {'pattern-either', 'patterns'},
+                             {'id', 'languages', 'severity', 'message', 'metadata'})
+            self.assertNotIn('paths', rule)
+            self.assertEqual(rule['metadata']['engine-validation'], 'pending')
+
+    def test_php_free_function_contract_keeps_method_calls_out(self):
+        rules = {r['id']: r for r in self.rules()}
+        patterns = {p['pattern'] for p in rules['ratesight.php.shell-execution']['pattern-either']}
+        self.assertEqual(patterns, {name + '(...)' for name in
+                                   ('exec', 'shell_exec', 'system', 'passthru', 'proc_open', 'popen', 'pcntl_exec')})
+        self.assertFalse(any('->' in p or '::' in p for p in patterns))
+        self.assertEqual({p['pattern'] for p in rules['ratesight.php.dynamic-code']['pattern-either']},
+                         {'eval(...)', 'create_function(...)'})
+
+    def test_unserialize_exception_is_literal_false_only_without_wildcard_options(self):
+        rule = next(r for r in self.rules() if r['id'] == 'ratesight.php.unsafe-unserialize')
+        self.assertEqual(rule['patterns'][0], {'pattern': 'unserialize(...)'})
+        exceptions = {p['pattern-not'] for p in rule['patterns'][1:]}
+        self.assertEqual(exceptions, {"unserialize($DATA, ['allowed_classes' => false])",
+                                     "unserialize($DATA, array('allowed_classes' => false))"})
+        self.assertFalse(any('...' in p for p in exceptions))
+        # Exact single-entry literals avoid a duplicate-key false/true bypass.
+        self.assertFalse(any('true' in p or '$OPTIONS' in p for p in exceptions))
+
+    def test_javascript_contract_includes_direct_function_and_literal_timers(self):
+        rules = {r['id']: r for r in self.rules()}
+        self.assertEqual({p['pattern'] for p in rules['ratesight.javascript.dynamic-code']['pattern-either']},
+                         {'eval(...)', 'new Function(...)', 'Function(...)'})
+        timers = {p['pattern'] for p in rules['ratesight.javascript.string-timer']['pattern-either']}
+        self.assertEqual(timers, {'setTimeout("...", ...)', 'setInterval("...", ...)',
+                                 'window.setTimeout("...", ...)', 'window.setInterval("...", ...)'})
+
+    def test_declarative_fixtures_keep_positive_negative_and_ambiguous_cases(self):
+        fixtures = {name: (language, code, expected) for name, language, code, expected in LOCAL_SECURITY_FIXTURES}
+        self.assertEqual(len(fixtures), len(LOCAL_SECURITY_FIXTURES))
+        self.assertEqual(len(fixtures), 25)
+        ids = {rule['id']: rule for rule in self.rules()}
+        for name, language, code, expected in LOCAL_SECURITY_FIXTURES:
+            self.assertTrue(code)
+            for rule_id in expected:
+                self.assertIn(rule_id, ids)
+                self.assertEqual(ids[rule_id]['languages'], [language])
+        for name in ('php_pdo_method_negative', 'php_unserialize_false_negative',
+                     'php_unserialize_array_false_negative', 'js_callback_timer_negative'):
+            self.assertEqual(fixtures[name][2], ())
+        for name in ('php_unserialize_true', 'php_unserialize_variable_options',
+                     'php_unserialize_variable_flag', 'php_unserialize_duplicate_key_refused'):
+            self.assertEqual(fixtures[name][2], ('ratesight.php.unsafe-unserialize',))
+        self.assertEqual(fixtures['js_direct_function'][2], ('ratesight.javascript.dynamic-code',))
+
+
 if __name__ == '__main__':
     unittest.main()
