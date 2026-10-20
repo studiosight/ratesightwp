@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Separate phases for the fixed32 set, ONE fixed readelf archive or ONE fixed CTF archive. No runtime assembly.
+"""Separate phases for the fixed32 set, ONE fixed readelf, CTF or libsframe archive. No runtime assembly.
 
 Acquisition uses sanitized unprivileged Ubuntu HTTPS only, without an archive decoder.
 Inspection requires a protected readonly root, separate PID/network namespaces,
@@ -40,7 +40,9 @@ READELF_ROW = {
 READELF_MEMBER = "usr/bin/x86_64-linux-gnu-readelf"
 CTF_MANIFEST_SHA = 'f63599229e0964931b6dece97a6ecadfd3e98c4d221aacf86797b22f5e587e5e'
 CTF_ROW = {'Package': 'libctf-nobfd0', 'Version': '2.42-4ubuntu2.10', 'Architecture': 'amd64', 'Filename': 'pool/main/b/binutils/libctf-nobfd0_2.42-4ubuntu2.10_amd64.deb', 'SHA256': 'da352eb7fa6c4369d2a6c1e5e680f574eda2e38576563326b18d9e47e61c4078', 'Size': '98012'}
-ARTIFACT_PROFILES = ("fixed32", "readelf-one-v1", "ctf-one-v1")
+LIBSFRAME_MANIFEST_SHA = 'b1363f597ec439b34d6eb1b6393bb337bca7cfcad5e2a2241137c5ae64fe6e4d'
+LIBSFRAME_ROW = {'Package': 'libsframe1', 'Version': '2.42-4ubuntu2.10', 'Architecture': 'amd64', 'Filename': 'pool/main/b/binutils/libsframe1_2.42-4ubuntu2.10_amd64.deb', 'SHA256': '72093fb456864db55f1352bfa5e952a94f7abaff64e71dff1fbf001db1984564', 'Size': '15724'}
+ARTIFACT_PROFILES = ("fixed32", "readelf-one-v1", "ctf-one-v1", "libsframe-one-v1")
 READELF_BYTES = 789280
 READELF_SHA = "64c58e15274bbbb5153f31078e455e9e77ee5f51489e709bba5bb788ce9df2b0"
 READELF_OUTPUT = "readelf-member.bin"
@@ -208,6 +210,8 @@ def acquisition_context(parent):
 
 def artifact_manifest_sha(artifact_profile):
     need(type(artifact_profile) is str and artifact_profile in ARTIFACT_PROFILES, "artifact_profile")
+    if artifact_profile == "libsframe-one-v1":
+        return LIBSFRAME_MANIFEST_SHA
     if artifact_profile == "ctf-one-v1":
         return CTF_MANIFEST_SHA
     return MANIFEST_SHA if artifact_profile == "fixed32" else READELF_MANIFEST_SHA
@@ -215,6 +219,11 @@ def artifact_manifest_sha(artifact_profile):
 
 def manifest(rows, artifact_profile="fixed32"):
     binding = artifact_manifest_sha(artifact_profile)
+    if artifact_profile == "libsframe-one-v1":
+        need(isinstance(rows, list) and len(rows) == 1, "manifest_count")
+        need(type(rows[0]) is dict and set(rows[0]) == FIELDS, "manifest_schema")
+        need(rows == [LIBSFRAME_ROW] and sha(canonical(rows)) == binding, "manifest_binding")
+        return rows
     if artifact_profile == "ctf-one-v1":
         need(isinstance(rows, list) and len(rows) == 1, "manifest_count")
         need(type(rows[0]) is dict and set(rows[0]) == FIELDS, "manifest_schema")

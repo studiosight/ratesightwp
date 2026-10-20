@@ -1281,5 +1281,132 @@ class CtfClosureTests(unittest.TestCase):
             with self.assertRaises(M.Held):M.fixed_member_contract(profile)
 
 
+
+class LibsframeProfileTests(unittest.TestCase):
+    """Synthetic data only: no real archive GET/decoder/native or missing-member closure claim."""
+    setUp = InspectionTests.setUp
+    tearDown = InspectionTests.tearDown
+    shared_reader = InspectionTests.shared_reader
+    fake_download = InspectionTests.fake_download
+
+    @contextlib.contextmanager
+    def fixture(self):
+        row = {"Package":"toy","Version":"1","Architecture":"amd64",
+               "Filename":"pool/main/t/toy.deb","Size":"3","SHA256":M.sha(b"abc")}
+        with patch.object(M,"LIBSFRAME_ROW",row), \
+             patch.object(M,"LIBSFRAME_MANIFEST_SHA",M.sha(M.canonical([row]))):
+            yield row
+
+    def test_exact_authenticated_tuple_and_profile_separation(self):
+        expected = {"Package":"libsframe1","Version":"2.42-4ubuntu2.10","Architecture":"amd64",
+                    "Filename":"pool/main/b/binutils/libsframe1_2.42-4ubuntu2.10_amd64.deb",
+                    "SHA256":"72093fb456864db55f1352bfa5e952a94f7abaff64e71dff1fbf001db1984564",
+                    "Size":"15724"}
+        self.assertEqual(M.LIBSFRAME_ROW,expected)
+        self.assertEqual(M.LIBSFRAME_MANIFEST_SHA,"b1363f597ec439b34d6eb1b6393bb337bca7cfcad5e2a2241137c5ae64fe6e4d")
+        self.assertEqual(M.sha(M.canonical([expected])),M.LIBSFRAME_MANIFEST_SHA)
+        self.assertEqual(M.manifest([expected],"libsframe-one-v1"),[expected])
+        for profile in ("fixed32","readelf-one-v1","ctf-one-v1"):
+            with self.subTest(profile=profile),self.assertRaises(M.Held):
+                M.manifest([expected],profile)
+        for row in (M.READELF_ROW,M.CTF_ROW):
+            with self.assertRaises(M.Held):M.manifest([dict(row)],"libsframe-one-v1")
+
+    def test_changed_fields_types_schema_count_and_unknown_profile_refuse(self):
+        for field in M.FIELDS:
+            with self.subTest(field=field),self.assertRaises(M.Held):
+                M.manifest([{**M.LIBSFRAME_ROW,field:"changed"}],"libsframe-one-v1")
+        for rows in ([],[dict(M.LIBSFRAME_ROW)]*2,[dict(M.LIBSFRAME_ROW,Extra=True)],
+                     [dict(M.LIBSFRAME_ROW,Size=15724)]):
+            with self.assertRaises(M.Held):M.manifest(rows,"libsframe-one-v1")
+        with self.assertRaises(M.Held):M.manifest([dict(M.LIBSFRAME_ROW)],"libsframe")
+
+    def test_materializer_and_native_actions_refuse_before_any_effect(self):
+        for action in ("materialize-readelf","materialize-ctf","probe-readelf"):
+            with patch.object(sys,"argv",["inspection",action,"--manifest","/fixture",
+                                         "--artifact-profile","libsframe-one-v1"]), \
+                 patch.object(M,"runner") as runner,patch.object(M,"acquisition_context") as context, \
+                 patch.object(M,"execute_materialization") as materialize, \
+                 patch.object(M,"execute_native_probe") as native, \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(M.main(),2)
+            runner.assert_not_called();context.assert_not_called()
+            materialize.assert_not_called();native.assert_not_called()
+
+    def test_bad_libsframe_binding_refuses_before_input_network_or_decoder(self):
+        with patch.object(M,"acquire") as fetch,patch.object(M,"tar_command") as decode, \
+             patch.object(M,"protected") as inputs:
+            with self.assertRaises(M.Held):
+                M.execute_acquisition([dict(M.CTF_ROW)],self.root,None,"libsframe-one-v1")
+            with self.assertRaises(M.Held):
+                M.execute_inspection([dict(M.CTF_ROW)],self.root,self.root,None,"libsframe-one-v1")
+        fetch.assert_not_called();decode.assert_not_called();inputs.assert_not_called()
+
+    def test_one_synthetic_acquisition_has_fixed_binding_and_never_decodes(self):
+        with self.fixture() as row,self.fake_download(Response()) as fetch, \
+             patch.object(M,"tar_command") as decoder,patch.object(M,"context") as private:
+            result=M.execute_acquisition([row],self.root,self.shared_reader(),"libsframe-one-v1")
+            self.assertEqual(result["manifestSha256"],M.LIBSFRAME_MANIFEST_SHA)
+        self.assertEqual(result["artifactProfile"],"libsframe-one-v1")
+        self.assertEqual(len(result["archives"]),1)
+        self.assertEqual(fetch.return_value.open.call_count,1)
+        self.assertFalse(result["archiveDecoderInvoked"])
+        self.assertFalse(result["publicationAuthorized"])
+        decoder.assert_not_called();private.assert_not_called()
+
+    def test_failed_download_retains_owned_bytes_no_decoder_or_followup(self):
+        with self.fixture() as row,self.fake_download(Response(b"bad")), \
+             patch.object(M,"execute_inspection") as inspect, \
+             self.assertRaisesRegex(M.Held,"archive_binding"):
+            M.execute_acquisition([row],self.root,self.shared_reader(),"libsframe-one-v1")
+        self.assertEqual((self.root/"toy.deb").read_bytes(),b"bad")
+        inspect.assert_not_called()
+
+    def inspect_fixture(self, failure=None):
+        inputs=self.root/"inputs";inputs.mkdir();(inputs/"toy.deb").write_bytes(b"abc")
+        calls=[]
+        def decode(path,kind,folder,deadline,current,*unexpected):
+            self.assertFalse(unexpected) # No materialization sink for this profile.
+            calls.append(kind)
+            data=(archive([("control",b"TOY_NOT_EXECUTED","file")]) if kind=="control" else
+                  archive([("usr/lib/x86_64-linux-gnu/libtoy.so.1.0",b"TOY_NOT_ELF","file"),
+                           ("usr/lib/x86_64-linux-gnu/libtoy.so.1","libtoy.so.1.0","link")]))
+            result=M.inspect_tar(io.BytesIO(data),current)
+            if failure==kind:raise M.Held("dpkg_decode_failed")
+            return result
+        with self.fixture() as row, \
+             patch.object(M,"protected",side_effect=lambda path,**kw:Path(path)), \
+             patch.object(M.os,"statvfs",return_value=type("V",(),{"f_flag":os.ST_RDONLY})()), \
+             patch.object(M,"tar_command",side_effect=decode):
+            if failure:
+                with self.assertRaisesRegex(M.Held,"dpkg_decode_failed"):
+                    M.execute_inspection([row],inputs,self.root,self.shared_reader(),"libsframe-one-v1")
+                result=None
+            else:result=M.execute_inspection([row],inputs,self.root,self.shared_reader(),"libsframe-one-v1")
+        self.assertEqual(list(inputs.iterdir()),[inputs/"toy.deb"])
+        self.assertEqual(list(self.root.iterdir()),[inputs])
+        return result,calls
+
+    def test_inert_complete_control_data_report_and_alias_data_without_output(self):
+        with patch.object(M.os,"symlink") as symlink,patch.object(M.os,"link") as link:
+            report,calls=self.inspect_fixture()
+        self.assertEqual(calls,["control","data"])
+        self.assertEqual(report["artifactProfile"],"libsframe-one-v1")
+        self.assertEqual(report["state"],"INERT_ARCHIVES_INSPECTED_NOT_RUNTIME_OR_SECURITY_PASS")
+        self.assertEqual(report["networkRequests"],0)
+        section=report["packages"][0]["data"]
+        self.assertEqual(section["entries"][0]["sha256"],M.sha(b"TOY_NOT_ELF"))
+        self.assertEqual(section["entries"][1]["kind"],"link_not_materialized")
+        symlink.assert_not_called();link.assert_not_called()
+
+    def test_data_decoder_failure_cannot_return_report_or_materialize_member(self):
+        report,calls=self.inspect_fixture("data")
+        self.assertIsNone(report);self.assertEqual(calls,["control","data"])
+
+    def test_control_decoder_failure_stops_before_data(self):
+        report,calls=self.inspect_fixture("control")
+        self.assertIsNone(report);self.assertEqual(calls,["control"])
+
+
 if __name__ == "__main__":
     unittest.main()
