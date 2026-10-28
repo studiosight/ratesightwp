@@ -1,10 +1,9 @@
 <?php
 /**
- * License validation via Ratesight API.
+ * License check.
  *
- * Sends the Ratesight ID + site URL to oauth.ratesight.com/validate and caches
- * the result for 24 hours. Fails closed — if the server is unreachable or the
- * response is invalid, the license is treated as inactive.
+ * Local only: the legacy Worker licence call is retired. A site with a Ratesight ID is
+ * treated as licensed (enforcement is off), cached for 24 hours.
  *
  * Gated by this class:
  *   - RS Pages (CPT) — pages return 404 when unlicensed
@@ -32,7 +31,6 @@ class Ratesight_License {
 	const LICENSE_ENFORCEMENT = false; // ← flip to true when Worker is live
 	const TRANSIENT_KEY   = 'ratesight_license_status';
 	const CACHE_DURATION  = DAY_IN_SECONDS; // 24 hours
-	const VALIDATE_URL    = 'https://oauth.ratesight.com/validate';
 
 	// -------------------------------------------------------------------------
 	// Public API
@@ -81,42 +79,10 @@ class Ratesight_License {
 	// -------------------------------------------------------------------------
 
 	private static function check_and_cache() {
-		$ratesight_id = (string) Ratesight_Options::get( 'code_id' );
-
-		// No ID configured — treat as unlicensed immediately, don't hit the API.
-		if ( $ratesight_id === '' ) {
-			set_transient( self::TRANSIENT_KEY, 'invalid', self::CACHE_DURATION );
-			return false;
-		}
-
-		$site_url = home_url();
-		// Already carries ratesight_id (the OID), so the Worker can derive the
-		// per-site key; just sign with the active secret.
-		$hmac     = hash_hmac( 'sha256', $ratesight_id . '|' . $site_url, Ratesight_OAuth_Client::active_secret() );
-
-		$response = wp_remote_post( self::VALIDATE_URL, array(
-			'timeout' => 10,
-			'headers' => array( 'Content-Type' => 'application/json' ),
-			'body'    => wp_json_encode( array(
-				'ratesight_id' => $ratesight_id,
-				'site_url'     => $site_url,
-				'hmac'         => $hmac,
-			) ),
-		) );
-
-		// Fail closed — any network error or unexpected response = invalid.
-		if ( is_wp_error( $response ) ) {
-			set_transient( self::TRANSIENT_KEY, 'invalid', self::CACHE_DURATION );
-			return false;
-		}
-
-		$code = wp_remote_retrieve_response_code( $response );
-		$body = json_decode( wp_remote_retrieve_body( $response ), true );
-
-		$valid = ( $code === 200 && ! empty( $body['ok'] ) );
-
+		// No network call: the legacy Worker licence check is retired. Enforcement is off; a site
+		// with a Ratesight ID is treated as licensed.
+		$valid = '' !== (string) Ratesight_Options::get( 'code_id' );
 		set_transient( self::TRANSIENT_KEY, $valid ? 'valid' : 'invalid', self::CACHE_DURATION );
-
 		return $valid;
 	}
 }

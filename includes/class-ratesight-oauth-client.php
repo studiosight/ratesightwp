@@ -2,7 +2,7 @@
 /**
  * Google OAuth client — proxy version.
  *
- * The Cloudflare Worker at oauth.ratesight.com holds all Google credentials.
+ * Retired: the legacy Worker no longer refreshes or holds Google access for this plugin.
  * This plugin only needs two secrets — both are Ratesight-internal values,
  * nothing from Google.
  *
@@ -29,8 +29,6 @@ defined( 'ABSPATH' ) || die;
 
 class Ratesight_OAuth_Client {
 
-	const PROXY_URL   = 'https://oauth.ratesight.com/callback';
-	const REFRESH_URL = 'https://oauth.ratesight.com/refresh';
 	const AUTH_URL    = 'https://accounts.google.com/o/oauth2/v2/auth';
 
 	// ── Configuration ─────────────────────────────────────────────────────────
@@ -131,7 +129,7 @@ class Ratesight_OAuth_Client {
 
 		return add_query_arg( array(
 			'client_id'     => $client_id,
-			'redirect_uri'  => self::PROXY_URL,
+			'redirect_uri'  => '',
 			'response_type' => 'code',
 			'scope'         => self::SCOPES[ $service ],
 			'state'         => $state,
@@ -228,51 +226,10 @@ class Ratesight_OAuth_Client {
 	 * the request is coming from a legitimate plugin install.
 	 */
 	private static function refresh_via_worker( string $service, array $data ): string|WP_Error {
-		$refresh_token = $data['refresh_token'];
-		$hmac          = hash_hmac( 'sha256', $refresh_token, self::active_secret() );
-
-		$response = wp_remote_post( self::REFRESH_URL, array(
-			'timeout' => 15,
-			'headers' => array( 'Content-Type' => 'application/json' ),
-			'body'    => wp_json_encode( array(
-				'refresh_token'     => $refresh_token,
-				'token_secret_hmac' => $hmac,
-				'service'           => $service,
-			) + self::auth_meta() ),
-		) );
-
-		if ( is_wp_error( $response ) ) {
-			return new \WP_Error( 'rs_refresh_failed', 'Token refresh request failed: ' . $response->get_error_message() );
-		}
-
-		$body = json_decode( wp_remote_retrieve_body( $response ), true );
-
-		if ( empty( $body['ok'] ) ) {
-			if ( ! empty( $body['revoked'] ) ) {
-				$reason = 'Google revoked the refresh token. This usually means the OAuth app is in Testing mode (tokens expire after 7 days). Go to Google Cloud Console → OAuth consent screen and publish the app, then reconnect.';
-				update_option( 'ratesight_' . $service . '_revoked', 1, false );
-				update_option( 'ratesight_' . $service . '_disconnect_reason', $reason, false );
-				self::disconnect( $service );
-				Ratesight_Notifier::alert(
-					strtoupper( $service ) . ' disconnected',
-					"Your {$service} connection was disconnected.\n\n{$reason}\n\nReconnect at: " . admin_url( 'admin.php?page=ratesight&tab=connections' )
-				);
-				return new \WP_Error( 'rs_refresh_revoked', $reason );
-			}
-			return new \WP_Error( 'rs_refresh_failed', 'Token refresh failed: ' . ( $body['error'] ?? 'unknown error' ) );
-		}
-
-		// Verify the Worker signed the response.
-		$result = self::verify_worker_payload( $body['payload'] );
-		if ( is_wp_error( $result ) ) {
-			return $result;
-		}
-
-		$data['access_token'] = $result['access_token'];
-		$data['expires_at']   = (int) $result['expires_at'];
-		update_option( 'ratesight_' . $service . '_oauth', $data, false );
-
-		return $data['access_token'];
+		// Retired: Google access for this plugin is no longer refreshed through the legacy Worker.
+		// Search Console, Business Profile and Bing data are owned by the Ratesight dashboard.
+		unset( $data );
+		return new \WP_Error( 'rs_google_oauth_retired', ucfirst( $service ) . ' data now comes from your Ratesight dashboard.' );
 	}
 
 	// -------------------------------------------------------------------------
