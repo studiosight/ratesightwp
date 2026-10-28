@@ -1730,19 +1730,7 @@ class Ratesight_Admin {
 			}
 		}
 
-		// Check Bing via Worker
-		$auth     = Ratesight_OAuth_Client::sign_request( $host . '|check' );
-		$response = wp_remote_get(
-			add_query_arg( array( 'host' => $host ) + $auth, 'https://oauth.ratesight.com/sitemap-status' ),
-			array( 'timeout' => 8 )
-		);
-
-		if ( ! is_wp_error( $response ) ) {
-			$body = json_decode( wp_remote_retrieve_body( $response ), true );
-			$result['bing_submitted'] = ! empty( $body['submitted'] );
-			$result['bing_verified']  = ! empty( $body['verified'] );
-		}
-
+		// Bing sitemap status is shown in the Ratesight dashboard.
 		wp_send_json_success( $result );
 	}
 

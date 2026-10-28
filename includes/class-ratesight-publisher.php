@@ -174,47 +174,14 @@ class Ratesight_Publisher {
 	// -------------------------------------------------------------------------
 
 	/**
-	 * Silently submit a newly published URL to Bing via the Worker.
-	 * Non-blocking — failure adds a warning but never stops the publish flow.
+	 * Bing URL submission moved to the Ratesight dashboard, which submits from the signed
+	 * publication event. Kept as a no-op so the publish flow is unchanged.
 	 *
 	 * @param int   $post_id
-	 * @param array &$warnings  Passed by reference to append any warning.
+	 * @param array &$warnings Unused.
 	 */
 	private function auto_submit_to_bing( int $post_id, array &$warnings ) {
-		$url  = get_permalink( $post_id );
-		$host = $url ? wp_parse_url( $url, PHP_URL_HOST ) : '';
-
-		if ( ! $url || ! $host ) return;
-
-		$auth     = Ratesight_OAuth_Client::sign_request( $host . '|' . $url );
-		$response = wp_remote_post( 'https://oauth.ratesight.com/auto-submit', array(
-			'timeout'  => 8,
-			'blocking' => true, // Keep blocking so we can log the result
-			'headers'  => array( 'Content-Type' => 'application/json' ),
-			'body'     => wp_json_encode( array(
-				'host' => $host,
-				'url'  => $url,
-			) + $auth ),
-		) );
-
-		if ( is_wp_error( $response ) ) {
-			// Network failure — silent, no user-facing warning
-			return;
-		}
-
-		$body = json_decode( wp_remote_retrieve_body( $response ), true );
-
-		// Only warn if Bing is registered but submission failed — not if it just
-		// isn't registered yet (that's expected for new installs).
-		if ( ! empty( $body['ok'] ) ) {
-			// Success — no log entry needed, submission is expected behaviour.
-			return;
-		}
-
-		$error = $body['error'] ?? '';
-		if ( $error && strpos( $error, 'not registered' ) === false && strpos( $error, 'not verified' ) === false ) {
-			$warnings[] = 'Bing submit: ' . $error;
-		}
+		unset( $post_id, $warnings );
 	}
 
 	/**
