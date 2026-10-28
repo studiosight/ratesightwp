@@ -18,7 +18,7 @@ defined( 'ABSPATH' ) || die;
 class Ratesight_AI_Client {
 
 	private static function unavailable(): array {
-		return array( 'ok' => false, 'error' => 'AI suggestions now appear in your Ratesight dashboard.' );
+		return array( 'ok' => false, 'error' => 'AI suggestions are temporarily unavailable.' );
 	}
 
 	public static function prompt( string $prompt, array|string $context_data = array(), int $timeout = 45 ): array {
