@@ -43,6 +43,8 @@ class Ratesight {
 		// Core
 		$this->loader->add_action( 'wp_ajax_ratesight_clear_logs',            $admin, 'ajax_clear_logs'           );
 		$this->loader->add_action( 'wp_ajax_ratesight_get_logs',              $admin, 'ajax_get_logs'             );
+		$this->loader->add_action( 'wp_ajax_ratesight_reset_pairing',         $admin, 'ajax_reset_pairing'        );
+		$this->loader->add_action( 'wp_ajax_ratesight_generate_recovery_secret', $admin, 'ajax_generate_recovery_secret' );
 		$this->loader->add_action( 'wp_ajax_ratesight_fix_log_status',        $admin, 'ajax_fix_log_status'       );
 		$this->loader->add_action( 'wp_ajax_ratesight_debug_pending_logs',    $admin, 'ajax_debug_pending_logs'   );
 		$this->loader->add_action( 'wp_ajax_ratesight_bulk_publish_drafts',   $admin, 'ajax_bulk_publish_drafts'  );

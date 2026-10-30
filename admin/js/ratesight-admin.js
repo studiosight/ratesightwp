@@ -105,6 +105,73 @@
 		$( '#rs-custom-text-color' ).on( 'change', updateReviewWidgetPreview );
 		updateReviewWidgetPreview();
 
+		// ── Pairing recovery and reset (administrators; the server checks the typed word too) ──
+		var rsSecretWarning = 'Anyone who sees this secret can act as Ratesight on this site; paste it only into the dashboard field and do not send it by chat or email.';
+		function rsRecoveryMessage( text, isError ) {
+			var $r = $( '#rs-recovery-result' ).empty();
+			$( '<p>' ).css( 'color', isError ? '#b32d2e' : '' ).text( text ).appendTo( $r );
+			return $r;
+		}
+		$( '#rs-recovery-generate' ).on( 'click', function () {
+			if ( $( '#rs-recovery-generate-word' ).val().trim() !== 'GENERATE' ) {
+				rsRecoveryMessage( 'Type GENERATE in the box to confirm.', true );
+				return;
+			}
+			var old = String( $( '#rs-recovery-old' ).val() || '' );
+			if ( old !== 'rotate' && old !== 'replace_now' ) {
+				rsRecoveryMessage( 'Choose what happens to the current secret: rotate or replace now.', true );
+				return;
+			}
+			var confirmText = old === 'replace_now'
+				? 'Generate a new recovery secret and replace the old one NOW? The old secret stops working immediately, so Ratesight is cut off from this site until you paste the new secret into the dashboard. The new secret is shown once.'
+				: 'Generate a new recovery secret and rotate? The old secret keeps working for 7 days, but Ratesight cannot use the new one until you paste it into the dashboard. The new secret is shown once.';
+			if ( ! window.confirm( confirmText ) ) {
+				return;
+			}
+			var $btn = $( this ).prop( 'disabled', true );
+			$.post( ajax, { action: 'ratesight_generate_recovery_secret', nonce: nonce, confirm: 'GENERATE', old: old } )
+				.done( function ( r ) {
+					if ( ! r || ! r.success ) {
+						rsRecoveryMessage( ( r && r.data && r.data.message ) || 'Could not generate a secret.', true );
+						return;
+					}
+					var secret = String( r.data.secret || '' );
+					var $r = rsRecoveryMessage( 'New recovery secret (key id ' + r.data.key_id + '). It is shown once; copy it now.', false );
+					var $box = $( '<input type="text" readonly class="regular-text code" id="rs-recovery-secret" style="width:100%;max-width:560px;">' ).val( secret ).appendTo( $r );
+					var $copy = $( '<button type="button" class="button" style="margin-left:6px;">Copy</button>' ).appendTo( $r );
+					var $hide = $( '<button type="button" class="button" style="margin-left:6px;">Hide</button>' ).appendTo( $r );
+					$( '<p class="description">' ).text( rsSecretWarning ).appendTo( $r );
+					$copy.on( 'click', function () {
+						copyText( secret, function () { $copy.text( 'Copied' ); }, function () { $box.trigger( 'focus' ).trigger( 'select' ); } );
+					} );
+					$hide.on( 'click', function () { secret = ''; $r.empty(); } );
+					$( '#rs-recovery-generate-word' ).val( '' );
+				} )
+				.fail( function () { rsRecoveryMessage( 'Could not generate a secret.', true ); } )
+				.always( function () { $btn.prop( 'disabled', false ); } );
+		} );
+		$( '#rs-recovery-reset' ).on( 'click', function () {
+			if ( $( '#rs-recovery-reset-word' ).val().trim() !== 'RESET' ) {
+				rsRecoveryMessage( 'Type RESET in the box to confirm.', true );
+				return;
+			}
+			if ( ! window.confirm( 'Clear this site\'s Ratesight secrets and pairing record? Ratesight is cut off from this site until the dashboard has a new secret or pairs it again.' ) ) {
+				return;
+			}
+			var $btn = $( this ).prop( 'disabled', true );
+			$.post( ajax, { action: 'ratesight_reset_pairing', nonce: nonce, confirm: 'RESET' } )
+				.done( function ( r ) {
+					if ( ! r || ! r.success ) {
+						rsRecoveryMessage( ( r && r.data && r.data.message ) || 'Could not reset the pairing.', true );
+						return;
+					}
+					rsRecoveryMessage( 'Pairing cleared. This site is now: ' + ( r.data.notice ? r.data.notice.heading : r.data.state ) + '. Request mode: ' + r.data.mode + '.', false );
+					$( '#rs-recovery-reset-word' ).val( '' );
+				} )
+				.fail( function () { rsRecoveryMessage( 'Could not reset the pairing.', true ); } )
+				.always( function () { $btn.prop( 'disabled', false ); } );
+		} );
+
 		// ── AI worker health test ─────────────────────────────────────────────
 		$( '#rs-test-ai-worker' ).on( 'click', function () {
 			var $btn = $( this ).prop( 'disabled', true ).text( 'Testing…' );
