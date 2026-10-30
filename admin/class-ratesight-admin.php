@@ -2333,6 +2333,7 @@ class Ratesight_Admin {
 	 * site out incorrectly or make it less strict.
 	 */
 	public function ajax_reset_pairing(): void {
+		if ( 'POST' !== strtoupper( (string) ( $_SERVER['REQUEST_METHOD'] ?? '' ) ) ) wp_send_json_error( array( 'message' => 'POST required.' ), 405 );
 		check_ajax_referer( 'ratesight_admin', 'nonce' );
 		if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
 		if ( 'RESET' !== trim( (string) wp_unslash( $_POST['confirm'] ?? '' ) ) ) {
@@ -2350,13 +2351,26 @@ class Ratesight_Admin {
 	 * ratesight_webhook_secret. The typed word is checked here.
 	 */
 	public function ajax_generate_recovery_secret(): void {
+		if ( 'POST' !== strtoupper( (string) ( $_SERVER['REQUEST_METHOD'] ?? '' ) ) ) wp_send_json_error( array( 'message' => 'POST required.' ), 405 );
 		check_ajax_referer( 'ratesight_admin', 'nonce' );
 		if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
 		if ( 'GENERATE' !== trim( (string) wp_unslash( $_POST['confirm'] ?? '' ) ) ) {
 			wp_send_json_error( array( 'message' => 'Type GENERATE to confirm.', 'code' => 'confirmation_required' ), 400 );
 		}
+		// What happens to the OLD secret is an explicit choice. A paired site must say which (the old secret
+		// is the one Ratesight uses); an unpaired site defaults to replace_now.
+		$old = trim( (string) wp_unslash( $_POST['old'] ?? '' ) );
+		if ( '' === $old ) {
+			if ( Ratesight_Pairing::is_connected() ) {
+				wp_send_json_error( array( 'message' => 'Choose what happens to the old secret: rotate (it keeps working for 7 days) or replace now (it stops working immediately).', 'code' => 'old_secret_choice_required' ), 400 );
+			}
+			$old = 'replace_now';
+		}
+		if ( ! in_array( $old, array( 'rotate', 'replace_now' ), true ) ) {
+			wp_send_json_error( array( 'message' => 'Unknown choice for the old secret.', 'code' => 'old_secret_choice_invalid' ), 400 );
+		}
 		$user   = wp_get_current_user();
-		$result = Ratesight_Pairing::generate_recovery_secret( (int) $user->ID, (string) $user->user_login );
+		$result = Ratesight_Pairing::generate_recovery_secret( (int) $user->ID, (string) $user->user_login, $old );
 		nocache_headers();
 		wp_send_json_success( $result );
 	}

@@ -117,11 +117,19 @@
 				rsRecoveryMessage( 'Type GENERATE in the box to confirm.', true );
 				return;
 			}
-			if ( ! window.confirm( 'Generate a new recovery secret? The current secret keeps working for 7 days, but Ratesight cannot use the new one until you paste it into the dashboard. The new secret is shown once.' ) ) {
+			var old = String( $( '#rs-recovery-old' ).val() || '' );
+			if ( old !== 'rotate' && old !== 'replace_now' ) {
+				rsRecoveryMessage( 'Choose what happens to the current secret: rotate or replace now.', true );
+				return;
+			}
+			var confirmText = old === 'replace_now'
+				? 'Generate a new recovery secret and replace the old one NOW? The old secret stops working immediately, so Ratesight is cut off from this site until you paste the new secret into the dashboard. The new secret is shown once.'
+				: 'Generate a new recovery secret and rotate? The old secret keeps working for 7 days, but Ratesight cannot use the new one until you paste it into the dashboard. The new secret is shown once.';
+			if ( ! window.confirm( confirmText ) ) {
 				return;
 			}
 			var $btn = $( this ).prop( 'disabled', true );
-			$.post( ajax, { action: 'ratesight_generate_recovery_secret', nonce: nonce, confirm: 'GENERATE' } )
+			$.post( ajax, { action: 'ratesight_generate_recovery_secret', nonce: nonce, confirm: 'GENERATE', old: old } )
 				.done( function ( r ) {
 					if ( ! r || ! r.success ) {
 						rsRecoveryMessage( ( r && r.data && r.data.message ) || 'Could not generate a secret.', true );

@@ -204,18 +204,37 @@ PEM,
 	 * (it needs source dashboard AND paired_at, both written only by the control-plane-signed /pair route).
 	 * The secret is returned to the caller once and is stored only in ratesight_webhook_secret.
 	 *
-	 * @return array{secret:string,key_id:string,previous_grace_expires:?string,mode:string}
+	 * What happens to the OLD secret is the caller's explicit choice ($old):
+	 *   rotate       the secret Ratesight actually knows keeps working for 7 days (it becomes "previous");
+	 *   replace_now  "previous" and its expiry are deleted, so the old key stops verifying immediately.
+	 * A generated secret that no signed pairing has proven (receipt manual_recovery) is NEVER moved into
+	 * "previous": Ratesight never received it, so keeping it as the fallback could overwrite the secret
+	 * Ratesight does know (a second generate during the grace window would otherwise lock it out in
+	 * enforce_v2). It is simply replaced, and an existing "previous" (the paired secret, with its original
+	 * expiry) is left as it was. Anything unrecognised means replace_now, the stricter choice.
+	 *
+	 * @return array{secret:string,key_id:string,previous_grace_expires:?string,mode:string,old:string}
 	 */
-	public static function generate_recovery_secret( int $user_id, string $login ): array {
+	public static function generate_recovery_secret( int $user_id, string $login, string $old = 'replace_now' ): array {
 		$now      = time();
-		$previous = (string) get_option( 'ratesight_webhook_secret', '' );
+		$old      = in_array( $old, array( 'rotate', 'replace_now' ), true ) ? $old : 'replace_now';
+		$current  = (string) get_option( 'ratesight_webhook_secret', '' );
+		$receipt  = get_option( 'ratesight_pairing_receipt', array() );
+		$unproven = is_array( $receipt ) && ( $receipt['source'] ?? '' ) === 'manual_recovery';
 		$secret   = bin2hex( random_bytes( 32 ) );
 		$key_id   = Ratesight_Request_Auth::key_id( $secret );
 		$expires  = null;
-		if ( $previous !== '' ) {
-			update_option( 'ratesight_webhook_secret_previous', $previous, false );
+		if ( 'replace_now' === $old ) {
+			delete_option( 'ratesight_webhook_secret_previous' );
+			delete_option( 'ratesight_webhook_secret_previous_expires' );
+		} elseif ( ! $unproven && $current !== '' ) {
+			update_option( 'ratesight_webhook_secret_previous', $current, false );
 			update_option( 'ratesight_webhook_secret_previous_expires', $now + self::PREVIOUS_GRACE, false );
 			$expires = gmdate( 'c', $now + self::PREVIOUS_GRACE );
+		} else {
+			// Rotate with an unproven current secret: leave "previous" (and its original expiry) untouched.
+			$left = (int) get_option( 'ratesight_webhook_secret_previous_expires', 0 );
+			$expires = (string) get_option( 'ratesight_webhook_secret_previous', '' ) !== '' && $left > $now ? gmdate( 'c', $left ) : null;
 		}
 		// The dashboard's signed self-test needs observe or enforce; same step the signed pairing takes.
 		if ( Ratesight_Request_Auth::mode() !== 'enforce_v2' ) {
@@ -224,8 +243,8 @@ PEM,
 		update_option( 'ratesight_webhook_secret', $secret, false );
 		delete_option( 'ratesight_auth_v2_readiness' );
 		update_option( 'ratesight_pairing_receipt', array( 'source' => 'manual_recovery', 'key_id' => $key_id, 'generated_at' => $now ), false );
-		Ratesight_Request_Auth::record_admin_event( $user_id, $login, 'recovery_secret_generated', $key_id, $previous !== '' ? 'previous secret kept 7 days' : '' );
-		return array( 'secret' => $secret, 'key_id' => $key_id, 'previous_grace_expires' => $expires, 'mode' => Ratesight_Request_Auth::mode() );
+		Ratesight_Request_Auth::record_admin_event( $user_id, $login, 'recovery_secret_generated', $key_id, 'replace_now' === $old ? 'old secret replaced now' : ( $expires !== null ? 'old secret kept until ' . $expires : 'rotate: nothing to keep' ) );
+		return array( 'secret' => $secret, 'key_id' => $key_id, 'previous_grace_expires' => $expires, 'mode' => Ratesight_Request_Auth::mode(), 'old' => $old );
 	}
 
 	public static function is_connected(): bool {

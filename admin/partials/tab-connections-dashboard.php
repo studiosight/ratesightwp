@@ -12,6 +12,7 @@ $connected = $installation['active'] && Ratesight_Pairing::is_connected();
 $publication_events = Ratesight_Publication_Events::status();
 $rs_notice = Ratesight_Pairing::notice();
 $rs_recovery = Ratesight_Pairing::status()['recovery'] ?? false;
+$rs_paired = Ratesight_Pairing::is_connected();
 ?>
 <div class="rs-card" id="rs-dashboard-connection-card" data-ratesight-owner="dashboard">
 	<div class="rs-card-body">
@@ -32,7 +33,15 @@ $rs_recovery = Ratesight_Pairing::status()['recovery'] ?? false;
 					<p class="description">A recovery secret was generated here and the dashboard has not paired yet. Paste it into the dashboard's webhook secret field for this site.</p>
 				<?php endif; ?>
 				<h3 style="margin:10px 0 4px;">Generate a recovery secret</h3>
-				<p class="description">Makes a new secret here to paste into the Ratesight dashboard. The current secret keeps working for 7 days. The new secret is shown once.</p>
+				<p class="description">Makes a new secret here to paste into the Ratesight dashboard. You choose whether the current secret keeps working for 7 days or stops immediately. The new secret is shown once.</p>
+				<p>
+					<label for="rs-recovery-old">The current secret</label>
+					<select id="rs-recovery-old">
+						<?php if ( $rs_paired ) : ?><option value="" selected>Choose…</option><?php endif; ?>
+						<option value="rotate">Rotate: keeps working for 7 days</option>
+						<option value="replace_now"<?php echo $rs_paired ? '' : ' selected'; ?>>Replace now: stops working immediately</option>
+					</select>
+				</p>
 				<p>
 					<label for="rs-recovery-generate-word">Type <code>GENERATE</code> to confirm</label>
 					<input type="text" id="rs-recovery-generate-word" autocomplete="off" style="width:140px;">
