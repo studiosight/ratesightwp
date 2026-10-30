@@ -128,8 +128,104 @@ PEM,
 			'supported' => function_exists( 'openssl_verify' ),
 			'contract'  => self::CONTRACT,
 			'source'    => is_array( $receipt ) && ( $receipt['source'] ?? '' ) === 'dashboard' ? 'dashboard' : null,
+			// A recovery secret was generated here but the dashboard has not paired: never "connected".
+			'recovery'  => is_array( $receipt ) && ( $receipt['source'] ?? '' ) === 'manual_recovery',
 			'pairedAt'  => is_array( $receipt ) && ! empty( $receipt['paired_at'] ) ? gmdate( 'c', (int) $receipt['paired_at'] ) : null,
 		);
+	}
+
+	/**
+	 * The three honest states of a site's Ratesight connection.
+	 *   paired      the signed pairing really happened (is_connected())
+	 *   registered  the site has its Ratesight ID but is NOT paired: Ratesight cannot act on it yet
+	 *   setup       no Ratesight ID yet
+	 * A stored ID alone is never "connected"; only is_connected() says that.
+	 */
+	public static function connection_state(): string {
+		if ( self::is_connected() ) {
+			return 'paired';
+		}
+		return trim( (string) Ratesight_Options::get( 'code_id' ) ) !== '' ? 'registered' : 'setup';
+	}
+
+	/** The heading and plain line the admin shows for connection_state(). */
+	public static function notice(): array {
+		switch ( self::connection_state() ) {
+			case 'paired':
+				return array( 'state' => 'paired', 'heading' => 'Connected', 'line' => "Ratesight is managing this site's services. There is nothing you need to connect here." );
+			case 'registered':
+				return array( 'state' => 'registered', 'heading' => 'Registered, not paired yet', 'line' => 'Your Ratesight team can finish pairing this site. No action is needed here.' );
+			default:
+				return array( 'state' => 'setup', 'heading' => 'Setup in progress', 'line' => 'Your Ratesight team can finish connecting this site. No action is needed here.' );
+		}
+	}
+
+	/**
+	 * Administrator reset: forget the pairing so the site is unpaired again.
+	 *
+	 * Clears exactly: the primary secret, the previous secret and its expiry, the pairing receipt and the
+	 * readiness proof. Keeps the Ratesight ID (code_id) and every provider and post setting.
+	 *
+	 * Mode: a site that was NEVER enforced goes back to legacy (the state before any pairing). A site that
+	 * ever enforced stays enforce_v2: set_mode() refuses that downgrade on purpose, and it is the safe side,
+	 * because with no secret every signed route is refused (rs_secret_required) until the control plane pairs
+	 * the site again. The signed /pair route does not depend on the secret or the mode, so re-pairing still
+	 * works from any state. Nothing here can make a site LESS strict than it was.
+	 *
+	 * @return array{state:string,mode:string,ever_enforced:bool,cleared_key_id:?string}
+	 */
+	public static function reset_pairing( int $user_id, string $login ): array {
+		$old       = (string) get_option( 'ratesight_webhook_secret', '' );
+		$cleared   = $old !== '' ? Ratesight_Request_Auth::key_id( $old ) : null;
+		$mode_now  = Ratesight_Request_Auth::mode();
+		$ever      = (bool) get_option( 'ratesight_auth_ever_enforced', false ) || $mode_now === 'enforce_v2';
+
+		foreach ( array( 'ratesight_webhook_secret', 'ratesight_webhook_secret_previous', 'ratesight_webhook_secret_previous_expires', 'ratesight_pairing_receipt', 'ratesight_auth_v2_readiness' ) as $name ) {
+			delete_option( $name );
+		}
+		$note = 'mode kept: ' . $mode_now;
+		if ( ! $ever && $mode_now !== 'legacy' ) {
+			$result = Ratesight_Request_Auth::set_mode( 'legacy' );
+			$note   = is_wp_error( $result ) ? 'mode kept: ' . $mode_now : 'mode reset to legacy';
+		}
+		Ratesight_Request_Auth::record_admin_event( $user_id, $login, 'pairing_reset', (string) $cleared, $note );
+		return array(
+			'state'          => self::connection_state(),
+			'mode'           => Ratesight_Request_Auth::mode(),
+			'ever_enforced'  => $ever,
+			'cleared_key_id' => $cleared,
+		);
+	}
+
+	/**
+	 * Administrator recovery: generate a new secret HERE, to be pasted into the dashboard.
+	 *
+	 * The receipt says source manual_recovery and carries NO paired_at, so is_connected() stays false
+	 * (it needs source dashboard AND paired_at, both written only by the control-plane-signed /pair route).
+	 * The secret is returned to the caller once and is stored only in ratesight_webhook_secret.
+	 *
+	 * @return array{secret:string,key_id:string,previous_grace_expires:?string,mode:string}
+	 */
+	public static function generate_recovery_secret( int $user_id, string $login ): array {
+		$now      = time();
+		$previous = (string) get_option( 'ratesight_webhook_secret', '' );
+		$secret   = bin2hex( random_bytes( 32 ) );
+		$key_id   = Ratesight_Request_Auth::key_id( $secret );
+		$expires  = null;
+		if ( $previous !== '' ) {
+			update_option( 'ratesight_webhook_secret_previous', $previous, false );
+			update_option( 'ratesight_webhook_secret_previous_expires', $now + self::PREVIOUS_GRACE, false );
+			$expires = gmdate( 'c', $now + self::PREVIOUS_GRACE );
+		}
+		// The dashboard's signed self-test needs observe or enforce; same step the signed pairing takes.
+		if ( Ratesight_Request_Auth::mode() !== 'enforce_v2' ) {
+			Ratesight_Request_Auth::set_mode( 'observe_v2' );
+		}
+		update_option( 'ratesight_webhook_secret', $secret, false );
+		delete_option( 'ratesight_auth_v2_readiness' );
+		update_option( 'ratesight_pairing_receipt', array( 'source' => 'manual_recovery', 'key_id' => $key_id, 'generated_at' => $now ), false );
+		Ratesight_Request_Auth::record_admin_event( $user_id, $login, 'recovery_secret_generated', $key_id, $previous !== '' ? 'previous secret kept 7 days' : '' );
+		return array( 'secret' => $secret, 'key_id' => $key_id, 'previous_grace_expires' => $expires, 'mode' => Ratesight_Request_Auth::mode() );
 	}
 
 	public static function is_connected(): bool {

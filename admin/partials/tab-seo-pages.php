@@ -41,12 +41,13 @@ $ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
 	<tr>
 		<th scope="row">Ratesight Connection</th>
 		<td>
-			<?php if ( $ratesight_id !== '' ) : ?>
-				<strong style="color:#00a32a;">Connected</strong>
+			<?php $rs_notice = Ratesight_Pairing::notice(); // The real test (is_connected()), not "an ID is stored". ?>
+			<?php if ( 'paired' === $rs_notice['state'] ) : ?>
+				<strong style="color:#00a32a;" data-rs-connection-state="paired">Connected</strong>
 				<p class="description">Ratesight is managing this site's services. There is nothing you need to connect here.</p>
 			<?php else : ?>
-				<strong>Setup in progress</strong>
-				<p class="description">Your Ratesight team can finish connecting this site. No action is needed here.</p>
+				<strong data-rs-connection-state="<?php echo esc_attr( $rs_notice['state'] ); ?>"><?php echo esc_html( $rs_notice['heading'] ); ?></strong>
+				<p class="description"><?php echo esc_html( $rs_notice['line'] ); ?></p>
 			<?php endif; ?>
 		</td>
 	</tr>

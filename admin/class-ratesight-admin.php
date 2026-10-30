@@ -2327,22 +2327,38 @@ class Ratesight_Admin {
 		) );
 	}
 
-	public function ajax_regen_webhook_secret(): void {
+	/**
+	 * Since 3.15.6: reset the pairing (administrators only). The typed word is checked here, not only in the
+	 * browser. See Ratesight_Pairing::reset_pairing() for exactly what it clears and why it cannot lock the
+	 * site out incorrectly or make it less strict.
+	 */
+	public function ajax_reset_pairing(): void {
 		check_ajax_referer( 'ratesight_admin', 'nonce' );
 		if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
-		$previous = (string) get_option( 'ratesight_webhook_secret', '' );
-		$secret   = bin2hex( random_bytes( 24 ) );
-		$expires  = time() + ( 7 * DAY_IN_SECONDS );
-		if ( $previous !== '' ) {
-			update_option( 'ratesight_webhook_secret_previous', $previous, false );
-			update_option( 'ratesight_webhook_secret_previous_expires', $expires, false );
+		if ( 'RESET' !== trim( (string) wp_unslash( $_POST['confirm'] ?? '' ) ) ) {
+			wp_send_json_error( array( 'message' => 'Type RESET to confirm.', 'code' => 'confirmation_required' ), 400 );
 		}
-		update_option( 'ratesight_webhook_secret', $secret, false );
-		wp_send_json_success( array(
-			'secret'                 => $secret,
-			'key_id'                 => Ratesight_Request_Auth::key_id( $secret ),
-			'previous_grace_expires' => $previous !== '' ? gmdate( 'c', $expires ) : null,
-		) );
+		$user   = wp_get_current_user();
+		$result = Ratesight_Pairing::reset_pairing( (int) $user->ID, (string) $user->user_login );
+		nocache_headers();
+		wp_send_json_success( array_merge( $result, array( 'notice' => Ratesight_Pairing::notice() ) ) );
+	}
+
+	/**
+	 * Since 3.15.6: generate a recovery secret here, to paste into the dashboard (administrators only).
+	 * The secret is in THIS response only; it is never shown again and is stored nowhere but
+	 * ratesight_webhook_secret. The typed word is checked here.
+	 */
+	public function ajax_generate_recovery_secret(): void {
+		check_ajax_referer( 'ratesight_admin', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
+		if ( 'GENERATE' !== trim( (string) wp_unslash( $_POST['confirm'] ?? '' ) ) ) {
+			wp_send_json_error( array( 'message' => 'Type GENERATE to confirm.', 'code' => 'confirmation_required' ), 400 );
+		}
+		$user   = wp_get_current_user();
+		$result = Ratesight_Pairing::generate_recovery_secret( (int) $user->ID, (string) $user->user_login );
+		nocache_headers();
+		wp_send_json_success( $result );
 	}
 
 	public function ajax_set_auth_mode(): void {

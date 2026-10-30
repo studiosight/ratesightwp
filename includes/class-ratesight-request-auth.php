@@ -566,6 +566,32 @@ class Ratesight_Request_Auth {
 		);
 	}
 
+	/**
+	 * Since 3.15.6: an administrator's pairing action (reset, recovery secret) goes in the same audit
+	 * option as request decisions, with WHO did it. Never the secret: only the 16-hex key id.
+	 */
+	public static function record_admin_event( int $user_id, string $login, string $action, string $key_id = '', string $note = '' ): void {
+		$rows = get_option( 'ratesight_auth_audit', array() );
+		$rows = is_array( $rows ) ? $rows : array();
+		$row  = array(
+			'time'       => gmdate( 'c' ),
+			'request_id' => substr( hash( 'sha256', $action . microtime( true ) . random_int( 0, PHP_INT_MAX ) ), 0, 20 ),
+			'ip'         => null,
+			'method'     => 'ADMIN',
+			'route'      => 'admin:' . $action,
+			'policy'     => 'admin_action',
+			'key_id'     => preg_match( '/^[a-f0-9]{16}$/', $key_id ) ? $key_id : null,
+			'result'     => $action,
+			'user_id'    => $user_id,
+			'user_login' => $login,
+		);
+		if ( $note !== '' ) {
+			$row['note'] = $note;
+		}
+		$rows[] = $row;
+		update_option( 'ratesight_auth_audit', array_slice( $rows, -100 ), false );
+	}
+
 	private static function failure( string $code, int $status, $request, string $policy, string $key_id = '' ) {
 		self::record_audit( $request, $policy, $code, $key_id );
 		return new WP_Error( $code, 'Request authentication failed.', array( 'status' => $status ) );
