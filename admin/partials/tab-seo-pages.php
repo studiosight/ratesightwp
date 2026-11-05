@@ -287,3 +287,24 @@ $ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
 
 <div class="rs-submit"><?php submit_button( 'Save Settings' ); ?></div>
 </form>
+
+<?php
+// Image compression phase 1 (unreleased). Turned on by the Ratesight team; this separate form
+// can only turn it off and is not part of the AI SEO Pages settings group.
+$rs_image_compression_on = class_exists( 'Ratesight_Image_Compression' ) && Ratesight_Image_Compression::enabled();
+?>
+<h2 class="rs-section">Image Compression</h2>
+<div class="rs-card">
+	<div class="rs-card-body">
+		<?php if ( $rs_image_compression_on ) : ?>
+			<p><strong>On:</strong> new JPEG uploads are saved as WebP when this server supports it. Existing images are not changed.</p>
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<input type="hidden" name="action" value="<?php echo esc_attr( Ratesight_Image_Compression::ADMIN_ACTION ); ?>">
+				<?php wp_nonce_field( Ratesight_Image_Compression::ADMIN_ACTION ); ?>
+				<?php submit_button( 'Turn off image compression', 'secondary', 'submit', false ); ?>
+			</form>
+		<?php else : ?>
+			<p><strong>Off.</strong> Uploads keep their original format. Your Ratesight team can turn this on.</p>
+		<?php endif; ?>
+	</div>
+</div>

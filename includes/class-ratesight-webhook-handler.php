@@ -1450,6 +1450,9 @@ class Ratesight_Webhook_Handler {
 			// existed for a long time but had no REST route; callers gate on a top-level flag, so the
 			// nested one alone kept the capability permanently switched off for them.
 			'indexnow'             => true,
+			// Unreleased: image compression phase 1 (WebP on new uploads, off by default). Which editor,
+			// WebP/AVIF write support, WordPress version, and whether the switch is on.
+			'image_compression'    => class_exists( 'Ratesight_Image_Compression' ) ? Ratesight_Image_Compression::capability() : null,
 			'provider_ownership'   => array(
 				'gbp_auto_post'   => false, // Retired in 3.13.0: the dashboard owns blog to GBP posts.
 				'bing_submission' => (string) Ratesight_Options::get( 'bing_api_key' ) !== '',

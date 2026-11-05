@@ -205,6 +205,11 @@ class Ratesight {
 		add_action( 'rest_api_init', array( 'Ratesight_CRM_Publish', 'register_routes' ) );
 		// Signed read of the stored outbound broken-link results (GET /broken-links).
 		add_action( 'rest_api_init', array( 'Ratesight_Link_Manager', 'register_routes' ) );
+		// Image compression phase 1 (GET/POST /image-compression). The upload filters are added
+		// only while the ratesight_image_compression option is on (default off).
+		add_action( 'rest_api_init', array( 'Ratesight_Image_Compression', 'register_routes' ) );
+		Ratesight_Image_Compression::register();
+		add_action( 'admin_post_' . Ratesight_Image_Compression::ADMIN_ACTION, array( 'Ratesight_Image_Compression', 'handle_admin_off' ) );
 		add_action( 'rest_api_init', array( 'Ratesight_IndexNow', 'register_routes' ) );
 		add_action( 'rest_api_init', array( 'Ratesight_Performance_Snapshot', 'register_routes' ) );
 		add_action( 'rest_api_init', array( 'Ratesight_Pairing', 'register_route' ) );

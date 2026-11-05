@@ -90,6 +90,7 @@ foreach ( array(
 	'includes/class-ratesight-page-api.php',
 	'includes/class-ratesight-media-alt.php',
 	'includes/class-ratesight-crm-publish.php',
+	'includes/class-ratesight-image-compression.php',
 	'includes/class-ratesight-recovery-log.php',
 	'includes/class-ratesight-redirect-health.php',
 	'includes/class-ratesight-redirect-serve-log.php',
