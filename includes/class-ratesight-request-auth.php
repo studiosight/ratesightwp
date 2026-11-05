@@ -81,6 +81,7 @@ class Ratesight_Request_Auth {
 		'POST /ratesight/v1/indexnow' => 'signed_mutation',
 		'GET /ratesight/v1/crm-publish' => 'signed_read',
 		'POST /ratesight/v1/crm-publish' => 'signed_mutation',
+		'GET /ratesight/v1/broken-links' => 'signed_read',
 	);
 
 	public static function mode(): string {

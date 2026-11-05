@@ -804,6 +804,132 @@ class Ratesight_Link_Manager {
 		return self::update_broken_status( $post_id, $url, 'broken' );
 	}
 
+	// ─── Signed read: GET /broken-links ──────────────────────────────────────
+
+	const BROKEN_LINKS_ROUTE     = '/broken-links';
+	const BROKEN_LINKS_MAX_PAGES = 200;
+	const BROKEN_LINKS_MAX_LINKS = 50;
+
+	/**
+	 * GET /ratesight/v1/broken-links — signed read of the stored outbound broken-link results
+	 * (the cron checker's ratesight_link_cache rows). Read only: it never runs a check, never
+	 * changes a status and never returns post content or the full outbound link map.
+	 * Ignore, replace and unlink stay in the Links tab of WordPress admin.
+	 */
+	public static function register_routes(): void {
+		register_rest_route( 'ratesight/v1', self::BROKEN_LINKS_ROUTE, array(
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( __CLASS__, 'handle_broken_links_get' ),
+				'permission_callback' => array( 'Ratesight_Request_Auth', 'authorize_read' ),
+			),
+		) );
+	}
+
+	public static function handle_broken_links_get( $request ) {
+		global $wpdb;
+		$table = $wpdb->prefix . 'ratesight_link_cache';
+		$counts = $wpdb->get_row(  // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			"SELECT COUNT(*) AS scanned, SUM(lc.broken_count >= 0) AS checked, SUM(lc.broken_count = -1) AS pending
+			 FROM `{$table}` lc INNER JOIN {$wpdb->posts} p ON p.ID = lc.post_id
+			 WHERE p.post_status = 'publish'",
+			ARRAY_A
+		);
+		if ( ! is_array( $counts ) ) {
+			return new \WP_Error( 'rs_link_cache_unavailable', 'The link results table could not be read.', array( 'status' => 503 ) );
+		}
+		$rows = $wpdb->get_results(  // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			"SELECT lc.post_id, lc.broken_urls, p.post_title, p.post_type
+			 FROM `{$table}` lc INNER JOIN {$wpdb->posts} p ON p.ID = lc.post_id
+			 WHERE p.post_status = 'publish' AND lc.broken_urls IS NOT NULL AND lc.broken_urls <> '[]'
+			 ORDER BY lc.broken_count DESC, lc.post_id ASC",
+			ARRAY_A
+		);
+		return new \WP_REST_Response( self::broken_links_summary( $counts, is_array( $rows ) ? $rows : array(), (string) get_option( 'ratesight_link_last_scan', '' ) ), 200 );
+	}
+
+	/** Site-local MySQL time to UTC ISO 8601, or null. */
+	private static function utc_or_null( $value ): ?string {
+		$value = is_string( $value ) ? trim( $value ) : '';
+		if ( ! preg_match( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $value ) ) return null;
+		return get_gmt_from_date( $value, 'Y-m-d\TH:i:s\Z' );
+	}
+
+	/**
+	 * Bounded summary of the stored results. Totals count every published row; the page list
+	 * holds only pages with a broken or possibly blocked target, capped at BROKEN_LINKS_MAX_PAGES
+	 * pages and BROKEN_LINKS_MAX_LINKS targets per page (`truncated` says when a cap was hit).
+	 */
+	public static function broken_links_summary( array $counts, array $rows, string $last_scan ): array {
+		$totals = array(
+			'pages_scanned'     => (int) ( $counts['scanned'] ?? 0 ),
+			'pages_checked'     => (int) ( $counts['checked'] ?? 0 ),
+			'pages_pending'     => (int) ( $counts['pending'] ?? 0 ),
+			'pages_with_issues' => 0,
+			'broken'            => 0,
+			'possibly_blocked'  => 0,
+			'ignored'           => 0,
+		);
+		$pages        = array();
+		$truncated    = false;
+		$last_checked = null;
+		foreach ( $rows as $row ) {
+			$entries = json_decode( (string) ( $row['broken_urls'] ?? '' ), true );
+			if ( ! is_array( $entries ) ) continue;
+			$links = array();
+			foreach ( $entries as $entry ) {
+				if ( ! is_array( $entry ) ) continue;
+				$status = (string) ( $entry['status'] ?? 'broken' );
+				$url    = (string) ( $entry['url'] ?? '' );
+				if ( $status === 'ignored' ) {
+					$totals['ignored']++;
+					continue;
+				}
+				if ( ( $status !== 'broken' && $status !== 'possibly_blocked' ) || $url === '' ) continue;
+				if ( preg_match( '/^(tel:|mailto:|javascript:|callto:|sms:|#)/i', $url ) ) continue;
+				$totals[ $status ]++;
+				$checked_at = self::utc_or_null( $entry['checked_at'] ?? null );
+				if ( $checked_at !== null && ( $last_checked === null || $checked_at > $last_checked ) ) $last_checked = $checked_at;
+				if ( count( $links ) >= self::BROKEN_LINKS_MAX_LINKS ) {
+					$truncated = true;
+					continue;
+				}
+				$links[] = array(
+					'url'        => substr( $url, 0, 2048 ),
+					'anchor'     => substr( (string) ( $entry['anchor'] ?? '' ), 0, 200 ),
+					'code'       => (int) ( $entry['code'] ?? 0 ),
+					'status'     => $status,
+					'checked_at' => $checked_at,
+				);
+			}
+			if ( ! $links ) continue;
+			$totals['pages_with_issues']++;
+			if ( count( $pages ) >= self::BROKEN_LINKS_MAX_PAGES ) {
+				$truncated = true;
+				continue;
+			}
+			$post_id = (int) $row['post_id'];
+			$pages[] = array(
+				'post_id'   => $post_id,
+				'title'     => substr( (string) ( $row['post_title'] ?? '' ), 0, 300 ),
+				'post_type' => (string) ( $row['post_type'] ?? '' ),
+				'url'       => (string) get_permalink( $post_id ),
+				'edit_url'  => admin_url( 'post.php?post=' . $post_id . '&action=edit' ),
+				'links'     => $links,
+			);
+		}
+		return array(
+			'ok'           => true,
+			'last_scan'    => self::utc_or_null( $last_scan ),
+			'last_checked' => $last_checked,
+			'totals'       => $totals,
+			'pages'        => $pages,
+			'max_pages'    => self::BROKEN_LINKS_MAX_PAGES,
+			'truncated'    => $truncated,
+			'manage_url'   => admin_url( 'admin.php?page=ratesight&tab=links&lf=broken' ),
+		);
+	}
+
 	/**
 	 * Return every active broken link across all scanned posts — for the global view.
 	 * Each item: { post_id, post_title, post_type, url, anchor, code }
