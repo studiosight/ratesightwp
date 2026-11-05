@@ -172,13 +172,15 @@ class Ratesight_Connection_Ownership {
 			'/crm-publish' => array( 'GET', 'POST' ),
 			// Signed read of the stored outbound broken-link results; ignore/replace/unlink stay in WP admin.
 			'/broken-links' => array( 'GET' ),
+			// Image compression phase 1: capability, settings and dry-run inventory; on/off switch.
+			'/image-compression' => array( 'GET', 'POST' ),
 		);
 		$result = array();
 		foreach ( $definitions as $path => $methods ) {
 			foreach ( $methods as $method ) {
 				$result[] = array(
 					'id' => $method . ' /ratesight/v1' . $path, 'type' => 'rest_route',
-					'source' => $path === '/broken-links' ? 'includes/class-ratesight-link-manager.php' : ( $path === '/crm-publish' ? 'includes/class-ratesight-crm-publish.php' : ( str_contains( $path, 'performance-snapshot' ) ? 'includes/class-ratesight-performance-snapshot.php' : ( $path === '/pair' ? 'includes/class-ratesight-pairing.php' : ( $path === '/enrollment-challenge' || $path === '/claim' ? 'includes/class-ratesight-enrollment.php' : ( $path === '/plugin-update' ? 'includes/class-ratesight-release-update.php' : ( str_contains( $path, 'related-links' ) ? 'includes/class-ratesight-related-links.php' : ( str_contains( $path, '/page' ) ? 'includes/class-ratesight-page-api.php' : ( str_contains( $path, 'trash-' ) || str_contains( $path, 'restore-' ) ? 'includes/class-ratesight-page-lifecycle.php' : 'includes/class-ratesight-webhook-handler.php' ) ) ) ) ) ) ) ),
+					'source' => $path === '/image-compression' ? 'includes/class-ratesight-image-compression.php' : ( $path === '/broken-links' ? 'includes/class-ratesight-link-manager.php' : ( $path === '/crm-publish' ? 'includes/class-ratesight-crm-publish.php' : ( str_contains( $path, 'performance-snapshot' ) ? 'includes/class-ratesight-performance-snapshot.php' : ( $path === '/pair' ? 'includes/class-ratesight-pairing.php' : ( $path === '/enrollment-challenge' || $path === '/claim' ? 'includes/class-ratesight-enrollment.php' : ( $path === '/plugin-update' ? 'includes/class-ratesight-release-update.php' : ( str_contains( $path, 'related-links' ) ? 'includes/class-ratesight-related-links.php' : ( str_contains( $path, '/page' ) ? 'includes/class-ratesight-page-api.php' : ( str_contains( $path, 'trash-' ) || str_contains( $path, 'restore-' ) ? 'includes/class-ratesight-page-lifecycle.php' : 'includes/class-ratesight-webhook-handler.php' ) ) ) ) ) ) ) ) ),
 					'owner' => 'wordpress_plugin', 'state' => 'retained_wordpress', 'replacement' => null, 'proofType' => 'route_registration',
 					'reasonCode' => null, 'evidenceToUnblock' => null,
 				);
@@ -299,6 +301,7 @@ class Ratesight_Connection_Ownership {
 			self::record( 'worker_ai', 'capability', 'includes/class-ratesight-ai-client.php', 'external_owner_unresolved', self::BLOCKED_EXTERNAL, 'worker_owner_unresolved', 'Locate Worker implementation, model contract, and deployment owner.' ),
 			self::record( 'meta_social_publishing', 'capability', 'includes/class-ratesight-connection-ownership.php', 'dashboard', 'dashboard_replacement_unproven', 'plugin_delivery_absent', 'Prove the intended dashboard syndication delivery contract in a later checkpoint; do not add Meta credentials to the plugin.' ),
 			self::record( 'outbound_broken_link_inventory', 'capability', 'includes/class-ratesight-link-manager.php', 'wordpress_plugin', 'retained_wordpress' ),
+			self::record( 'image_compression_on_upload', 'capability', 'includes/class-ratesight-image-compression.php', 'wordpress_plugin', 'retained_wordpress' ),
 		);
 	}
 

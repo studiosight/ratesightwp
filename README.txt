@@ -68,6 +68,7 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 == Changelog ==
 
+Unreleased (no version bump) - Image compression phase 1, off by default: while the ratesight_image_compression option is on, new JPEG uploads are saved as WebP (quality JPEG 82, WebP 80, never below 75), big images are capped at 2560 px; PNG, GIF, SVG, logos and line art, CMYK under GD and files over 20 MB or 40 megapixels keep their format. capabilities.image_compression reports the editor and WebP/AVIF support (AVIF only on WordPress 6.5+, off in this phase). Signed GET /image-compression returns that plus a dry-run inventory (counts by type, estimated savings, writes nothing); signed POST /image-compression {enabled} turns it on or off (refused on hosting-only sites). Admins can turn it off on the AI SEO Pages tab. Existing media is never changed.
 Unreleased (no version bump) - Signed read GET /broken-links: the stored outbound broken-link results (totals, last scan, up to 200 pages with their broken and possibly blocked targets, a truncated flag). Read only; ignore, replace and unlink stay in the Links tab.
 3.15.5 - Redirects: method native stores a rule in the plugin's own map whatever else is active; Redirection plugin writes and deletes fixed (exact-match items only, errors reported, real storage method returned)
 3.15.4 - Ratesight CRM posts publish by default; no per-site setting
