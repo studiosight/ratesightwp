@@ -307,6 +307,16 @@ $r = Ratesight_Image_Optimizer::optimize_existing( 51, Ratesight_Image_Optimizer
 check_opt( 'bulk: a file over the size guard is skipped, recorded, nothing written', $r['status'] === 'failed' && $postmeta[51]['_rs_img_opt_error']['code'] === 'too_large' && ! isset( $postmeta[51]['_rs_img_opt_journal'] ) && filesize( $huge ) === Ratesight_Image_Metadata::MAX_BYTES + 1 );
 unlink( $huge );
 
+// ── Thumbnail regeneration of an old attachment: left to the bulk tool ───────
+$regen = $uploads_base . '/2026/11/old-regen.jpg';
+$regen_sm = $uploads_base . '/2026/11/old-regen-150x150.jpg';
+file_put_contents( $regen, $jpeg );
+file_put_contents( $regen_sm, $jpeg );
+$attached[ 55 ] = $regen;
+Ratesight_Image_Optimizer::filter_generate_metadata( array( 'file' => '2026/11/old-regen.jpg', 'sizes' => array( 'thumbnail' => array( 'file' => 'old-regen-150x150.jpg', 'mime-type' => 'image/jpeg' ) ) ), 55 );
+check_opt( 'metadata generated for a file not uploaded in this request (e.g. regenerated thumbnails): nothing rewritten, no record', file_get_contents( $regen ) === $jpeg && file_get_contents( $regen_sm ) === $jpeg && ! isset( $postmeta[55]['_rs_img_opt'] ) );
+unlink( $regen ); unlink( $regen_sm );
+
 // ── HEIC: WordPress 6.7+ converts it to a JPEG that keeps EXIF / GPS ─────────
 $heic_raw = "\0\0\0\x18ftypheic" . 'Jane Owner GPS';
 $heic     = $uploads_base . '/2026/11/IMG_1.heic';
@@ -344,6 +354,9 @@ $enc->setAccessible( true );
 $saved_rt = $_SERVER['REQUEST_TIME_FLOAT'] ?? null;
 $fb->setValue( null, 'image/jpeg' );
 $_SERVER['REQUEST_TIME_FLOAT'] = microtime( true ) - 100;
+$pend->setValue( null, array() );
+check_opt( 'no AVIF upload waiting for its sizes (metadata never generated): never changed', Ratesight_Image_Optimizer::filter_output_format( array(), null, 'image/avif' ) === array() );
+$pend->setValue( null, array( wp_normalize_path( $uploads_base . '/2026/11/pending.avif' ) => array( 'mime' => 'image/avif' ) ) );
 check_opt( 'budget used: the next AVIF size is written in the fallback type', Ratesight_Image_Optimizer::filter_output_format( array(), null, 'image/avif' ) === array( 'image/avif' => 'image/jpeg' ) );
 check_opt( '... never for a save with a file name (this plugin\'s encodes, the full-size decision)', Ratesight_Image_Optimizer::filter_output_format( array(), '/x/photo.avif', 'image/avif' ) === array() );
 $enc->setValue( null, true );
@@ -392,7 +405,13 @@ check_opt( 'lock: released by its holder', ! isset( $wpdb->rows['ratesight_img_o
 $wpdb->rows['ratesight_img_opt_lock'] = ( time() - 5 ) . ':stale';
 $t3 = $acq->invoke( null );
 check_opt( 'lock: a stale lock (a request that died) is taken over', $t3 !== '' && $wpdb->rows['ratesight_img_opt_lock'] === $t3 );
-$rel->invoke( null, $t3 );
+$t4 = ( new ReflectionMethod( 'Ratesight_Image_Optimizer', 'refresh_lock' ) );
+$t4->setAccessible( true );
+$t5 = $t4->invoke( null, $t3 );
+check_opt( 'lock: the holder can push its expiry forward (new token, compare-and-swap)', $t5 !== '' && $t5 !== $t3 && $wpdb->rows['ratesight_img_opt_lock'] === $t5 );
+check_opt( 'lock: a request that lost the lock cannot refresh it', $t4->invoke( null, $t3 ) === '' && $wpdb->rows['ratesight_img_opt_lock'] === $t5 );
+$rel->invoke( null, $t5 );
+check_opt( 'lock: released after a refresh', ! isset( $wpdb->rows['ratesight_img_opt_lock'] ) );
 
 // ── Static checks ────────────────────────────────────────────────────────────
 $src = file_get_contents( __DIR__ . '/../includes/class-ratesight-image-optimizer.php' );

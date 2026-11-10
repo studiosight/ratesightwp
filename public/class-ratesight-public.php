@@ -336,9 +336,14 @@ class Ratesight_Public {
 
 	/**
 	 * A front-end page view rendered through the theme (where wp_head, wp_body_open and wp_footer
-	 * run). REST, AJAX, cron, feeds and admin renders keep printing the tag as before.
+	 * run). REST, AJAX, cron, feeds and admin renders keep printing the tag as before, and so does
+	 * anything before the main query ran (WP-CLI, XML-RPC, GraphQL endpoints): a tag deferred there
+	 * would never be printed, because no theme footer follows.
 	 */
 	private static function is_theme_page_render(): bool {
+		if ( ! function_exists( 'did_action' ) || ! did_action( 'wp' ) ) {
+			return false;
+		}
 		if ( ( function_exists( 'is_admin' ) && is_admin() )
 			|| ( function_exists( 'wp_doing_ajax' ) && wp_doing_ajax() )
 			|| ( function_exists( 'wp_doing_cron' ) && wp_doing_cron() )
@@ -351,9 +356,18 @@ class Ratesight_Public {
 		return true;
 	}
 
-	/** Is this content going into the page body (after wp_head, after wp_body_open, or in the main loop)? */
+	/**
+	 * Is this content going into the page? Yes once the template has started loading (after
+	 * template_redirect: block themes on WordPress 5.9-6.3 render the whole page before wp_head),
+	 * after wp_body_open, after wp_head, or in the main loop. Renders while wp_head runs were
+	 * already turned away in inline_widget(). Renders on wp or template_redirect (thrown away
+	 * by the plugin or theme that made them) are not.
+	 */
 	private static function rendering_page_body(): bool {
 		if ( ! function_exists( 'did_action' ) ) {
+			return true;
+		}
+		if ( did_action( 'template_redirect' ) && ! doing_action( 'template_redirect' ) ) {
 			return true;
 		}
 		if ( did_action( 'wp_body_open' ) ) {
