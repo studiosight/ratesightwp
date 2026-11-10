@@ -303,6 +303,27 @@ check_meta( 'rewrite_file: unsupported file left untouched', ! $res['ok'] && $re
 unlink( $tmp );
 check_meta( 'no temp files left behind', glob( $tmp . '.rs-meta-*' ) === array() );
 
+// ── Size and memory guards (an out-of-memory error cannot be caught) ─────────
+check_meta( 'whole-file reads are capped at 12 MB (about 3x buffered stays inside a 128M limit)', Ratesight_Image_Metadata::MAX_BYTES === 12582912 && Ratesight_Image_Metadata::MEMORY_FACTOR === 4 );
+check_meta( 'memory_limit parsing: 128M, 1G, 512K, plain bytes; -1 and empty = unlimited', Ratesight_Image_Metadata::memory_limit_bytes( '128M' ) === 134217728 && Ratesight_Image_Metadata::memory_limit_bytes( '1G' ) === 1073741824 && Ratesight_Image_Metadata::memory_limit_bytes( '512K' ) === 524288 && Ratesight_Image_Metadata::memory_limit_bytes( '65536' ) === 65536 && Ratesight_Image_Metadata::memory_limit_bytes( '-1' ) === -1 && Ratesight_Image_Metadata::memory_limit_bytes( '' ) === -1 );
+$mb = 1048576;
+check_meta( 'memory pre-check: 12 MB x4 + 60 MB in use fits 128M', Ratesight_Image_Metadata::memory_allows( 12 * $mb, 128 * $mb, 60 * $mb ) );
+check_meta( 'memory pre-check: 12 MB x4 + 90 MB in use does not fit 128M', ! Ratesight_Image_Metadata::memory_allows( 12 * $mb, 128 * $mb, 90 * $mb ) );
+check_meta( 'memory pre-check: unlimited (-1) always fits', Ratesight_Image_Metadata::memory_allows( 500 * $mb, -1, 90 * $mb ) );
+$big = tempnam( sys_get_temp_dir(), 'rsimg' );
+$h   = fopen( $big, 'r+' );
+ftruncate( $h, Ratesight_Image_Metadata::MAX_BYTES + 1 ); // Sparse: nothing is written or read.
+fclose( $h );
+clearstatcache();
+$res = Ratesight_Image_Metadata::rewrite_file( $big, $business );
+check_meta( 'rewrite_file refuses a file over MAX_BYTES without reading it', ! $res['ok'] && $res['reason'] === 'size' && filesize( $big ) === Ratesight_Image_Metadata::MAX_BYTES + 1 );
+check_meta( 'file_orientation does not read a file over MAX_BYTES', Ratesight_Image_Metadata::file_orientation( $big ) === 1 );
+unlink( $big );
+$small = tempnam( sys_get_temp_dir(), 'rsimg' );
+file_put_contents( $small, $src );
+check_meta( 'sniff_file reads only the magic bytes', Ratesight_Image_Metadata::sniff_file( $small ) === 'image/jpeg' && Ratesight_Image_Metadata::sniff_file( $small . '-missing' ) === '' );
+unlink( $small );
+
 // ── Real encoder output (GD) ─────────────────────────────────────────────────
 if ( ! extension_loaded( 'gd' ) ) {
 	skip_meta( 'GD round-trip: real JPEG / PNG / WebP stay decodable after the rewrite', 'GD extension not loaded on this PHP' );

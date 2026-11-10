@@ -10,6 +10,17 @@
  * and MIME type from the start: nothing has linked to the original yet. Every size WordPress then
  * generates is scrubbed in wp_generate_attachment_metadata.
  *
+ * UPLOADS THIS FEATURE DOES NOT CONVERT (HEIC, which WordPress 6.7+ turns into a JPEG that keeps
+ * the phone's EXIF and GPS; files over the size or memory guard) still have their JPEG / PNG /
+ * WebP full size and sizes cleaned in place in wp_generate_attachment_metadata, in the same
+ * request as the upload. Attachments that already existed are left to the bulk tool. Files of
+ * other types (the HEIC original WordPress keeps, TIFF, GIF) cannot be cleaned and are left as
+ * they are.
+ *
+ * MEMORY. Metadata work buffers a whole file (about 3x its size), and an out-of-memory error
+ * cannot be caught, so files over Ratesight_Image_Metadata::MAX_BYTES, or that would not fit in
+ * the remaining memory_limit, are left untouched and the reason is recorded.
+ *
  * EXISTING IMAGES (bulk tool) are optimized IN PLACE: same file names, same format, same URLs.
  * Existing posts, page-builder data, CDN and cache entries keep pointing at files that still exist.
  * Format conversion is deliberately limited to new uploads for that reason.
@@ -36,13 +47,21 @@ final class Ratesight_Image_Optimizer {
 	const ROLLBACK_KEY = '_rs_img_opt_rollback';
 	/** Attachment meta: in-place run in progress (written before the first file is replaced). */
 	const JOURNAL_KEY = '_rs_img_opt_journal';
+	/** Attachment meta: 1 while some sizes of an AVIF upload still wait for their AVIF encode. */
+	const AVIF_PENDING_KEY = '_rs_img_opt_avif_pending';
 	/** Interrupted runs of one attachment before the bulk tool gives up on it. */
 	const MAX_ATTEMPTS = 2;
 
 	const RECORD_VERSION = 1;
 	const BACKUP_DIR     = 'ratesight-originals';
+	/** Option row used as the batch lock (autoload no; value "expiry:random"). */
 	const LOCK           = 'ratesight_img_opt_lock';
+	const LOCK_TTL       = 120;
 	const NONCE          = 'ratesight_img_opt';
+
+	/** AVIF sizes stop once this share of max_execution_time is used, and never after AVIF_BUDGET_CAP seconds. */
+	const AVIF_BUDGET_SHARE = 0.5;
+	const AVIF_BUDGET_CAP   = 20;
 
 	/** Upload types this feature touches. GIF (animation) and SVG are never touched. */
 	const UPLOAD_MIMES = array( 'image/jpeg', 'image/png', 'image/webp', 'image/bmp', 'image/tiff' );
@@ -64,6 +83,24 @@ final class Ratesight_Image_Optimizer {
 	/** Files created by the upload currently being processed (temp encodes, backups, converted copies). */
 	private static $created = null;
 
+	/** Uploads left untouched because of the size or memory guard: normalized path => reason. */
+	private static $skipped = array();
+
+	/** Uploads another plugin opted out of (ratesight_image_optimize_upload): normalized path => true. */
+	private static $opted_out = array();
+
+	/** Files that came through wp_handle_upload in this request while the feature was on: normalized path => true. */
+	private static $uploaded = array();
+
+	/** Type WordPress writes sizes of an AVIF upload in once the time budget is used ('' = no AVIF upload pending). */
+	private static $avif_fallback = '';
+
+	/** True while reencode() saves: the output-format filter must not change this plugin's own encodes. */
+	private static $encoding = false;
+
+	/** Request start when the server does not report REQUEST_TIME_FLOAT. */
+	private static $started = null;
+
 	// -------------------------------------------------------------------------
 	// Wiring
 	// -------------------------------------------------------------------------
@@ -73,6 +110,7 @@ final class Ratesight_Image_Optimizer {
 		add_filter( 'big_image_size_threshold', array( __CLASS__, 'filter_big_image_threshold' ), 20, 3 );
 		add_filter( 'wp_editor_set_quality', array( __CLASS__, 'filter_quality' ), 20, 2 );
 		add_filter( 'wp_generate_attachment_metadata', array( __CLASS__, 'filter_generate_metadata' ), 20, 2 );
+		add_filter( 'image_editor_output_format', array( __CLASS__, 'filter_output_format' ), 20, 3 );
 		add_action( 'delete_attachment', array( __CLASS__, 'on_delete_attachment' ) );
 
 		add_action( 'wp_ajax_ratesight_img_opt_status', array( __CLASS__, 'ajax_status' ) );
@@ -247,6 +285,76 @@ final class Ratesight_Image_Optimizer {
 	}
 
 	/**
+	 * May this file be read whole (metadata rewrite, orientation read, encode)? '' when yes,
+	 * otherwise the reason: 'too_large' above Ratesight_Image_Metadata::MAX_BYTES, 'low_memory'
+	 * when 4x the file plus what the request already uses would pass memory_limit. An
+	 * out-of-memory error cannot be caught, so the caller leaves the file untouched instead.
+	 */
+	public static function size_guard( string $path, ?int $memory_limit = null, ?int $memory_used = null ): string {
+		clearstatcache( true, $path );
+		$bytes = (int) @filesize( $path ); // phpcs:ignore
+		if ( $bytes > Ratesight_Image_Metadata::MAX_BYTES ) {
+			return 'too_large';
+		}
+		if ( ! Ratesight_Image_Metadata::memory_allows( $bytes, $memory_limit, $memory_used ) ) {
+			return 'low_memory';
+		}
+		return '';
+	}
+
+	private static function skip_message( string $reason ): string {
+		if ( $reason === 'too_large' ) {
+			return 'Larger than ' . (int) round( Ratesight_Image_Metadata::MAX_BYTES / 1048576 ) . ' MB; left as uploaded.';
+		}
+		if ( $reason === 'low_memory' ) {
+			return 'Not enough PHP memory to process this file safely; left as uploaded.';
+		}
+		return 'Left as uploaded.';
+	}
+
+	/** Seconds since this request started. */
+	public static function request_elapsed(): float {
+		$start = isset( $_SERVER['REQUEST_TIME_FLOAT'] ) ? (float) $_SERVER['REQUEST_TIME_FLOAT'] : 0.0; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+		if ( $start <= 0.0 ) {
+			if ( self::$started === null ) {
+				self::$started = microtime( true );
+			}
+			$start = (float) self::$started;
+		}
+		return max( 0.0, microtime( true ) - $start );
+	}
+
+	/**
+	 * Seconds of the request AVIF encoding of sizes may use: AVIF_BUDGET_SHARE of
+	 * max_execution_time, never more than AVIF_BUDGET_CAP (also when the limit is 0 = unlimited).
+	 */
+	public static function avif_budget( ?int $max_execution_time = null ): float {
+		$max = $max_execution_time === null ? (int) ini_get( 'max_execution_time' ) : $max_execution_time;
+		$cap = (float) self::AVIF_BUDGET_CAP;
+		return $max > 0 ? min( $cap, $max * self::AVIF_BUDGET_SHARE ) : $cap;
+	}
+
+	public static function avif_budget_used(): bool {
+		return self::request_elapsed() >= self::avif_budget();
+	}
+
+	/** Type for sizes of an AVIF upload once the budget is used: the uploaded type when WordPress can write it, else WebP, else JPEG. */
+	private static function avif_fallback_mime( string $source_mime ): string {
+		$candidates = array();
+		if ( in_array( $source_mime, Ratesight_Image_Metadata::CLEANABLE, true ) ) {
+			$candidates[] = $source_mime;
+		}
+		$candidates[] = 'image/webp';
+		$candidates[] = 'image/jpeg';
+		foreach ( $candidates as $mime ) {
+			if ( self::editor_supports( $mime ) ) {
+				return $mime;
+			}
+		}
+		return '';
+	}
+
+	/**
 	 * Decide whether an upload can be processed so that the stored file is guaranteed clean.
 	 *
 	 * JPEG / PNG / WebP: cleaned before encoding (no encoder can carry phone EXIF into any output,
@@ -330,10 +438,9 @@ final class Ratesight_Image_Optimizer {
 	}
 
 	private static function handle_upload( $upload, string $context ) {
+		// A new upload: an earlier upload's AVIF time budget never carries over to this one.
+		self::$avif_fallback = '';
 		if ( ! is_array( $upload ) || ! empty( $upload['error'] ) || empty( $upload['file'] ) || empty( $upload['type'] ) ) {
-			return $upload;
-		}
-		if ( ! in_array( $upload['type'], self::UPLOAD_MIMES, true ) ) {
 			return $upload;
 		}
 		$settings = self::settings();
@@ -343,8 +450,17 @@ final class Ratesight_Image_Optimizer {
 		/**
 		 * Filters whether one upload is optimized. Return false for uploads that are not Media
 		 * Library images (e.g. a plugin that stores a file and expects its exact name and type).
+		 * Asked for every upload (also types this feature does not convert, such as HEIC) so that
+		 * an opt-out also stops the metadata cleaning of the sizes WordPress generates.
 		 */
 		if ( ! apply_filters( 'ratesight_image_optimize_upload', true, $upload, $context ) ) {
+			self::$opted_out[ wp_normalize_path( (string) $upload['file'] ) ] = true;
+			return $upload;
+		}
+		// Only files uploaded in this request are cleaned when their metadata is generated
+		// (scrub_unrecorded); existing attachments are left to the bulk tool.
+		self::$uploaded[ wp_normalize_path( (string) $upload['file'] ) ] = true;
+		if ( ! in_array( $upload['type'], self::UPLOAD_MIMES, true ) ) {
 			return $upload;
 		}
 
@@ -362,8 +478,40 @@ final class Ratesight_Image_Optimizer {
 		}
 		if ( $result['record'] !== null ) {
 			self::$pending[ wp_normalize_path( $result['file'] ) ] = $result['record'];
+			// WordPress encodes every size of an AVIF upload as AVIF, which is slow: once the time
+			// budget is used, filter_output_format() writes the remaining sizes in this type.
+			self::$avif_fallback = $result['mime'] === 'image/avif' ? self::avif_fallback_mime( (string) $upload['type'] ) : '';
 		}
 		return $out;
+	}
+
+	/**
+	 * image_editor_output_format: while WordPress generates the sizes of an AVIF upload made in
+	 * this request, sizes saved after the AVIF time budget is used are written in the fallback type
+	 * instead. Only size saves (no file name passed) are changed: never this plugin's own encodes,
+	 * never WordPress's decision about the full-size file. The sizes left are recorded in
+	 * generate_metadata() so the bulk tool can finish them.
+	 */
+	public static function filter_output_format( $formats, $filename = null, $mime_type = null ) {
+		if ( self::$avif_fallback === '' || self::$encoding || $mime_type !== 'image/avif' || ! self::avif_upload_pending() ) {
+			return $formats;
+		}
+		if ( ( is_string( $filename ) && $filename !== '' ) || ! self::avif_budget_used() ) {
+			return $formats;
+		}
+		$formats               = is_array( $formats ) ? $formats : array();
+		$formats['image/avif'] = self::$avif_fallback;
+		return $formats;
+	}
+
+	/** Is an AVIF upload of this request still waiting for its sizes (metadata not generated yet)? */
+	private static function avif_upload_pending(): bool {
+		foreach ( self::$pending as $record ) {
+			if ( is_array( $record ) && ( $record['mime'] ?? '' ) === 'image/avif' ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -410,24 +558,63 @@ final class Ratesight_Image_Optimizer {
 		if ( $file === '' ) {
 			return $metadata;
 		}
-		$key    = wp_normalize_path( $file );
-		$record = self::$pending[ $key ] ?? null;
-		if ( $record === null && ! empty( $metadata['original_image'] ) ) {
-			// WordPress rotated or scaled our file into a new full size: match on the original.
-			$key    = wp_normalize_path( trailingslashit( dirname( $file ) ) . wp_basename( $metadata['original_image'] ) );
-			$record = self::$pending[ $key ] ?? null;
+		$keys = array( wp_normalize_path( $file ) );
+		if ( ! empty( $metadata['original_image'] ) ) {
+			// WordPress rotated, scaled or converted (HEIC to JPEG) the upload into a new full
+			// size: match on the original too.
+			$keys[] = wp_normalize_path( trailingslashit( dirname( $file ) ) . wp_basename( $metadata['original_image'] ) );
+		}
+		$key       = '';
+		$record    = null;
+		$opted_out = false;
+		$uploaded  = false;
+		$skipped   = '';
+		foreach ( $keys as $candidate ) {
+			if ( isset( self::$uploaded[ $candidate ] ) ) {
+				$uploaded = true;
+				unset( self::$uploaded[ $candidate ] );
+			}
+			if ( $record === null && isset( self::$pending[ $candidate ] ) ) {
+				$record = self::$pending[ $candidate ];
+				$key    = $candidate;
+			}
+			if ( isset( self::$opted_out[ $candidate ] ) ) {
+				$opted_out = true;
+				unset( self::$opted_out[ $candidate ] );
+			}
+			if ( isset( self::$skipped[ $candidate ] ) ) {
+				$skipped = (string) self::$skipped[ $candidate ];
+				unset( self::$skipped[ $candidate ] );
+			}
 		}
 		$settings = self::settings();
 
 		if ( $record === null ) {
-			$existing = get_post_meta( $attachment_id, self::META_KEY, true );
-			if ( ! is_array( $existing ) || ! $settings['enabled'] ) {
+			if ( ! $settings['enabled'] || $opted_out ) {
 				return $metadata;
 			}
-			return self::scrub_sizes( $file, $metadata, $settings['location'] );
+		}
+		// Whole size files are read below (WordPress raises it too, but only while it edits pixels).
+		if ( function_exists( 'wp_raise_memory_limit' ) ) {
+			wp_raise_memory_limit( 'image' );
+		}
+
+		if ( $record === null ) {
+			$existing = get_post_meta( $attachment_id, self::META_KEY, true );
+			if ( is_array( $existing ) ) {
+				// Size regeneration of an optimized attachment: only the size files are touched.
+				return self::scrub_sizes( $file, $metadata, $settings['location'] );
+			}
+			if ( ! $uploaded ) {
+				// Not uploaded in this request (e.g. thumbnails regenerated for an old attachment):
+				// left as it is. The bulk tool, with its journal and backups, handles those files.
+				return $metadata;
+			}
+			return self::scrub_unrecorded( $attachment_id, $file, $metadata, $settings, $skipped );
 		}
 
 		unset( self::$pending[ $key ] );
+		self::$avif_fallback = ''; // The sizes are generated: the AVIF time budget no longer applies.
 		if ( $key !== wp_normalize_path( $file ) && self::is_inside_uploads( $file ) ) {
 			// The new full size (-scaled / -rotated) was written by WordPress from our file.
 			Ratesight_Image_Metadata::rewrite_file( $file, $settings['location'], true );
@@ -437,9 +624,56 @@ final class Ratesight_Image_Optimizer {
 		if ( isset( $record['backups'] ) && $record['backups'] === array() ) {
 			unset( $record['backups'] );
 		}
+		if ( ( $record['mime'] ?? '' ) === 'image/avif' ) {
+			$left = self::non_avif_sizes( $metadata );
+			if ( $left !== array() ) {
+				// The time budget ran out: these sizes stay in the fallback type until the bulk
+				// tool (Optimize existing images) encodes them as AVIF.
+				$record['avif_pending'] = $left;
+				$record['notes'][]      = 'avif_time_budget';
+				update_post_meta( $attachment_id, self::AVIF_PENDING_KEY, 1 );
+			}
+		}
 		update_post_meta( $attachment_id, self::META_KEY, $record );
 		delete_post_meta( $attachment_id, self::ERROR_KEY );
 		return $metadata;
+	}
+
+	/**
+	 * A file uploaded in this request (through wp_handle_upload) that this feature did not
+	 * process: a type it does not convert (HEIC, which WordPress 6.7+ turns into a JPEG that keeps
+	 * the phone's EXIF and GPS), or a file over the size or memory guard. Clean the full-size
+	 * file and every generated JPEG / PNG / WebP size in place (same names, same type, same URLs).
+	 * No optimization record is written, so the bulk tool still treats the attachment as not
+	 * optimized. Fails open: a file that cannot be read safely is left as it is.
+	 */
+	private static function scrub_unrecorded( int $attachment_id, string $file, array $metadata, array $settings, string $skipped ): array {
+		if ( self::is_inside_uploads( $file )
+			&& in_array( Ratesight_Image_Metadata::sniff_file( $file ), Ratesight_Image_Metadata::CLEANABLE, true )
+			&& self::size_guard( $file ) === '' ) {
+			$done = Ratesight_Image_Metadata::rewrite_file( $file, $settings['location'], true );
+			if ( ! $done['ok'] ) {
+				self::log( 'metadata #' . $attachment_id, null, 'full size not cleaned (' . $done['reason'] . ')' );
+			}
+		}
+		$metadata = self::scrub_sizes( $file, $metadata, $settings['location'] );
+		$metadata = self::scrub_image_meta( $metadata );
+		if ( $skipped !== '' ) {
+			// Recorded, so the bulk tool does not retry a file it cannot process either.
+			update_post_meta( $attachment_id, self::ERROR_KEY, array( 'code' => $skipped, 'message' => self::skip_message( $skipped ), 'at' => time() ) );
+		}
+		return $metadata;
+	}
+
+	/** Names of the sizes WordPress wrote in a type other than AVIF. */
+	private static function non_avif_sizes( array $metadata ): array {
+		$names = array();
+		foreach ( (array) ( $metadata['sizes'] ?? array() ) as $name => $size ) {
+			if ( is_array( $size ) && ! empty( $size['file'] ) && isset( $size['mime-type'] ) && $size['mime-type'] !== 'image/avif' ) {
+				$names[] = (string) $name;
+			}
+		}
+		return $names;
 	}
 
 	/**
@@ -449,8 +683,19 @@ final class Ratesight_Image_Optimizer {
 	 * @return array { file: string, mime: string, record: array|null }
 	 */
 	private static function optimize_upload_file( string $path, string $mime, array $settings ): array {
+		// First: the pre-clean below already buffers the whole file (about 3x its size).
+		if ( function_exists( 'wp_raise_memory_limit' ) ) {
+			wp_raise_memory_limit( 'image' );
+		}
 		$unchanged = array( 'file' => $path, 'mime' => $mime, 'record' => null );
 		if ( ! self::is_inside_uploads( $path ) ) {
+			return $unchanged;
+		}
+		$guard = self::size_guard( $path );
+		if ( $guard !== '' ) {
+			// Fail open: stored exactly as uploaded; generate_metadata() records the reason.
+			self::$skipped[ wp_normalize_path( $path ) ] = $guard;
+			self::log( 'upload', null, 'left unprocessed (' . $guard . '): ' . wp_basename( $path ) );
 			return $unchanged;
 		}
 		$plan = self::plan( $mime, self::target_mime( $mime, $settings['format'] ), self::editor_supports( 'image/webp' ) );
@@ -644,7 +889,12 @@ final class Ratesight_Image_Optimizer {
 
 		$tmp   = trailingslashit( dirname( $path ) ) . pathinfo( $path, PATHINFO_FILENAME ) . '-rs-tmp-' . strtolower( wp_generate_password( 8, false, false ) ) . '.' . self::extension_for( $target );
 		self::track( $tmp );
-		$saved = $editor->save( $tmp, $target );
+		self::$encoding = true;
+		try {
+			$saved = $editor->save( $tmp, $target );
+		} finally {
+			self::$encoding = false;
+		}
 		if ( is_wp_error( $saved ) ) {
 			return $saved;
 		}
@@ -732,13 +982,20 @@ final class Ratesight_Image_Optimizer {
 		return $metadata;
 	}
 
-	/** WordPress copies camera and credit (owner) fields into attachment metadata: clear them. */
+	/**
+	 * WordPress copies camera, credit (owner), copyright, title and keyword fields from the file
+	 * into attachment metadata, which the REST API shows publicly: clear them, matching what the
+	 * Images tab says is removed. The caption is kept (WordPress may already use it as the excerpt).
+	 */
 	public static function scrub_image_meta( array $metadata ): array {
 		if ( isset( $metadata['image_meta'] ) && is_array( $metadata['image_meta'] ) ) {
-			foreach ( array( 'camera', 'credit' ) as $field ) {
+			foreach ( array( 'camera', 'credit', 'copyright', 'title' ) as $field ) {
 				if ( isset( $metadata['image_meta'][ $field ] ) ) {
 					$metadata['image_meta'][ $field ] = '';
 				}
+			}
+			if ( isset( $metadata['image_meta']['keywords'] ) ) {
+				$metadata['image_meta']['keywords'] = array();
 			}
 		}
 		return $metadata;
@@ -862,13 +1119,22 @@ final class Ratesight_Image_Optimizer {
 		return '';
 	}
 
-	/** Deleting an attachment also deletes its backups. */
+	/** Deleting an attachment also deletes its backups and the size files its AVIF sizes replaced. */
 	public static function on_delete_attachment( $post_id ): void {
 		try {
 			foreach ( array( self::META_KEY, self::JOURNAL_KEY ) as $key ) {
 				$entry = get_post_meta( (int) $post_id, $key, true );
 				if ( is_array( $entry ) && ! empty( $entry['backups'] ) && is_array( $entry['backups'] ) ) {
 					self::delete_backups( $entry['backups'] );
+				}
+			}
+			$record = get_post_meta( (int) $post_id, self::META_KEY, true );
+			if ( is_array( $record ) && ! empty( $record['superseded'] ) && is_array( $record['superseded'] ) ) {
+				foreach ( $record['superseded'] as $relative ) {
+					$abs = self::uploads_absolute( (string) $relative );
+					if ( $abs !== '' && self::is_inside_uploads( $abs ) ) {
+						@unlink( $abs ); // phpcs:ignore
+					}
 				}
 			}
 		} catch ( \Throwable $e ) {
@@ -908,6 +1174,10 @@ final class Ratesight_Image_Optimizer {
 	}
 
 	private static function optimize_existing_run( int $attachment_id, array $settings ): array {
+		// First: every file of the attachment is read whole below.
+		if ( function_exists( 'wp_raise_memory_limit' ) ) {
+			wp_raise_memory_limit( 'image' );
+		}
 		$out = array( 'id' => $attachment_id, 'status' => 'failed', 'message' => '', 'bytes_before' => 0, 'bytes_after' => 0 );
 		if ( get_post_meta( $attachment_id, self::META_KEY, true ) ) {
 			$out['status']  = 'skipped';
@@ -924,6 +1194,11 @@ final class Ratesight_Image_Optimizer {
 		}
 		if ( ! self::is_inside_uploads( $file ) ) {
 			return self::fail( $attachment_id, $out, 'outside_uploads', 'File is outside the uploads directory; skipped.' );
+		}
+		$guard = self::size_guard( $file );
+		if ( $guard !== '' ) {
+			// Fail open and recorded: nothing is written to the files.
+			return self::fail( $attachment_id, $out, $guard, self::skip_message( $guard ) );
 		}
 
 		// Resume after an interrupted run.
@@ -968,6 +1243,12 @@ final class Ratesight_Image_Optimizer {
 			}
 			if ( ! self::is_inside_uploads( $path ) ) {
 				$notes[] = $role . ':outside_uploads_skipped';
+				continue;
+			}
+			$why = self::size_guard( $path );
+			if ( $why !== '' ) {
+				// Left untouched; the ":metadata_" note keeps the record from claiming it was cleaned.
+				$notes[] = $role . ':metadata_' . $why;
 				continue;
 			}
 			$files[ $path ] = $role;
@@ -1114,6 +1395,125 @@ final class Ratesight_Image_Optimizer {
 	}
 
 	/**
+	 * Encode as AVIF the sizes of an AVIF upload that were left in the fallback type when the
+	 * upload request ran out of its time budget. Each new .avif file is written next to the old
+	 * size file, which is KEPT (a post may already link to it) and deleted with the attachment.
+	 * Every call converts or drops at least one size, so the bulk tool always makes progress;
+	 * further sizes stop once the request's AVIF time budget is used. Never throws.
+	 *
+	 * @return array { id, status: 'optimized'|'failed'|'skipped', message, bytes_before, bytes_after }
+	 */
+	public static function finish_avif_sizes( int $attachment_id, array $settings ): array {
+		$out = array( 'id' => $attachment_id, 'status' => 'skipped', 'message' => '', 'bytes_before' => 0, 'bytes_after' => 0 );
+		try {
+			if ( function_exists( 'wp_raise_memory_limit' ) ) {
+				wp_raise_memory_limit( 'image' );
+			}
+			$record   = get_post_meta( $attachment_id, self::META_KEY, true );
+			$pending  = is_array( $record ) && is_array( $record['avif_pending'] ?? null ) ? array_values( $record['avif_pending'] ) : array();
+			$file     = (string) get_attached_file( $attachment_id );
+			$metadata = wp_get_attachment_metadata( $attachment_id );
+			if ( $pending === array() || $file === '' || ! is_array( $metadata ) || $settings['format'] !== 'avif' || ! self::editor_supports( 'image/avif' ) ) {
+				// Nothing to do, or AVIF is no longer chosen / writable: the sizes keep their type.
+				if ( is_array( $record ) && $pending !== array() ) {
+					unset( $record['avif_pending'] );
+					$record['notes'][] = 'avif_sizes_left_as_is';
+					update_post_meta( $attachment_id, self::META_KEY, $record );
+				}
+				delete_post_meta( $attachment_id, self::AVIF_PENDING_KEY );
+				$out['message'] = 'Sizes keep their current format.';
+				return $out;
+			}
+
+			$dir        = trailingslashit( dirname( $file ) );
+			$notes      = is_array( $record['notes'] ?? null ) ? $record['notes'] : array();
+			$superseded = is_array( $record['superseded'] ?? null ) ? $record['superseded'] : array();
+			$converted  = array(); // old basename => new basename (WordPress may share one file between sizes).
+			$left       = array();
+			$worked     = false;
+			foreach ( $pending as $name ) {
+				$name = (string) $name;
+				$size = $metadata['sizes'][ $name ] ?? null;
+				if ( ! is_array( $size ) || empty( $size['file'] ) || ( $size['mime-type'] ?? '' ) === 'image/avif' ) {
+					continue;
+				}
+				$old = wp_basename( (string) $size['file'] );
+				if ( isset( $converted[ $old ] ) ) {
+					$metadata['sizes'][ $name ]['file']      = $converted[ $old ]['file'];
+					$metadata['sizes'][ $name ]['mime-type'] = 'image/avif';
+					$metadata['sizes'][ $name ]['filesize']  = $converted[ $old ]['filesize'];
+					continue;
+				}
+				if ( $worked && self::avif_budget_used() ) {
+					$left[] = $name;
+					continue;
+				}
+				$src = $dir . $old;
+				if ( ! self::is_inside_uploads( $src ) || self::size_guard( $src ) !== '' ) {
+					$notes[] = 'size:' . $name . ':avif_skipped';
+					continue;
+				}
+				$worked              = true;
+				$src_bytes           = (int) filesize( $src );
+				$out['bytes_before'] += $src_bytes;
+				$encoded             = self::reencode( $src, 'image/avif', 0, $settings['quality'] );
+				if ( is_wp_error( $encoded ) || $encoded['mime'] !== 'image/avif' ) {
+					if ( ! is_wp_error( $encoded ) && is_file( $encoded['path'] ) ) {
+						@unlink( $encoded['path'] ); // phpcs:ignore
+					}
+					$notes[]             = 'size:' . $name . ':avif_failed';
+					$out['bytes_after'] += $src_bytes;
+					continue;
+				}
+				$new_name = wp_unique_filename( $dir, pathinfo( $old, PATHINFO_FILENAME ) . '.avif' );
+				$dest     = $dir . $new_name;
+				if ( is_file( $dest ) || ! @rename( $encoded['path'], $dest ) ) { // phpcs:ignore
+					@unlink( $encoded['path'] ); // phpcs:ignore
+					$notes[]             = 'size:' . $name . ':avif_failed';
+					$out['bytes_after'] += $src_bytes;
+					continue;
+				}
+				clearstatcache( true, $dest );
+				$new_bytes                               = (int) filesize( $dest );
+				$converted[ $old ]                       = array( 'file' => $new_name, 'filesize' => $new_bytes );
+				$metadata['sizes'][ $name ]['file']      = $new_name;
+				$metadata['sizes'][ $name ]['mime-type'] = 'image/avif';
+				$metadata['sizes'][ $name ]['filesize']  = $new_bytes;
+				$superseded[]                            = self::uploads_relative( $src );
+				$out['bytes_after']                     += $new_bytes;
+			}
+
+			wp_update_attachment_metadata( $attachment_id, $metadata );
+			$record['notes'] = $notes;
+			if ( $superseded !== array() ) {
+				$record['superseded'] = array_values( array_unique( array_filter( $superseded ) ) );
+			}
+			if ( $left === array() ) {
+				unset( $record['avif_pending'] );
+				delete_post_meta( $attachment_id, self::AVIF_PENDING_KEY );
+			} else {
+				$record['avif_pending'] = $left;
+			}
+			update_post_meta( $attachment_id, self::META_KEY, $record );
+
+			$out['status']  = 'optimized';
+			$out['message'] = $left === array() ? 'AVIF sizes finished.' : count( $left ) . ' size(s) still to encode as AVIF.';
+			return $out;
+		} catch ( \Throwable $e ) {
+			self::log( 'avif sizes #' . $attachment_id, $e );
+			try {
+				// Do not retry forever: the sizes keep the type they have.
+				delete_post_meta( $attachment_id, self::AVIF_PENDING_KEY );
+			} catch ( \Throwable $ignored ) {
+				// Nothing more can be done safely.
+			}
+			$out['status']  = 'failed';
+			$out['message'] = 'Unexpected error; sizes left as they are.';
+			return $out;
+		}
+	}
+
+	/**
 	 * Restore one in-place optimized (or interrupted) attachment from its backups. Uploads that
 	 * were converted to a new format are never rolled back: posts may already link to the new file.
 	 */
@@ -1188,11 +1588,22 @@ final class Ratesight_Image_Optimizer {
 		};
 
 		return array(
-			'candidates'  => $candidates,
-			'optimized'   => $count_key( self::META_KEY ),
-			'failed'      => $count_key( self::ERROR_KEY ),
+			'candidates'   => $candidates,
+			'optimized'    => $count_key( self::META_KEY ),
+			'failed'       => $count_key( self::ERROR_KEY ),
 			'rollbackable' => $count_key( self::ROLLBACK_KEY ),
+			'avif_pending' => $count_key( self::AVIF_PENDING_KEY ),
 		);
+	}
+
+	/** Attachments with sizes still waiting for their AVIF encode, oldest first. */
+	private static function avif_pending_ids( int $limit ): array {
+		global $wpdb;
+		return array_map( 'intval', (array) $wpdb->get_col( $wpdb->prepare( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			"SELECT DISTINCT post_id FROM {$wpdb->postmeta} WHERE meta_key = %s ORDER BY post_id ASC LIMIT %d",
+			self::AVIF_PENDING_KEY,
+			max( 1, $limit )
+		) ) );
 	}
 
 	private static function rollback_ids( int $limit ): array {
@@ -1207,6 +1618,77 @@ final class Ratesight_Image_Optimizer {
 	private static function batch_size(): int {
 		$size = (int) apply_filters( 'ratesight_image_optimize_batch_size', self::BATCH_DEFAULT );
 		return max( 1, min( self::BATCH_MAX, $size ) );
+	}
+
+	// -------------------------------------------------------------------------
+	// Batch lock
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Take the batch lock atomically. INSERT IGNORE on the unique option_name either creates the
+	 * row (lock taken) or changes nothing (the pattern of WordPress's own upgrader lock;
+	 * add_option() is not atomic because it upserts). The value is "expiry:random". A lock past
+	 * its expiry (a request that died) is taken over with a compare-and-swap UPDATE, so of two
+	 * requests that both see it stale only one wins. The option API and its cache are bypassed on
+	 * purpose: a persistent object cache could otherwise serve a stale value.
+	 *
+	 * @return string The lock token, or '' when another batch holds the lock.
+	 */
+	private static function acquire_lock(): string {
+		global $wpdb;
+		$now   = time();
+		$token = ( $now + self::LOCK_TTL ) . ':' . strtolower( wp_generate_password( 12, false, false ) );
+		$added = $wpdb->query( $wpdb->prepare( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			"INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')",
+			self::LOCK,
+			$token
+		) );
+		if ( (int) $added === 1 ) {
+			return $token;
+		}
+		$current = $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", self::LOCK ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		if ( ! is_string( $current ) || (int) $current > $now ) {
+			return '';
+		}
+		$taken = $wpdb->query( $wpdb->prepare( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			"UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s",
+			$token,
+			self::LOCK,
+			$current
+		) );
+		return (int) $taken === 1 ? $token : '';
+	}
+
+	/**
+	 * Push the expiry of a held lock forward (between items of a long batch), compare-and-swap on
+	 * the holder's own token. Returns the new token, or '' when this request no longer holds it.
+	 */
+	private static function refresh_lock( string $token ): string {
+		global $wpdb;
+		if ( $token === '' ) {
+			return '';
+		}
+		$fresh = ( time() + self::LOCK_TTL ) . ':' . strtolower( wp_generate_password( 12, false, false ) );
+		$done  = $wpdb->query( $wpdb->prepare( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			"UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s",
+			$fresh,
+			self::LOCK,
+			$token
+		) );
+		return (int) $done === 1 ? $fresh : '';
+	}
+
+	/** Release the lock, only if this request still holds it. */
+	private static function release_lock( string $token ): void {
+		global $wpdb;
+		if ( $token === '' ) {
+			return;
+		}
+		$wpdb->query( $wpdb->prepare( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			"DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = %s",
+			self::LOCK,
+			$token
+		) );
 	}
 
 	// -------------------------------------------------------------------------
@@ -1246,26 +1728,49 @@ final class Ratesight_Image_Optimizer {
 		if ( ! $settings['enabled'] ) {
 			wp_send_json_error( array( 'message' => 'Turn on Image optimization and save the settings first.' ), 409 );
 		}
-		if ( get_transient( self::LOCK ) ) {
+		$lock = self::acquire_lock();
+		if ( $lock === '' ) {
 			wp_send_json_error( array( 'message' => 'Another batch is still running. Try again shortly.', 'busy' => true ), 409 );
 		}
-		set_transient( self::LOCK, time(), 2 * MINUTE_IN_SECONDS );
 
 		$started = microtime( true );
 		$items   = array();
-		foreach ( self::candidate_ids( self::batch_size() ) as $id ) {
-			if ( microtime( true ) - $started > self::BATCH_SECONDS ) {
-				break;
+		try {
+			foreach ( self::candidate_ids( self::batch_size() ) as $id ) {
+				if ( microtime( true ) - $started > self::BATCH_SECONDS ) {
+					break;
+				}
+				if ( $items !== array() ) {
+					$lock = self::refresh_lock( $lock );
+					if ( $lock === '' ) {
+						break; // The lock was lost (taken over as stale): stop here.
+					}
+				}
+				$items[] = self::optimize_existing( $id, $settings );
 			}
-			$items[] = self::optimize_existing( $id, $settings );
+			// Then AVIF uploads whose last sizes did not fit in the upload request's time budget.
+			foreach ( self::avif_pending_ids( self::batch_size() ) as $id ) {
+				if ( $lock === '' || microtime( true ) - $started > self::BATCH_SECONDS ) {
+					break;
+				}
+				if ( $items !== array() ) {
+					$lock = self::refresh_lock( $lock );
+					if ( $lock === '' ) {
+						break;
+					}
+				}
+				$items[] = self::finish_avif_sizes( $id, $settings );
+			}
+		} finally {
+			self::release_lock( $lock );
 		}
-		delete_transient( self::LOCK );
 
-		$counts = self::status_counts();
+		$counts    = self::status_counts();
+		$remaining = $counts['candidates'] + $counts['avif_pending'];
 		wp_send_json_success( array(
 			'items'     => $items,
-			'remaining' => $counts['candidates'],
-			'done'      => $counts['candidates'] === 0 || $items === array(),
+			'remaining' => $remaining,
+			'done'      => $remaining === 0 || $items === array(),
 			'counts'    => $counts,
 		) );
 	}
@@ -1276,20 +1781,29 @@ final class Ratesight_Image_Optimizer {
 		if ( $confirm !== 'rollback' ) {
 			wp_send_json_error( array( 'message' => 'Confirmation missing.' ), 400 );
 		}
-		if ( get_transient( self::LOCK ) ) {
+		$lock = self::acquire_lock();
+		if ( $lock === '' ) {
 			wp_send_json_error( array( 'message' => 'Another batch is still running. Try again shortly.', 'busy' => true ), 409 );
 		}
-		set_transient( self::LOCK, time(), 2 * MINUTE_IN_SECONDS );
 
 		$started = microtime( true );
 		$items   = array();
-		foreach ( self::rollback_ids( self::batch_size() ) as $id ) {
-			if ( microtime( true ) - $started > self::BATCH_SECONDS ) {
-				break;
+		try {
+			foreach ( self::rollback_ids( self::batch_size() ) as $id ) {
+				if ( microtime( true ) - $started > self::BATCH_SECONDS ) {
+					break;
+				}
+				if ( $items !== array() ) {
+					$lock = self::refresh_lock( $lock );
+					if ( $lock === '' ) {
+						break; // The lock was lost (taken over as stale): stop here.
+					}
+				}
+				$items[] = self::rollback( $id );
 			}
-			$items[] = self::rollback( $id );
+		} finally {
+			self::release_lock( $lock );
 		}
-		delete_transient( self::LOCK );
 
 		$counts   = self::status_counts();
 		$progress = array_filter( $items, static fn( array $item ): bool => $item['status'] !== 'failed' );

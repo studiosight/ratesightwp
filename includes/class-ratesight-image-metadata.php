@@ -33,8 +33,14 @@ defined( 'ABSPATH' ) || die;
 
 final class Ratesight_Image_Metadata {
 
-	/** Refuse to buffer a file larger than this (bytes). */
-	const MAX_BYTES = 67108864;
+	/**
+	 * Refuse to buffer a file larger than this (bytes). A rewrite holds the original, the rewritten
+	 * copy and parsing slices at once (about 3x the file), so 12 MB stays well inside a 128M limit.
+	 */
+	const MAX_BYTES = 12582912;
+
+	/** Memory a whole-file read may need, as a multiple of the file size (pre-check only). */
+	const MEMORY_FACTOR = 4;
 
 	/** Containers this class can clean (and write the business location into). */
 	const CLEANABLE = array( 'image/jpeg', 'image/png', 'image/webp' );
@@ -113,6 +119,9 @@ final class Ratesight_Image_Metadata {
 		if ( ! $size || $size > self::MAX_BYTES ) {
 			return self::result( false, false, 'size' );
 		}
+		if ( ! self::memory_allows( (int) $size ) ) {
+			return self::result( false, false, 'memory' );
+		}
 		$bytes = file_get_contents( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 		if ( ! is_string( $bytes ) || $bytes === '' ) {
 			return self::result( false, false, 'unreadable' );
@@ -152,11 +161,63 @@ final class Ratesight_Image_Metadata {
 			return 1;
 		}
 		$size = filesize( $path );
-		if ( ! $size || $size > self::MAX_BYTES ) {
+		if ( ! $size || $size > self::MAX_BYTES || ! self::memory_allows( (int) $size ) ) {
 			return 1;
 		}
 		$bytes = file_get_contents( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 		return is_string( $bytes ) ? self::orientation( $bytes ) : 1;
+	}
+
+	/** Container type of a file from its first bytes only ('' when not JPEG / PNG / WebP or unreadable). */
+	public static function sniff_file( string $path ): string {
+		if ( ! is_file( $path ) || ! is_readable( $path ) ) {
+			return '';
+		}
+		$head = @file_get_contents( $path, false, null, 0, 16 ); // phpcs:ignore
+		return is_string( $head ) ? self::sniff( $head ) : '';
+	}
+
+	/**
+	 * PHP memory_limit in bytes; -1 when unlimited. Uses WordPress's parser when loaded.
+	 *
+	 * @param string|null $raw ini value to parse (null = the current memory_limit).
+	 */
+	public static function memory_limit_bytes( ?string $raw = null ): int {
+		$raw = trim( $raw === null ? (string) ini_get( 'memory_limit' ) : $raw );
+		if ( $raw === '' ) {
+			return -1;
+		}
+		if ( function_exists( 'wp_convert_hr_to_bytes' ) ) {
+			$bytes = (int) wp_convert_hr_to_bytes( $raw );
+		} else {
+			$bytes = (int) $raw;
+			$unit  = strtolower( substr( $raw, -1 ) );
+			if ( $unit === 'g' ) {
+				$bytes *= 1073741824;
+			} elseif ( $unit === 'm' ) {
+				$bytes *= 1048576;
+			} elseif ( $unit === 'k' ) {
+				$bytes *= 1024;
+			}
+		}
+		return $bytes <= 0 ? -1 : $bytes;
+	}
+
+	/**
+	 * Cheap pre-check before a whole-file read: false when MEMORY_FACTOR x the file plus what this
+	 * request already uses would pass memory_limit (an out-of-memory error cannot be caught).
+	 *
+	 * @param int      $bytes File size.
+	 * @param int|null $limit Limit in bytes (-1 = unlimited); null = the current memory_limit.
+	 * @param int|null $used  Bytes in use; null = memory_get_usage().
+	 */
+	public static function memory_allows( int $bytes, ?int $limit = null, ?int $used = null ): bool {
+		$limit = $limit === null ? self::memory_limit_bytes() : $limit;
+		if ( $limit <= 0 ) {
+			return true;
+		}
+		$used = $used === null ? (int) memory_get_usage() : $used;
+		return ( $bytes * self::MEMORY_FACTOR ) + $used <= $limit;
 	}
 
 	// -------------------------------------------------------------------------

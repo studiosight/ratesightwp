@@ -30,7 +30,8 @@ function sanitize_text_field( $v ) { return trim( strip_tags( (string) $v ) ); }
 function absint( $v ) { return abs( (int) $v ); }
 function sanitize_hex_color( $v ) { return $v; }
 function add_settings_error( ...$a ) { global $settings_errors; $settings_errors[] = $a; }
-function apply_filters( $hook, $value, ...$args ) { global $throw_in; if ( $throw_in === $hook ) throw new RuntimeException( 'boom' ); return $value; }
+function apply_filters( $hook, $value, ...$args ) { global $throw_in, $filter_returns; if ( $throw_in === $hook ) throw new RuntimeException( 'boom' ); return array_key_exists( $hook, $filter_returns ) ? $filter_returns[ $hook ] : $value; }
+function wp_generate_password( $length = 12, $special = true, $extra = false ) { return substr( bin2hex( random_bytes( $length ) ), 0, $length ); }
 function wp_normalize_path( $p ) { return str_replace( '\\', '/', (string) $p ); }
 function wp_basename( $p ) { return basename( (string) $p ); }
 function trailingslashit( $p ) { return rtrim( (string) $p, '/' ) . '/'; }
@@ -51,7 +52,24 @@ function get_bloginfo( $what ) { return '6.7'; }
 function get_post_mime_type( $id ) { global $mimes; return $mimes[ $id ] ?? ''; }
 function wp_get_attachment_metadata( $id ) { global $att_meta; return $att_meta[ $id ] ?? array(); }
 function wp_update_attachment_metadata( $id, $m ) { global $att_meta; $att_meta[ $id ] = $m; return true; }
-$mimes = array(); $att_meta = array(); $journal_log = array(); $throw_in = '';
+$mimes = array(); $att_meta = array(); $journal_log = array(); $throw_in = ''; $filter_returns = array();
+
+/** Just enough of $wpdb for the batch lock: INSERT IGNORE / SELECT / compare-and-swap UPDATE / DELETE on one option row. */
+class RS_Lock_WPDB {
+	public $options  = 'wp_options';
+	public $postmeta = 'wp_postmeta';
+	public $rows     = array();
+	public function prepare( $sql, ...$args ) { return array( $sql, $args ); }
+	public function query( $q ) {
+		list( $sql, $a ) = $q;
+		if ( str_starts_with( $sql, 'INSERT IGNORE' ) ) { if ( isset( $this->rows[ $a[0] ] ) ) return 0; $this->rows[ $a[0] ] = $a[1]; return 1; }
+		if ( str_starts_with( $sql, 'UPDATE' ) ) { if ( ( $this->rows[ $a[1] ] ?? null ) === $a[2] ) { $this->rows[ $a[1] ] = $a[0]; return 1; } return 0; }
+		if ( str_starts_with( $sql, 'DELETE' ) ) { if ( ( $this->rows[ $a[0] ] ?? null ) === $a[1] ) { unset( $this->rows[ $a[0] ] ); return 1; } return 0; }
+		return false;
+	}
+	public function get_var( $q ) { return $this->rows[ $q[1][0] ] ?? null; }
+}
+$wpdb = new RS_Lock_WPDB();
 ini_set( 'error_log', '/dev/null' );
 
 require __DIR__ . '/../includes/class-ratesight-options.php';
@@ -129,10 +147,11 @@ $pend->setValue( null, array( '/resized.jpg' => array( 'resized' => true ), '/sa
 check_opt( 'big-image threshold is turned off only for a file our resize already shrank', Ratesight_Image_Optimizer::filter_big_image_threshold( 2560, null, '/resized.jpg' ) === false && Ratesight_Image_Optimizer::filter_big_image_threshold( 2560, null, '/same.jpg' ) === 2560 );
 $pend->setValue( null, $saved_pending );
 $attached[ 7 ] = $file;
-$meta = Ratesight_Image_Optimizer::filter_generate_metadata( array( 'file' => '2026/11/photo.jpg', 'sizes' => array(), 'image_meta' => array( 'camera' => 'PhoneCo X', 'credit' => 'Jane Owner', 'caption' => 'Kept' ) ), 7 );
+$meta = Ratesight_Image_Optimizer::filter_generate_metadata( array( 'file' => '2026/11/photo.jpg', 'sizes' => array(), 'image_meta' => array( 'camera' => 'PhoneCo X', 'credit' => 'Jane Owner', 'caption' => 'Kept', 'copyright' => '(c) Jane Owner', 'title' => 'IMG_0001 at home', 'keywords' => array( 'home', 'family' ) ) ), 7 );
 $rec  = $postmeta[7]['_rs_img_opt'] ?? null;
 check_opt( 'record stored on the attachment (idempotency marker)', is_array( $rec ) && $rec['mode'] === 'upload' && $rec['stripped'] === true && $rec['gps'] === true && $rec['converted'] === false && in_array( 'no_image_editor', $rec['notes'], true ) );
 check_opt( 'camera and credit cleared from attachment metadata, caption kept', $meta['image_meta']['camera'] === '' && $meta['image_meta']['credit'] === '' && $meta['image_meta']['caption'] === 'Kept' );
+check_opt( 'copyright, title and keywords cleared from attachment metadata too (no keep-copyright setting exists)', $meta['image_meta']['copyright'] === '' && $meta['image_meta']['title'] === '' && $meta['image_meta']['keywords'] === array() );
 check_opt( 'an already optimized attachment is skipped by the bulk tool', Ratesight_Image_Optimizer::optimize_existing( 7, Ratesight_Image_Optimizer::settings() )['status'] === 'skipped' );
 check_opt( 'an upload-mode record is never rolled back (posts may link the new file)', Ratesight_Image_Optimizer::rollback( 7 )['status'] === 'skipped' && file_exists( $file ) );
 check_opt( 'GIF uploads are never touched', Ratesight_Image_Optimizer::filter_handle_upload( array( 'file' => $file, 'url' => 'u', 'type' => 'image/gif' ) ) === array( 'file' => $file, 'url' => 'u', 'type' => 'image/gif' ) );
@@ -270,6 +289,130 @@ foreach ( array( '/ratesight-originals/2026/11', '/ratesight-originals/2026', '/
 	@rmdir( $uploads_base . $d );
 }
 
+// ── Size and memory guard (fail open, recorded) ──────────────────────────────
+$huge = $uploads_base . '/2026/11/huge.jpg';
+$hh   = fopen( $huge, 'w' );
+ftruncate( $hh, Ratesight_Image_Metadata::MAX_BYTES + 1 ); // Sparse: never read.
+fclose( $hh );
+clearstatcache();
+check_opt( 'size guard: a file over 12 MB is too_large', Ratesight_Image_Optimizer::size_guard( $huge ) === 'too_large' );
+check_opt( 'size guard: 4x the file plus memory in use over memory_limit is low_memory; -1 = unlimited', Ratesight_Image_Optimizer::size_guard( $file, 1000, 900 ) === 'low_memory' && Ratesight_Image_Optimizer::size_guard( $file, -1, 900 ) === '' );
+$hu = array( 'file' => $huge, 'url' => 'https://example.test/wp-content/uploads/2026/11/huge.jpg', 'type' => 'image/jpeg' );
+check_opt( 'upload over the size guard: returned unchanged, file untouched', Ratesight_Image_Optimizer::filter_handle_upload( $hu, 'upload' ) === $hu && filesize( $huge ) === Ratesight_Image_Metadata::MAX_BYTES + 1 );
+$attached[ 50 ] = $huge;
+Ratesight_Image_Optimizer::filter_generate_metadata( array( 'file' => '2026/11/huge.jpg', 'sizes' => array() ), 50 );
+check_opt( '... the reason is recorded on the attachment and nothing claims it was cleaned', ( $postmeta[50]['_rs_img_opt_error']['code'] ?? '' ) === 'too_large' && ! isset( $postmeta[50]['_rs_img_opt'] ) );
+$attached[ 51 ] = $huge; $mimes[ 51 ] = 'image/jpeg'; $att_meta[ 51 ] = array( 'sizes' => array() );
+$r = Ratesight_Image_Optimizer::optimize_existing( 51, Ratesight_Image_Optimizer::settings() );
+check_opt( 'bulk: a file over the size guard is skipped, recorded, nothing written', $r['status'] === 'failed' && $postmeta[51]['_rs_img_opt_error']['code'] === 'too_large' && ! isset( $postmeta[51]['_rs_img_opt_journal'] ) && filesize( $huge ) === Ratesight_Image_Metadata::MAX_BYTES + 1 );
+unlink( $huge );
+
+// ── Thumbnail regeneration of an old attachment: left to the bulk tool ───────
+$regen = $uploads_base . '/2026/11/old-regen.jpg';
+$regen_sm = $uploads_base . '/2026/11/old-regen-150x150.jpg';
+file_put_contents( $regen, $jpeg );
+file_put_contents( $regen_sm, $jpeg );
+$attached[ 55 ] = $regen;
+Ratesight_Image_Optimizer::filter_generate_metadata( array( 'file' => '2026/11/old-regen.jpg', 'sizes' => array( 'thumbnail' => array( 'file' => 'old-regen-150x150.jpg', 'mime-type' => 'image/jpeg' ) ) ), 55 );
+check_opt( 'metadata generated for a file not uploaded in this request (e.g. regenerated thumbnails): nothing rewritten, no record', file_get_contents( $regen ) === $jpeg && file_get_contents( $regen_sm ) === $jpeg && ! isset( $postmeta[55]['_rs_img_opt'] ) );
+unlink( $regen ); unlink( $regen_sm );
+
+// ── HEIC: WordPress 6.7+ converts it to a JPEG that keeps EXIF / GPS ─────────
+$heic_raw = "\0\0\0\x18ftypheic" . 'Jane Owner GPS';
+$heic     = $uploads_base . '/2026/11/IMG_1.heic';
+$heic_jpg = $uploads_base . '/2026/11/IMG_1.jpg';
+$heic_sm  = $uploads_base . '/2026/11/IMG_1-150x150.jpg';
+file_put_contents( $heic, $heic_raw );
+$hu = array( 'file' => $heic, 'url' => 'https://example.test/wp-content/uploads/2026/11/IMG_1.heic', 'type' => 'image/heic' );
+check_opt( 'HEIC upload: not converted by this plugin (WordPress converts it)', Ratesight_Image_Optimizer::filter_handle_upload( $hu, 'upload' ) === $hu );
+file_put_contents( $heic_jpg, $jpeg );
+file_put_contents( $heic_sm, $jpeg );
+$attached[ 60 ] = $heic_jpg;
+$heic_meta = array( 'file' => '2026/11/IMG_1.jpg', 'original_image' => 'IMG_1.heic', 'sizes' => array( 'thumbnail' => array( 'file' => 'IMG_1-150x150.jpg', 'mime-type' => 'image/jpeg' ) ), 'image_meta' => array( 'credit' => 'Jane Owner' ) );
+$m = Ratesight_Image_Optimizer::filter_generate_metadata( $heic_meta, 60 );
+check_opt( 'HEIC converted to JPEG: the JPEG full size is cleaned (owner gone, business GPS written)', ! str_contains( file_get_contents( $heic_jpg ), 'Jane Owner' ) && str_contains( file_get_contents( $heic_jpg ), 'WGS-84' ) );
+check_opt( '... every generated size is cleaned, attachment metadata scrubbed', ! str_contains( file_get_contents( $heic_sm ), 'Jane Owner' ) && $m['image_meta']['credit'] === '' );
+check_opt( '... the HEIC original (not cleanable) is left as it is, and no optimization record is written', file_get_contents( $heic ) === $heic_raw && ! isset( $postmeta[60]['_rs_img_opt'] ) );
+$filter_returns = array( 'ratesight_image_optimize_upload' => false );
+file_put_contents( $heic_jpg, $jpeg );
+Ratesight_Image_Optimizer::filter_handle_upload( $hu, 'upload' );
+$filter_returns = array();
+Ratesight_Image_Optimizer::filter_generate_metadata( $heic_meta, 60 );
+check_opt( 'an upload a plugin opted out of is not cleaned afterwards either', file_get_contents( $heic_jpg ) === $jpeg );
+set_opt( 'img_opt_enabled', 0 );
+Ratesight_Image_Optimizer::filter_generate_metadata( $heic_meta, 60 );
+check_opt( 'feature off: nothing is cleaned', file_get_contents( $heic_jpg ) === $jpeg );
+set_opt( 'img_opt_enabled', 1 );
+unlink( $heic ); unlink( $heic_jpg ); unlink( $heic_sm );
+
+// ── AVIF time budget ─────────────────────────────────────────────────────────
+check_opt( 'AVIF budget: half of max_execution_time, capped at 20 s; 0 (unlimited) = 20 s', Ratesight_Image_Optimizer::avif_budget( 30 ) === 15.0 && Ratesight_Image_Optimizer::avif_budget( 10 ) === 5.0 && Ratesight_Image_Optimizer::avif_budget( 120 ) === 20.0 && Ratesight_Image_Optimizer::avif_budget( 0 ) === 20.0 );
+$fb  = new ReflectionProperty( 'Ratesight_Image_Optimizer', 'avif_fallback' );
+$fb->setAccessible( true );
+$enc = new ReflectionProperty( 'Ratesight_Image_Optimizer', 'encoding' );
+$enc->setAccessible( true );
+$saved_rt = $_SERVER['REQUEST_TIME_FLOAT'] ?? null;
+$fb->setValue( null, 'image/jpeg' );
+$_SERVER['REQUEST_TIME_FLOAT'] = microtime( true ) - 100;
+$pend->setValue( null, array() );
+check_opt( 'no AVIF upload waiting for its sizes (metadata never generated): never changed', Ratesight_Image_Optimizer::filter_output_format( array(), null, 'image/avif' ) === array() );
+$pend->setValue( null, array( wp_normalize_path( $uploads_base . '/2026/11/pending.avif' ) => array( 'mime' => 'image/avif' ) ) );
+check_opt( 'budget used: the next AVIF size is written in the fallback type', Ratesight_Image_Optimizer::filter_output_format( array(), null, 'image/avif' ) === array( 'image/avif' => 'image/jpeg' ) );
+check_opt( '... never for a save with a file name (this plugin\'s encodes, the full-size decision)', Ratesight_Image_Optimizer::filter_output_format( array(), '/x/photo.avif', 'image/avif' ) === array() );
+$enc->setValue( null, true );
+check_opt( '... never while reencode() saves', Ratesight_Image_Optimizer::filter_output_format( array(), null, 'image/avif' ) === array() );
+$enc->setValue( null, false );
+check_opt( 'other types and existing mappings are left alone', Ratesight_Image_Optimizer::filter_output_format( array( 'image/heic' => 'image/jpeg' ), null, 'image/jpeg' ) === array( 'image/heic' => 'image/jpeg' ) );
+$_SERVER['REQUEST_TIME_FLOAT'] = microtime( true );
+check_opt( 'budget not used yet: AVIF sizes stay AVIF', Ratesight_Image_Optimizer::filter_output_format( array(), null, 'image/avif' ) === array() );
+$fb->setValue( null, '' );
+$_SERVER['REQUEST_TIME_FLOAT'] = microtime( true ) - 100;
+check_opt( 'no AVIF upload in this request: never changed', Ratesight_Image_Optimizer::filter_output_format( array(), null, 'image/avif' ) === array() );
+if ( $saved_rt === null ) { unset( $_SERVER['REQUEST_TIME_FLOAT'] ); } else { $_SERVER['REQUEST_TIME_FLOAT'] = $saved_rt; }
+
+$avif    = $uploads_base . '/2026/11/shot.avif';
+$avif_md = $uploads_base . '/2026/11/shot-300x200.jpg';
+file_put_contents( $avif, 'avif bytes' );
+file_put_contents( $avif_md, $jpeg );
+$pend->setValue( null, array( wp_normalize_path( $avif ) => array( 'mode' => 'upload', 'mime' => 'image/avif', 'notes' => array(), 'backups' => array() ) ) );
+$attached[ 70 ] = $avif;
+Ratesight_Image_Optimizer::filter_generate_metadata( array( 'file' => '2026/11/shot.avif', 'sizes' => array( 'thumbnail' => array( 'file' => 'shot-150x150.avif', 'mime-type' => 'image/avif' ), 'medium' => array( 'file' => 'shot-300x200.jpg', 'mime-type' => 'image/jpeg' ) ) ), 70 );
+check_opt( 'sizes left in the fallback type are recorded for the bulk tool', ( $postmeta[70]['_rs_img_opt']['avif_pending'] ?? null ) === array( 'medium' ) && in_array( 'avif_time_budget', $postmeta[70]['_rs_img_opt']['notes'], true ) && ( $postmeta[70]['_rs_img_opt_avif_pending'] ?? 0 ) === 1 );
+check_opt( '... and the fallback size is cleaned like any other size', ! str_contains( file_get_contents( $avif_md ), 'Jane Owner' ) );
+$att_meta[ 70 ] = array( 'file' => '2026/11/shot.avif', 'sizes' => array( 'medium' => array( 'file' => 'shot-300x200.jpg', 'mime-type' => 'image/jpeg' ) ) );
+$r = Ratesight_Image_Optimizer::finish_avif_sizes( 70, Ratesight_Image_Optimizer::settings() );
+check_opt( 'bulk finish when AVIF is no longer chosen: sizes keep their type, nothing is retried', $r['status'] === 'skipped' && ! isset( $postmeta[70]['_rs_img_opt_avif_pending'] ) && ! isset( $postmeta[70]['_rs_img_opt']['avif_pending'] ) && in_array( 'avif_sizes_left_as_is', $postmeta[70]['_rs_img_opt']['notes'], true ) && is_file( $avif_md ) );
+$postmeta[70]['_rs_img_opt']['superseded'] = array( '2026/11/shot-300x200.jpg' );
+Ratesight_Image_Optimizer::on_delete_attachment( 70 );
+check_opt( 'deleting the attachment deletes the size files its AVIF sizes replaced', ! is_file( $avif_md ) );
+$postmeta[71]['_rs_img_opt'] = array( 'superseded' => array( '../../' . basename( $avif ) ) );
+Ratesight_Image_Optimizer::on_delete_attachment( 71 );
+check_opt( '... never a path that escapes the uploads directory', is_file( $avif ) );
+unlink( $avif );
+
+// ── Batch lock ───────────────────────────────────────────────────────────────
+$acq = new ReflectionMethod( 'Ratesight_Image_Optimizer', 'acquire_lock' );
+$acq->setAccessible( true );
+$rel = new ReflectionMethod( 'Ratesight_Image_Optimizer', 'release_lock' );
+$rel->setAccessible( true );
+$t1 = $acq->invoke( null );
+$t2 = $acq->invoke( null );
+check_opt( 'lock: the first request takes it, a second is refused while it is fresh', $t1 !== '' && $t2 === '' && (int) $wpdb->rows['ratesight_img_opt_lock'] > time() );
+$rel->invoke( null, 'someone-else' );
+check_opt( 'lock: release only removes the holder\'s own lock', isset( $wpdb->rows['ratesight_img_opt_lock'] ) );
+$rel->invoke( null, $t1 );
+check_opt( 'lock: released by its holder', ! isset( $wpdb->rows['ratesight_img_opt_lock'] ) );
+$wpdb->rows['ratesight_img_opt_lock'] = ( time() - 5 ) . ':stale';
+$t3 = $acq->invoke( null );
+check_opt( 'lock: a stale lock (a request that died) is taken over', $t3 !== '' && $wpdb->rows['ratesight_img_opt_lock'] === $t3 );
+$t4 = ( new ReflectionMethod( 'Ratesight_Image_Optimizer', 'refresh_lock' ) );
+$t4->setAccessible( true );
+$t5 = $t4->invoke( null, $t3 );
+check_opt( 'lock: the holder can push its expiry forward (new token, compare-and-swap)', $t5 !== '' && $t5 !== $t3 && $wpdb->rows['ratesight_img_opt_lock'] === $t5 );
+check_opt( 'lock: a request that lost the lock cannot refresh it', $t4->invoke( null, $t3 ) === '' && $wpdb->rows['ratesight_img_opt_lock'] === $t5 );
+$rel->invoke( null, $t5 );
+check_opt( 'lock: released after a refresh', ! isset( $wpdb->rows['ratesight_img_opt_lock'] ) );
+
 // ── Static checks ────────────────────────────────────────────────────────────
 $src = file_get_contents( __DIR__ . '/../includes/class-ratesight-image-optimizer.php' );
 $meta_src = file_get_contents( __DIR__ . '/../includes/class-ratesight-image-metadata.php' );
@@ -284,6 +427,10 @@ $forbidden = '/\b(exec|shell_exec|system|passthru|proc_open|popen|curl_init|curl
 check_opt( 'no shell or remote calls in the new classes', ! preg_match( $forbidden, preg_replace( '#^\s*(//|\*).*$#m', '', $src . $meta_src ) ) );
 check_opt( 'apply and rollback need an explicit confirm word', str_contains( $src, "\$confirm !== 'apply'" ) && str_contains( $src, "\$confirm !== 'rollback'" ) );
 check_opt( 'apply refuses while the setting is off', (bool) preg_match( "/public static function ajax_apply.*?if \( ! \\\$settings\['enabled'\] \)/s", $src ) );
+check_opt( 'the batch lock is not a get_transient / set_transient pair any more', ! preg_match( '/(get|set|delete)_transient\(\s*self::LOCK/', $src ) );
+check_opt( 'apply and rollback release the lock in finally', substr_count( $src, "} finally {\n\t\t\tself::release_lock( \$lock );" ) === 2 );
+check_opt( 'memory is raised first in the upload and bulk entry points', (bool) preg_match( "/function optimize_upload_file\\([^)]*\\): array \\{\\s*\\/\\/[^\\n]*\\n\\s*if \\( function_exists\\( 'wp_raise_memory_limit' \\) \\)/", $src ) && (bool) preg_match( "/function optimize_existing_run\\([^)]*\\): array \\{\\s*\\/\\/[^\\n]*\\n\\s*if \\( function_exists\\( 'wp_raise_memory_limit' \\) \\)/", $src ) );
+check_opt( 'the Images tab does not promise metadata is "always" removed, and names what cannot be cleaned', ! str_contains( $tab, 'always removed' ) && str_contains( $tab, 'Not every file can be cleaned' ) );
 $missing = array();
 foreach ( $images as $def ) if ( ! str_contains( $tab, 'name="' . $def['name'] . '"' ) ) $missing[] = $def['name'];
 check_opt( 'the Image optimization form carries every option of its group: missing ' . json_encode( $missing ), $missing === array() );

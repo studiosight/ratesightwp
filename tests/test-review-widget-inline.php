@@ -34,6 +34,21 @@ class Ratesight_Options {
 }
 function doing_action( string $hook ): bool { return in_array( $hook, $GLOBALS['rs_test_doing'], true ); }
 function doing_filter( string $hook ): bool { return in_array( $hook, $GLOBALS['rs_test_doing'], true ); }
+// Actions that already ran on this page. Default: the page body (after wp_head and wp_body_open).
+$GLOBALS['rs_test_did']     = array( 'wp' => 1, 'template_redirect' => 1, 'wp_head' => 1, 'wp_body_open' => 1 );
+$GLOBALS['rs_test_ajax']    = false;
+$GLOBALS['rs_test_actions'] = array();
+function did_action( string $hook ): int { return (int) ( $GLOBALS['rs_test_did'][ $hook ] ?? 0 ); }
+function in_the_loop(): bool { return false; }
+function is_main_query(): bool { return true; }
+function is_admin(): bool { return false; }
+function wp_doing_ajax(): bool { return $GLOBALS['rs_test_ajax']; }
+function wp_doing_cron(): bool { return false; }
+function add_action( string $hook, $callback, int $priority = 10 ): bool { $GLOBALS['rs_test_actions'][] = array( $hook, $callback, $priority ); return true; }
+function has_action( string $hook, $callback = false ) {
+	foreach ( $GLOBALS['rs_test_actions'] as $a ) if ( $a[0] === $hook && $a[1] === $callback ) return $a[2];
+	return false;
+}
 // Like WordPress: add_query_arg() does NOT encode values (callers must).
 function add_query_arg( array $args, string $url ): string {
 	$pairs = array();
@@ -52,6 +67,10 @@ function rs_new_page(): Ratesight_Public {
 	$p = new ReflectionProperty( 'Ratesight_Public', 'printed_widgets' );
 	$p->setAccessible( true );
 	$p->setValue( null, array() );
+	$d = new ReflectionProperty( 'Ratesight_Public', 'deferred_widgets' );
+	$d->setAccessible( true );
+	$d->setValue( null, array() );
+	$GLOBALS['rs_test_actions'] = array();
 	return new Ratesight_Public();
 }
 
@@ -86,6 +105,51 @@ $in_excerpt = $public->shortcode_leave_reviews();
 $GLOBALS['rs_test_doing'] = array();
 check_review_widget_inline_case( 'nothing printed while rendering wp_head or an excerpt', $in_head === '' && $in_excerpt === '' );
 check_review_widget_inline_case( 'the real content still gets the widgets afterwards', str_contains( $public->shortcode_all_reviews(), '<script id="ratesight-reviews-widget"' ) && str_contains( $public->shortcode_leave_reviews(), '<script id="ratesight-carousel-widget"' ) );
+
+// Content rendered BEFORE the template loads (a theme or plugin on wp / template_redirect, e.g. to
+// build a description) is thrown away: it must not use up the slot.
+$public = rs_new_page();
+$GLOBALS['rs_test_did'] = array( 'wp' => 1 );
+$pre_all = $public->shortcode_all_reviews();
+$GLOBALS['rs_test_did']   = array( 'wp' => 1, 'template_redirect' => 1 );
+$GLOBALS['rs_test_doing'] = array( 'template_redirect' );
+$pre_leave = $public->shortcode_leave_reviews();
+$GLOBALS['rs_test_doing'] = array();
+check_review_widget_inline_case( 'render on wp / during template_redirect: nothing printed', $pre_all === '' && $pre_leave === '' );
+check_review_widget_inline_case( 'before the page body: a wp_footer fallback is registered once', count( $GLOBALS['rs_test_actions'] ) === 1 && $GLOBALS['rs_test_actions'][0][0] === 'wp_footer' && $GLOBALS['rs_test_actions'][0][1] === array( 'Ratesight_Public', 'print_deferred_widgets' ) );
+$GLOBALS['rs_test_did'] = array( 'wp' => 1, 'template_redirect' => 1, 'wp_head' => 1, 'wp_body_open' => 1 );
+$body_all = $public->shortcode_all_reviews();
+check_review_widget_inline_case( 'the real body content still prints the exact tag inline', $body_all === '<script id="ratesight-reviews-widget" src="' . $base . '?typ=6&#038;oid=1234&#038;min=4&#038;map=true"' . $attrs );
+ob_start();
+Ratesight_Public::print_deferred_widgets();
+$footer = ob_get_clean();
+check_review_widget_inline_case( 'footer prints only the widget the body never printed, with the same tag and id', $footer === '<script id="ratesight-carousel-widget" src="' . $base . '?typ=5&#038;oid=1234&#038;min=4"' . $attrs . "\n" );
+ob_start();
+Ratesight_Public::print_deferred_widgets();
+check_review_widget_inline_case( 'footer fallback prints a tag at most once', ob_get_clean() === '' && ! str_contains( $public->shortcode_leave_reviews(), '<script' ) );
+
+// Without wp_body_open (older classic themes): after wp_head counts as the body.
+$public = rs_new_page();
+$GLOBALS['rs_test_did'] = array( 'wp' => 1, 'template_redirect' => 1, 'wp_head' => 1 );
+check_review_widget_inline_case( 'classic theme without wp_body_open: printed inline', str_contains( $public->shortcode_all_reviews(), '<script id="ratesight-reviews-widget"' ) && $GLOBALS['rs_test_actions'] === array() );
+
+// Block themes on WordPress 5.9-6.3 render the whole page after template_redirect, BEFORE wp_head.
+$public = rs_new_page();
+$GLOBALS['rs_test_did'] = array( 'wp' => 1, 'template_redirect' => 1 );
+check_review_widget_inline_case( 'block theme rendering before wp_head: printed inline, not moved to the footer', str_contains( $public->shortcode_all_reviews(), '<script id="ratesight-reviews-widget"' ) && $GLOBALS['rs_test_actions'] === array() );
+
+// AJAX / REST renders are not theme pages: printed as before.
+$public = rs_new_page();
+$GLOBALS['rs_test_did']  = array( 'wp' => 1 );
+$GLOBALS['rs_test_ajax'] = true;
+check_review_widget_inline_case( 'AJAX render (no page body): printed as before', str_contains( $public->shortcode_all_reviews(), '<script id="ratesight-reviews-widget"' ) && $GLOBALS['rs_test_actions'] === array() );
+$GLOBALS['rs_test_ajax'] = false;
+
+// Before the main query ran (WP-CLI, XML-RPC, GraphQL): no footer will follow, so printed inline.
+$public = rs_new_page();
+$GLOBALS['rs_test_did'] = array();
+check_review_widget_inline_case( 'render before the wp action (CLI / XML-RPC / GraphQL): printed inline, nothing deferred', str_contains( $public->shortcode_all_reviews(), '<script id="ratesight-reviews-widget"' ) && $GLOBALS['rs_test_actions'] === array() );
+$GLOBALS['rs_test_did'] = array( 'wp' => 1, 'template_redirect' => 1, 'wp_head' => 1, 'wp_body_open' => 1 );
 
 // ── Empty / odd code id ────────────────────────────────────────────────────
 $GLOBALS['rs_test_code_id'] = '   ';
