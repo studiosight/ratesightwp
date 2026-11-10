@@ -68,6 +68,7 @@ are never sent in URLs or displayed in the client-facing plugin.
 
 == Changelog ==
 
+Unreleased (no version bump) - Fix: [rs_all_reviews] and [rs_leave_reviews] rendered nothing. They enqueued the widget, so WordPress printed id="<handle>-js", but the typ=6 / typ=5 Ratesight scripts look up getElementById("ratesight-reviews-widget") / ("ratesight-carousel-widget") and replace that tag with their iframe in place. The shortcodes now print Ratesight's exact embed tag inline where the shortcode sits, once per page (a repeat prints an HTML comment), nothing when no Ratesight ID is set. The sidebar widget is unchanged. If an optimizer still delays or moves scripts, exclude go.ratesight.com/Widgets/WidgetJS.ashx there.
 Unreleased (no version bump) - Signed read GET /broken-links: the stored outbound broken-link results (totals, last scan, up to 200 pages with their broken and possibly blocked targets, a truncated flag). Read only; ignore, replace and unlink stay in the Links tab.
 3.15.5 - Redirects: method native stores a rule in the plugin's own map whatever else is active; Redirection plugin writes and deletes fixed (exact-match items only, errors reported, real storage method returned)
 3.15.4 - Ratesight CRM posts publish by default; no per-site setting
