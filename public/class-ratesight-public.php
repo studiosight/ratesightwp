@@ -308,7 +308,7 @@ class Ratesight_Public {
 		}
 		self::$printed_widgets[ $id ] = true;
 
-		$query = array( 'typ' => $args['typ'], 'oid' => $code_id ) + $args;
+		$query = array( 'typ' => $args['typ'], 'oid' => rawurlencode( $code_id ) ) + $args;
 		$src   = add_query_arg( $query, self::WIDGET_BASE );
 
 		return '<script id="' . esc_attr( $id ) . '" src="' . esc_url( $src ) . '"'

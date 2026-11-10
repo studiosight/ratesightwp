@@ -34,7 +34,12 @@ class Ratesight_Options {
 }
 function doing_action( string $hook ): bool { return in_array( $hook, $GLOBALS['rs_test_doing'], true ); }
 function doing_filter( string $hook ): bool { return in_array( $hook, $GLOBALS['rs_test_doing'], true ); }
-function add_query_arg( array $args, string $url ): string { return $url . '?' . http_build_query( $args ); }
+// Like WordPress: add_query_arg() does NOT encode values (callers must).
+function add_query_arg( array $args, string $url ): string {
+	$pairs = array();
+	foreach ( $args as $k => $v ) $pairs[] = $k . '=' . $v;
+	return $url . '?' . implode( '&', $pairs );
+}
 function esc_url( string $url ): string { return str_replace( '&', '&#038;', $url ); }
 function esc_attr( string $s ): string { return htmlspecialchars( $s, ENT_QUOTES ); }
 function wp_register_script( ...$a ): void { $GLOBALS['rs_test_enqueued'][] = $a[0]; }
@@ -94,6 +99,13 @@ $GLOBALS['rs_test_code_id'] = '12"><x';
 $public = rs_new_page();
 $odd = $public->shortcode_all_reviews();
 check_review_widget_inline_case( 'code id is url-encoded in src', str_contains( $odd, 'oid=12%22%3E%3Cx' ) && ! str_contains( $odd, '"><x' ) );
+
+$GLOBALS['rs_test_code_id'] = '12 34&typ=1';
+$public = rs_new_page();
+$amp = $public->shortcode_all_reviews();
+check_review_widget_inline_case( 'space and ampersand in code id are encoded and cannot add params', str_contains( $amp, 'oid=12%2034%26typ%3D1&#038;min=4' ) && ! str_contains( $amp, '12 34' ) && substr_count( $amp, 'typ=' ) === 1 );
+$amp = $public->shortcode_leave_reviews();
+check_review_widget_inline_case( 'carousel encodes space and ampersand too', str_contains( $amp, 'oid=12%2034%26typ%3D1&#038;min=4' ) && substr_count( $amp, 'typ=' ) === 1 );
 $GLOBALS['rs_test_code_id'] = '1234';
 
 // ── Source checks ──────────────────────────────────────────────────────────
