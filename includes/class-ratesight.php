@@ -202,6 +202,9 @@ class Ratesight {
 		// Since 3.4.0: alt text was only ever settable at upload time, and IndexNow submission was
 		// reachable only from the admin bulk-action UI. Both are signed mutations.
 		add_action( 'rest_api_init', array( 'Ratesight_Media_Alt', 'register_routes' ) );
+		// Image optimization: upload filters (each a no-op while the setting is off) and the
+		// admin-only bulk tool AJAX actions (manage_options + nonce).
+		Ratesight_Image_Optimizer::register();
 		add_action( 'rest_api_init', array( 'Ratesight_CRM_Publish', 'register_routes' ) );
 		// Signed read of the stored outbound broken-link results (GET /broken-links).
 		add_action( 'rest_api_init', array( 'Ratesight_Link_Manager', 'register_routes' ) );

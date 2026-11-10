@@ -11,7 +11,7 @@
 
 defined( 'ABSPATH' ) || die;
 
-$valid_tabs = array( 'performance', 'widgets', 'support', 'widget-settings', 'seo-pages', 'logs', 'connections', 'links', 'help' );
+$valid_tabs = array( 'performance', 'widgets', 'support', 'widget-settings', 'seo-pages', 'logs', 'connections', 'links', 'help', 'images' );
 if ( ! in_array( $tab, $valid_tabs, true ) ) {
 	$tab = 'performance';
 }
@@ -101,6 +101,7 @@ if ( ! in_array( $tab, $valid_tabs, true ) ) {
 			'connections' => 'tab-connections.php',
 			'links'       => 'tab-links.php',
 			'help'        => 'tab-help.php',
+			'images'      => 'tab-images.php',
 		);
 		$partial = __DIR__ . '/' . ( $map[ $tab ] ?? 'tab-performance.php' );
 		if ( file_exists( $partial ) ) {
