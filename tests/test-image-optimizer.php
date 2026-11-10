@@ -46,7 +46,7 @@ function update_post_meta( $id, $key, $value ) {
 	return true;
 }
 function delete_post_meta( $id, $key ) { global $postmeta; unset( $postmeta[ $id ][ $key ] ); return true; }
-function wp_image_editor_supports( $args ) { global $editor_mimes; return ! empty( $editor_mimes[ $args['mime_type'] ] ); }
+function wp_image_editor_supports( $args ) { global $editor_mimes, $throw_in; if ( $throw_in === 'editor:' . $args['mime_type'] ) throw new RuntimeException( 'boom' ); return ! empty( $editor_mimes[ $args['mime_type'] ] ); }
 function get_bloginfo( $what ) { return '6.7'; }
 function get_post_mime_type( $id ) { global $mimes; return $mimes[ $id ] ?? ''; }
 function wp_get_attachment_metadata( $id ) { global $att_meta; return $att_meta[ $id ] ?? array(); }
@@ -102,7 +102,8 @@ check_opt( 'no image library: the upload keeps its type', Ratesight_Image_Optimi
 $editor_mimes = array( 'image/jpeg' => true, 'image/webp' => true ); reset_editor_cache();
 check_opt( 'AVIF asked, server writes only WebP: WebP', Ratesight_Image_Optimizer::target_mime( 'image/jpeg', 'avif' ) === 'image/webp' );
 $editor_mimes['image/avif'] = true; reset_editor_cache();
-check_opt( 'AVIF asked and writable (WordPress 6.5+): AVIF', Ratesight_Image_Optimizer::target_mime( 'image/jpeg', 'avif' ) === 'image/avif' );
+check_opt( 'AVIF asked and writable (WordPress 6.5+, PHP 8.2+): AVIF; on PHP 8.0/8.1 (getimagesize cannot verify AVIF) WebP', Ratesight_Image_Optimizer::target_mime( 'image/jpeg', 'avif' ) === ( PHP_VERSION_ID >= 80200 ? 'image/avif' : 'image/webp' ) );
+check_opt( 'AVIF support is reported only where it can be verified', Ratesight_Image_Optimizer::editor_supports( 'image/avif' ) === ( PHP_VERSION_ID >= 80200 ) );
 check_opt( '"original" keeps the type', Ratesight_Image_Optimizer::target_mime( 'image/png', 'original' ) === 'image/png' );
 
 // ── Upload on a server with no GD / Imagick: strip + location, nothing else ──
@@ -153,6 +154,18 @@ $in_meta  = array( 'file' => 'x', 'sizes' => array( 'thumb' => array( 'file' => 
 check_opt( 'an exception inside the metadata filter returns the metadata unchanged', Ratesight_Image_Optimizer::filter_generate_metadata( $in_meta, 7 ) === $in_meta );
 check_opt( 'an exception inside the bulk step is reported as failed, never thrown', Ratesight_Image_Optimizer::optimize_existing( 8, Ratesight_Image_Optimizer::settings() )['status'] === 'failed' );
 $throw_in = '';
+
+// An exception after this run created a backup: the backup is removed, the upload is untouched.
+set_opt( 'img_opt_keep_original', 1 );
+reset_editor_cache();
+file_put_contents( $file, $jpeg );
+$throw_in = 'editor:image/jpeg';
+$back = Ratesight_Image_Optimizer::filter_handle_upload( $upload, 'upload' );
+$throw_in = '';
+$orphans = glob( $uploads_base . '/ratesight-originals/2026/11/*' ) ?: array();
+check_opt( 'exception mid-upload: upload returned unchanged, the original is in place', $back === $upload && is_file( $file ) );
+check_opt( 'exception mid-upload: backup / temp files created by the run are removed', $orphans === array() && ( glob( $uploads_base . '/2026/11/*-rs-tmp-*' ) ?: array() ) === array() );
+set_opt( 'img_opt_keep_original', 0 );
 
 // ── Encoder output verification (pure: getimagesize is core PHP) ─────────────
 $png_ok = "\x89PNG\r\n\x1A\n" . pack( 'N', 13 ) . 'IHDR' . pack( 'NN', 32, 16 ) . "\x08\x02\x00\x00\x00" . pack( 'N', crc32( 'IHDR' . pack( 'NN', 32, 16 ) . "\x08\x02\x00\x00\x00" ) );
@@ -241,6 +254,17 @@ $r = Ratesight_Image_Optimizer::optimize_existing( 30, Ratesight_Image_Optimizer
 check_opt( 'a twice-interrupted attachment is skipped with an error (no endless retry)', $r['status'] === 'failed' && $postmeta[30]['_rs_img_opt_error']['code'] === 'interrupted' );
 set_opt( 'img_opt_keep_original', 0 );
 @unlink( $old );
+
+// Width / height are refreshed from the file (e.g. after a resumed run without backups).
+$sof   = "\xFF\xC0" . pack( 'n', 17 ) . "\x08" . pack( 'nn', 12, 24 ) . "\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01";
+$dimj  = "\xFF\xD8" . $sof . "\xFF\xDA" . pack( 'n', 3 ) . "\x00" . "\x11\x22" . "\xFF\xD9";
+$dimf  = $uploads_base . '/2026/11/dims.jpg';
+file_put_contents( $dimf, $dimj );
+$attached[ 40 ] = $dimf; $mimes[ 40 ] = 'image/jpeg'; $att_meta[ 40 ] = array( 'width' => 4000, 'height' => 2000, 'sizes' => array() );
+$postmeta[40] = array( '_rs_img_opt_journal' => array( 'attempts' => 1, 'backups' => array(), 'done' => array( '2026/11/dims.jpg' ), 'current' => '' ) );
+$r = Ratesight_Image_Optimizer::optimize_existing( 40, Ratesight_Image_Optimizer::settings() );
+check_opt( 'resumed run without backups: width/height read back from the file', $r['status'] === 'optimized' && $att_meta[40]['width'] === 24 && $att_meta[40]['height'] === 12 );
+@unlink( $dimf );
 foreach ( array( '/ratesight-originals/2026/11', '/ratesight-originals/2026', '/ratesight-originals' ) as $d ) {
 	foreach ( array_merge( glob( $uploads_base . $d . '/*' ) ?: array(), array( $uploads_base . $d . '/.htaccess' ) ) as $f ) if ( is_file( $f ) ) unlink( $f );
 	@rmdir( $uploads_base . $d );

@@ -61,6 +61,9 @@ final class Ratesight_Image_Optimizer {
 	/** Editor capability cache: mime => bool. */
 	private static $supports = array();
 
+	/** Files created by the upload currently being processed (temp encodes, backups, converted copies). */
+	private static $created = null;
+
 	// -------------------------------------------------------------------------
 	// Wiring
 	// -------------------------------------------------------------------------
@@ -130,8 +133,11 @@ final class Ratesight_Image_Optimizer {
 		}
 		$ok = function_exists( 'wp_image_editor_supports' ) && (bool) wp_image_editor_supports( array( 'mime_type' => $mime ) );
 		if ( $ok && $mime === 'image/avif' ) {
-			// WordPress learned the AVIF type (extension map, upload checks, srcset) in 6.5.
-			$ok = function_exists( 'get_bloginfo' ) && version_compare( (string) get_bloginfo( 'version' ), '6.5', '>=' );
+			// WordPress learned the AVIF type (extension map, upload checks, srcset) in 6.5, and
+			// getimagesize() reads AVIF only from PHP 8.2 (8.0/8.1 report nothing or 0x0), so an
+			// AVIF encode could not be verified there. AVIF is skipped cleanly: WebP is used instead.
+			$ok = PHP_VERSION_ID >= 80200
+				&& function_exists( 'get_bloginfo' ) && version_compare( (string) get_bloginfo( 'version' ), '6.5', '>=' );
 		}
 		self::$supports[ $mime ] = $ok;
 		return $ok;
@@ -286,11 +292,40 @@ final class Ratesight_Image_Optimizer {
 	 * @param string $context 'upload' or 'sideload'.
 	 */
 	public static function filter_handle_upload( $upload, $context = 'upload' ) {
+		self::$created = array();
 		try {
-			return self::handle_upload( $upload, (string) $context );
+			$result        = self::handle_upload( $upload, (string) $context );
+			self::$created = null;
+			return $result;
 		} catch ( \Throwable $e ) {
 			self::log( 'upload', $e );
+			self::remove_orphans( is_array( $upload ) ? (string) ( $upload['file'] ?? '' ) : '' );
 			return $upload;
+		}
+	}
+
+	private static function track( string $path ): void {
+		if ( is_array( self::$created ) && $path !== '' ) {
+			self::$created[] = $path;
+		}
+	}
+
+	/**
+	 * After an exception mid-upload: delete what this run created (temp encodes, backups, a
+	 * converted copy), but only while the original upload is still in place, so the returned,
+	 * unchanged upload always points at a real file.
+	 */
+	private static function remove_orphans( string $original ): void {
+		$created       = is_array( self::$created ) ? self::$created : array();
+		self::$created = null;
+		if ( $original === '' || ! is_file( $original ) ) {
+			return;
+		}
+		$keep = wp_normalize_path( $original );
+		foreach ( array_unique( $created ) as $path ) {
+			if ( wp_normalize_path( $path ) !== $keep && is_file( $path ) ) {
+				@unlink( $path ); // phpcs:ignore
+			}
 		}
 	}
 
@@ -501,6 +536,7 @@ final class Ratesight_Image_Optimizer {
 					$dir  = dirname( $path );
 					$name = wp_unique_filename( $dir, pathinfo( $path, PATHINFO_FILENAME ) . '.' . self::extension_for( $encoded['mime'] ) );
 					$dest = trailingslashit( $dir ) . $name;
+					self::track( $dest );
 					if ( @rename( $encoded['path'], $dest ) ) { // phpcs:ignore
 						$out_path      = $dest;
 						$out_mime      = $encoded['mime'];
@@ -607,11 +643,13 @@ final class Ratesight_Image_Optimizer {
 		$editor->set_quality( $quality );
 
 		$tmp   = trailingslashit( dirname( $path ) ) . pathinfo( $path, PATHINFO_FILENAME ) . '-rs-tmp-' . strtolower( wp_generate_password( 8, false, false ) ) . '.' . self::extension_for( $target );
+		self::track( $tmp );
 		$saved = $editor->save( $tmp, $target );
 		if ( is_wp_error( $saved ) ) {
 			return $saved;
 		}
 		$saved_path = (string) ( $saved['path'] ?? '' );
+		self::track( $saved_path );
 		$saved_mime = (string) ( $saved['mime-type'] ?? $target );
 		if ( $saved_path === '' || ! self::is_valid_image_file( $saved_path, $saved_mime ) ) {
 			if ( $saved_path !== '' && is_file( $saved_path ) ) {
@@ -779,6 +817,7 @@ final class Ratesight_Image_Optimizer {
 		if ( file_exists( $dest ) ) {
 			$dest = trailingslashit( dirname( $dest ) ) . wp_unique_filename( dirname( $dest ), wp_basename( $dest ) );
 		}
+		self::track( $dest );
 		if ( ! @copy( $path, $dest ) ) { // phpcs:ignore
 			return new \WP_Error( 'rs_img_backup', 'Backup copy failed.' );
 		}
@@ -1024,7 +1063,15 @@ final class Ratesight_Image_Optimizer {
 			$after += is_file( $path ) ? (int) filesize( $path ) : 0;
 		}
 		if ( is_file( $file ) ) {
+			clearstatcache( true, $file );
 			$metadata['filesize'] = (int) filesize( $file );
+			// Dimensions from the file itself: correct even when a resumed run (no backups) found
+			// the full size already resized by the interrupted run.
+			$dims = @getimagesize( $file ); // phpcs:ignore
+			if ( is_array( $dims ) && (int) $dims[0] > 0 && (int) $dims[1] > 0 ) {
+				$metadata['width']  = (int) $dims[0];
+				$metadata['height'] = (int) $dims[1];
+			}
 		}
 		$metadata = self::scrub_image_meta( $metadata );
 		wp_update_attachment_metadata( $attachment_id, $metadata );

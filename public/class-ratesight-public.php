@@ -248,38 +248,71 @@ class Ratesight_Public {
 	// Shortcodes
 	// -------------------------------------------------------------------------
 
-	public function shortcode_leave_reviews(): string {
-		$opts    = $this->opts();
-		$code_id = trim( $opts['code_id'] );
-		if ( $code_id === '' ) {
-			return '';
-		}
+	/**
+	 * Ratesight review widgets print Ratesight's exact embed tag INLINE, where
+	 * the shortcode sits, instead of enqueueing a footer script:
+	 *
+	 *  - The typ=5 (carousel) and typ=6 (all reviews) widget scripts find their
+	 *    own tag with document.getElementById( "ratesight-carousel-widget" ) /
+	 *    ( "ratesight-reviews-widget" ). wp_enqueue_script prints
+	 *    id="<handle>-js", the lookup returned null and the widget threw on
+	 *    appendChild, so the shortcodes rendered nothing.
+	 *  - Both scripts then replace that tag with their iframe in place
+	 *    (parentElement.replaceChild), so the tag has to be in the post content;
+	 *    a footer tag would put the reviews at the bottom of the page.
+	 *
+	 * The data-* attributes ask common optimizers (LiteSpeed, WP Rocket,
+	 * Autoptimize, Cloudflare Rocket Loader) to leave the tag alone. An
+	 * optimizer that still delays or moves it can break the widget: exclude
+	 * go.ratesight.com/Widgets/WidgetJS.ashx there.
+	 */
+	private const REVIEWS_WIDGET_ID  = 'ratesight-reviews-widget';
+	private const CAROUSEL_WIDGET_ID = 'ratesight-carousel-widget';
 
-		// Only emit once per page.
-		if ( wp_script_is( 'ratesight-carousel-widget', 'done' ) ) {
-			return '';
-		}
-		$src = esc_url( add_query_arg( array( 'typ' => 5, 'oid' => $code_id, 'min' => 4 ), self::WIDGET_BASE ) );
-		wp_register_script( 'ratesight-carousel-widget', $src, array(), null, true );
-		wp_enqueue_script( 'ratesight-carousel-widget' );
-		return '';
+	/** Widget ids already printed on this page (one per page: the id must be unique). */
+	private static array $printed_widgets = array();
+
+	public function shortcode_leave_reviews(): string {
+		// The carousel page (go.ratesight.com carousel-reviews-widget.aspx)
+		// already shows "Click the 5-Stars below to leave a review" with a
+		// star link to Reviews.aspx, so no separate stars block is printed.
+		return $this->inline_widget( self::CAROUSEL_WIDGET_ID, 'rs_leave_reviews', array( 'typ' => 5, 'min' => 4 ) );
 	}
 
 	public function shortcode_all_reviews(): string {
-		$opts    = $this->opts();
-		$code_id = trim( $opts['code_id'] );
+		return $this->inline_widget( self::REVIEWS_WIDGET_ID, 'rs_all_reviews', array( 'typ' => 6, 'min' => 4, 'map' => 'true' ) );
+	}
+
+	/**
+	 * Build Ratesight's embed tag for one widget, once per page.
+	 *
+	 * @param string $id        Exact id the widget script looks up.
+	 * @param string $shortcode Shortcode name, for the duplicate comment.
+	 * @param array  $args      Query args before oid (typ first, as Ratesight documents it).
+	 */
+	private function inline_widget( string $id, string $shortcode, array $args ): string {
+		$code_id = trim( (string) ( $this->opts()['code_id'] ?? '' ) );
 		if ( $code_id === '' ) {
 			return '';
 		}
 
-		// Only emit once per page.
-		if ( wp_script_is( 'ratesight-reviews-widget', 'done' ) ) {
+		// SEO plugins and excerpts can render the content outside the page
+		// body (wp_head, get_the_excerpt). Print nothing there and do not use
+		// up the once-per-page slot.
+		if ( doing_action( 'wp_head' ) || doing_filter( 'get_the_excerpt' ) ) {
 			return '';
 		}
-		$src = esc_url( add_query_arg( array( 'typ' => 6, 'oid' => $code_id, 'min' => 4, 'map' => 'true' ), self::WIDGET_BASE ) );
-		wp_register_script( 'ratesight-reviews-widget', $src, array(), null, true );
-		wp_enqueue_script( 'ratesight-reviews-widget' );
-		return '';
+
+		if ( isset( self::$printed_widgets[ $id ] ) ) {
+			return '<!-- Ratesight: [' . $shortcode . '] is already on this page; only the first one is shown. -->';
+		}
+		self::$printed_widgets[ $id ] = true;
+
+		$query = array( 'typ' => $args['typ'], 'oid' => rawurlencode( $code_id ) ) + $args;
+		$src   = add_query_arg( $query, self::WIDGET_BASE );
+
+		return '<script id="' . esc_attr( $id ) . '" src="' . esc_url( $src ) . '"'
+			. ' data-no-optimize="1" data-cfasync="false" data-no-defer="1"></script>';
 	}
 
 	public function shortcode_jobs(): string {
