@@ -34,6 +34,10 @@ final class Ratesight_Image_Optimizer {
 	const ERROR_KEY = '_rs_img_opt_error';
 	/** Attachment meta: 1 when an in-place optimization kept backups and can be rolled back. */
 	const ROLLBACK_KEY = '_rs_img_opt_rollback';
+	/** Attachment meta: in-place run in progress (written before the first file is replaced). */
+	const JOURNAL_KEY = '_rs_img_opt_journal';
+	/** Interrupted runs of one attachment before the bulk tool gives up on it. */
+	const MAX_ATTEMPTS = 2;
 
 	const RECORD_VERSION = 1;
 	const BACKUP_DIR     = 'ratesight-originals';
@@ -192,17 +196,105 @@ final class Ratesight_Image_Optimizer {
 	}
 
 	// -------------------------------------------------------------------------
+	// Safety helpers (pure: no WordPress state besides the uploads directory)
+	// -------------------------------------------------------------------------
+
+	/** Log without secrets: where it happened and the error class / message only. */
+	private static function log( string $where, ?\Throwable $error = null, string $message = '' ): void {
+		$detail = $error !== null ? get_class( $error ) . ': ' . $error->getMessage() : $message;
+		error_log( 'Ratesight image optimization (' . $where . '): ' . substr( $detail, 0, 300 ) ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+	}
+
+	/**
+	 * Is this an existing file inside the uploads directory (symlinks resolved), and not inside
+	 * the plugin's own backup directory? Every file the plugin writes must pass this.
+	 */
+	public static function is_inside_uploads( string $path ): bool {
+		$base = self::uploads_base();
+		if ( $base === '' || $path === '' ) {
+			return false;
+		}
+		$real_base = realpath( $base );
+		$real      = realpath( $path );
+		if ( $real_base === false || $real === false || ! is_file( $real ) ) {
+			return false;
+		}
+		$real_base = trailingslashit( wp_normalize_path( $real_base ) );
+		$real      = wp_normalize_path( $real );
+		return strpos( $real, $real_base ) === 0 && strpos( $real, $real_base . self::BACKUP_DIR . '/' ) !== 0;
+	}
+
+	/**
+	 * An encoder result may replace or delete an original only when it is a real, non-empty image
+	 * of the expected type with valid dimensions (getimagesize is core PHP, no extension needed).
+	 */
+	public static function is_valid_image_file( string $path, string $expected_mime ): bool {
+		clearstatcache( true, $path );
+		if ( ! is_file( $path ) || (int) filesize( $path ) <= 0 ) {
+			return false;
+		}
+		$info = @getimagesize( $path ); // phpcs:ignore
+		if ( ! is_array( $info ) || (int) ( $info[0] ?? 0 ) < 1 || (int) ( $info[1] ?? 0 ) < 1 ) {
+			return false;
+		}
+		return ( $info['mime'] ?? '' ) === $expected_mime;
+	}
+
+	/**
+	 * Decide whether an upload can be processed so that the stored file is guaranteed clean.
+	 *
+	 * JPEG / PNG / WebP: cleaned before encoding (no encoder can carry phone EXIF into any output,
+	 * AVIF included) and cleaned again after. BMP has no metadata container. TIFF cannot be cleaned
+	 * in place, so it is only processed when it is converted to a type that can be cleaned (WebP,
+	 * or the chosen JPEG/PNG/WebP); otherwise it is refused and left exactly as uploaded.
+	 *
+	 * @return array { target: string, refuse: bool, must_convert: bool, reason: string }
+	 */
+	public static function plan( string $source, string $target, bool $webp_writable ): array {
+		$plan = array( 'target' => $target, 'refuse' => false, 'must_convert' => false, 'reason' => '' );
+		if ( $source === 'image/tiff' ) {
+			$plan['must_convert'] = true;
+			if ( ! in_array( $target, Ratesight_Image_Metadata::CLEANABLE, true ) ) {
+				if ( ! $webp_writable ) {
+					$plan['refuse'] = true;
+					$plan['reason'] = 'tiff_metadata_not_cleanable';
+					return $plan;
+				}
+				$plan['target'] = 'image/webp';
+				$plan['reason'] = 'tiff_converted_to_webp';
+			}
+			return $plan;
+		}
+		if ( in_array( $source, Ratesight_Image_Metadata::CLEANABLE, true ) || $source === 'image/bmp' ) {
+			return $plan;
+		}
+		$plan['refuse'] = true;
+		$plan['reason'] = 'unsupported_type';
+		return $plan;
+	}
+
+	// -------------------------------------------------------------------------
 	// New uploads
 	// -------------------------------------------------------------------------
 
 	/**
 	 * wp_handle_upload: runs for admin uploads, REST uploads and sideloads, after the file is in
-	 * the uploads directory and before the attachment exists.
+	 * the uploads directory and before the attachment exists. Fails open: on any error the upload
+	 * is returned exactly as WordPress handed it over.
 	 *
 	 * @param array  $upload  { file, url, type } (or { error }).
 	 * @param string $context 'upload' or 'sideload'.
 	 */
 	public static function filter_handle_upload( $upload, $context = 'upload' ) {
+		try {
+			return self::handle_upload( $upload, (string) $context );
+		} catch ( \Throwable $e ) {
+			self::log( 'upload', $e );
+			return $upload;
+		}
+	}
+
+	private static function handle_upload( $upload, string $context ) {
 		if ( ! is_array( $upload ) || ! empty( $upload['error'] ) || empty( $upload['file'] ) || empty( $upload['type'] ) ) {
 			return $upload;
 		}
@@ -222,30 +314,31 @@ final class Ratesight_Image_Optimizer {
 		}
 
 		$result = self::optimize_upload_file( (string) $upload['file'], (string) $upload['type'], $settings );
+		$out    = $upload;
 		if ( $result['file'] !== $upload['file'] ) {
-			$old_name      = wp_basename( $upload['file'] );
-			$new_name      = wp_basename( $result['file'] );
-			$url           = (string) $upload['url'];
-			$upload['url'] = substr( $url, -strlen( $old_name ) ) === $old_name
+			$old_name   = wp_basename( $upload['file'] );
+			$new_name   = wp_basename( $result['file'] );
+			$url        = (string) $upload['url'];
+			$out['url'] = substr( $url, -strlen( $old_name ) ) === $old_name
 				? substr( $url, 0, -strlen( $old_name ) ) . $new_name
 				: trailingslashit( dirname( $url ) ) . $new_name;
-			$upload['file'] = $result['file'];
-			$upload['type'] = $result['mime'];
+			$out['file'] = $result['file'];
+			$out['type'] = $result['mime'];
 		}
 		if ( $result['record'] !== null ) {
 			self::$pending[ wp_normalize_path( $result['file'] ) ] = $result['record'];
 		}
-		return $upload;
+		return $out;
 	}
 
 	/**
-	 * Our resize already applied the owner's long-edge limit; WordPress must not add a second
-	 * "-scaled" copy (and keep the unscrubbed original next to it) for a file we processed.
+	 * Only when our resize already applied the owner's long-edge limit: WordPress must not add a
+	 * second "-scaled" copy of that file. Files we did not resize keep WordPress's threshold.
 	 */
 	public static function filter_big_image_threshold( $threshold, $imagesize = null, $file = '' ) {
-		if ( is_string( $file ) && $file !== '' && isset( self::$pending[ wp_normalize_path( $file ) ] ) ) {
-			$record = self::$pending[ wp_normalize_path( $file ) ];
-			if ( ! empty( $record['max_edge'] ) ) {
+		if ( is_string( $file ) && $file !== '' ) {
+			$record = self::$pending[ wp_normalize_path( $file ) ] ?? null;
+			if ( is_array( $record ) && ! empty( $record['resized'] ) ) {
 				return false;
 			}
 		}
@@ -263,10 +356,18 @@ final class Ratesight_Image_Optimizer {
 
 	/**
 	 * Scrub every generated size and store the record. Also runs on size regeneration for an
-	 * attachment that is already optimized (only the size files are touched then).
+	 * attachment that is already optimized (only the size files are touched then). Fails open.
 	 */
 	public static function filter_generate_metadata( $metadata, $attachment_id = 0 ) {
-		$attachment_id = (int) $attachment_id;
+		try {
+			return self::generate_metadata( $metadata, (int) $attachment_id );
+		} catch ( \Throwable $e ) {
+			self::log( 'metadata #' . (int) $attachment_id, $e );
+			return $metadata;
+		}
+	}
+
+	private static function generate_metadata( $metadata, int $attachment_id ) {
 		if ( ! is_array( $metadata ) || $attachment_id <= 0 ) {
 			return $metadata;
 		}
@@ -292,7 +393,7 @@ final class Ratesight_Image_Optimizer {
 		}
 
 		unset( self::$pending[ $key ] );
-		if ( $key !== wp_normalize_path( $file ) ) {
+		if ( $key !== wp_normalize_path( $file ) && self::is_inside_uploads( $file ) ) {
 			// The new full size (-scaled / -rotated) was written by WordPress from our file.
 			Ratesight_Image_Metadata::rewrite_file( $file, $settings['location'], true );
 		}
@@ -307,11 +408,22 @@ final class Ratesight_Image_Optimizer {
 	}
 
 	/**
-	 * Resize / convert / strip one freshly uploaded file.
+	 * Resize / convert / clean one freshly uploaded file. Any path that cannot end in a verified
+	 * clean file returns the upload unchanged with record null (unmarked, nothing claimed).
 	 *
 	 * @return array { file: string, mime: string, record: array|null }
 	 */
 	private static function optimize_upload_file( string $path, string $mime, array $settings ): array {
+		$unchanged = array( 'file' => $path, 'mime' => $mime, 'record' => null );
+		if ( ! self::is_inside_uploads( $path ) ) {
+			return $unchanged;
+		}
+		$plan = self::plan( $mime, self::target_mime( $mime, $settings['format'] ), self::editor_supports( 'image/webp' ) );
+		if ( $plan['refuse'] ) {
+			self::log( 'upload', null, 'left unprocessed (' . $plan['reason'] . '): ' . wp_basename( $path ) );
+			return $unchanged;
+		}
+
 		$bytes_before = (int) @filesize( $path ); // phpcs:ignore
 		$record       = array(
 			'v'            => self::RECORD_VERSION,
@@ -328,74 +440,118 @@ final class Ratesight_Image_Optimizer {
 			'bytes_before' => $bytes_before,
 			'bytes_after'  => $bytes_before,
 			'backups'      => array(),
-			'notes'        => array(),
+			'notes'        => $plan['reason'] !== '' ? array( $plan['reason'] ) : array(),
 		);
 
 		if ( $settings['keep_original'] ) {
 			$backup = self::make_backup( $path );
 			if ( is_wp_error( $backup ) ) {
-				// The owner asked for a backup; without one, leave the upload exactly as WordPress has
-				// it and unmarked, so the bulk tool can pick it up once backups work.
-				return array( 'file' => $path, 'mime' => $mime, 'record' => null );
+				// The owner asked for a (clean) backup; without one, leave the upload exactly as
+				// WordPress has it and unmarked, so the bulk tool can pick it up later.
+				self::log( 'upload', null, 'backup failed: ' . $backup->get_error_message() );
+				return $unchanged;
 			}
 			$record['backups'][ self::uploads_relative( $path ) ] = $backup;
 		}
 
-		$target   = self::target_mime( $mime, $settings['format'] );
-		$out_path = $path;
-		$out_mime = $mime;
-		$rotated  = false;
+		// Clean the source BEFORE any encoder sees it (Imagick copies EXIF into its output,
+		// including AVIF, which this plugin cannot rewrite afterwards). Orientation is kept so
+		// the encoder can still rotate the pixels.
+		if ( in_array( $mime, Ratesight_Image_Metadata::CLEANABLE, true ) ) {
+			$pre = Ratesight_Image_Metadata::rewrite_file( $path, null, true );
+			if ( ! $pre['ok'] ) {
+				self::log( 'upload', null, 'metadata could not be cleaned (' . $pre['reason'] . '): ' . wp_basename( $path ) );
+				self::delete_backups( $record['backups'] );
+				return $unchanged;
+			}
+		}
+
+		$out_path      = $path;
+		$out_mime      = $mime;
+		$from_editor   = false;
+		$delete_source = false;
 
 		if ( ! self::is_animated( $path, $mime ) && self::editor_supports( $mime ) ) {
-			$encoded = self::reencode( $path, $target, $settings['max_edge'], $settings['quality'] );
-			if ( is_wp_error( $encoded ) && $target !== $mime ) {
-				$record['notes'][] = 'convert_failed';
-				$target            = $mime;
-				$encoded           = self::reencode( $path, $mime, $settings['max_edge'], $settings['quality'] );
+			// Try the chosen type, then WebP (AVIF asked but not encodable here), then the source type.
+			$targets = array( $plan['target'] );
+			if ( $plan['target'] === 'image/avif' && self::editor_supports( 'image/webp' ) ) {
+				$targets[] = 'image/webp';
 			}
-			if ( is_wp_error( $encoded ) ) {
-				$record['notes'][] = 'reencode_failed';
-			} else {
-				$smaller = (int) filesize( $encoded['path'] ) < $bytes_before;
-				if ( $encoded['resized'] || $encoded['rotated'] || $smaller ) {
-					if ( $encoded['mime'] === $mime ) {
-						self::replace_file( $encoded['path'], $path );
-					} else {
-						$dir      = dirname( $path );
-						$name     = wp_unique_filename( $dir, pathinfo( $path, PATHINFO_FILENAME ) . '.' . self::extension_for( $encoded['mime'] ) );
-						$out_path = trailingslashit( $dir ) . $name;
-						if ( ! @rename( $encoded['path'], $out_path ) ) { // phpcs:ignore
-							@unlink( $encoded['path'] ); // phpcs:ignore
-							$out_path          = $path;
-							$record['notes'][] = 'rename_failed';
-						} else {
-							// The original stays out of the public uploads path (a scrubbed copy is
-							// in the backup directory only when the owner asked for backups).
-							@unlink( $path ); // phpcs:ignore
-							$out_mime            = $encoded['mime'];
-							$record['converted'] = true;
-						}
-					}
-					$record['resized'] = $encoded['resized'];
-					$rotated           = $encoded['rotated'] || $encoded['reencoded'];
-				} else {
-					@unlink( $encoded['path'] ); // phpcs:ignore
-					$record['notes'][] = 'kept_original_encoding_smaller';
+			if ( ! $plan['must_convert'] ) {
+				$targets[] = $mime;
+			}
+			$encoded = null;
+			foreach ( array_unique( $targets ) as $try ) {
+				$encoded = self::reencode( $path, $try, $settings['max_edge'], $settings['quality'] );
+				if ( ! is_wp_error( $encoded ) ) {
+					break;
 				}
+				$record['notes'][] = 'encode_failed:' . $try;
+			}
+			if ( is_wp_error( $encoded ) || $encoded === null ) {
+				$encoded = null;
+			} elseif ( $plan['must_convert'] || $encoded['resized'] || $encoded['rotated'] || (int) filesize( $encoded['path'] ) < $bytes_before ) {
+				if ( $encoded['mime'] === $mime ) {
+					if ( self::replace_file( $encoded['path'], $path ) ) {
+						$from_editor = true;
+					} else {
+						$record['notes'][] = 'replace_failed';
+					}
+				} else {
+					$dir  = dirname( $path );
+					$name = wp_unique_filename( $dir, pathinfo( $path, PATHINFO_FILENAME ) . '.' . self::extension_for( $encoded['mime'] ) );
+					$dest = trailingslashit( $dir ) . $name;
+					if ( @rename( $encoded['path'], $dest ) ) { // phpcs:ignore
+						$out_path      = $dest;
+						$out_mime      = $encoded['mime'];
+						$from_editor   = true;
+						$delete_source = true; // Only once the new file is verified clean, below.
+					} else {
+						@unlink( $encoded['path'] ); // phpcs:ignore
+						$record['notes'][] = 'rename_failed';
+					}
+				}
+				$record['resized'] = $from_editor && $encoded['resized'];
+			} else {
+				@unlink( $encoded['path'] ); // phpcs:ignore
+				$record['notes'][] = 'kept_original_encoding_smaller';
 			}
 		} else {
 			$record['notes'][] = self::is_animated( $path, $mime ) ? 'animated_skipped' : 'no_image_editor';
 		}
-		if ( $target !== $mime && ! $record['converted'] ) {
-			$record['notes'][] = 'format_unchanged';
+
+		if ( $plan['must_convert'] && $out_mime === $mime ) {
+			// TIFF that could not be converted: its metadata cannot be cleaned, so nothing is claimed.
+			self::log( 'upload', null, 'TIFF left unprocessed (could not convert): ' . wp_basename( $path ) );
+			self::delete_backups( $record['backups'] );
+			return $unchanged;
 		}
 
-		// Pixels written by an editor are upright already: drop the orientation tag then.
-		$meta               = Ratesight_Image_Metadata::rewrite_file( $out_path, $settings['location'], ! $rotated );
-		$record['stripped'] = $meta['ok'];
-		$record['gps']      = $meta['gps'];
-		if ( ! $meta['ok'] ) {
-			$record['notes'][] = 'metadata_' . $meta['reason'];
+		if ( in_array( $out_mime, Ratesight_Image_Metadata::CLEANABLE, true ) ) {
+			// Editor output is upright already: drop the orientation tag then.
+			$meta = Ratesight_Image_Metadata::rewrite_file( $out_path, $settings['location'], ! $from_editor );
+			if ( ! $meta['ok'] ) {
+				if ( $delete_source ) {
+					@unlink( $out_path ); // phpcs:ignore -- The cleaned source is still in place.
+					$out_path = $path;
+					$out_mime = $mime;
+				}
+				self::log( 'upload', null, 'output could not be verified clean (' . $meta['reason'] . '): ' . wp_basename( $out_path ) );
+				self::delete_backups( $record['backups'] );
+				return array( 'file' => $out_path, 'mime' => $out_mime, 'record' => null );
+			}
+			$record['gps'] = $meta['gps'];
+		} else {
+			// AVIF encoded from a cleaned source, or BMP (no metadata container): clean, but this
+			// plugin cannot write the business location into it.
+			$record['notes'][] = 'location_not_written:' . $out_mime;
+		}
+		$record['stripped'] = true;
+		if ( $delete_source ) {
+			// The original stays out of the public uploads path (a cleaned copy is in the backup
+			// directory only when the owner asked for backups).
+			@unlink( $path ); // phpcs:ignore
+			$record['converted'] = true;
 		}
 		clearstatcache( true, $out_path );
 		$record['mime']        = $out_mime;
@@ -409,9 +565,11 @@ final class Ratesight_Image_Optimizer {
 
 	/**
 	 * Load, apply the EXIF orientation, shrink to the long-edge limit (never enlarge), encode at the
-	 * quality into a sibling temp file of the target type.
+	 * quality into a sibling temp file of the target type. The result is verified (non-empty,
+	 * getimagesize, expected type) before it is returned; otherwise it is deleted and an error comes
+	 * back, so a broken encode can never replace or delete an original.
 	 *
-	 * @return array|\WP_Error { path, mime, width, height, resized, rotated, reencoded }
+	 * @return array|\WP_Error { path, mime, width, height, resized, rotated }
 	 */
 	private static function reencode( string $path, string $target, int $max_edge, int $quality ) {
 		if ( ! function_exists( 'wp_get_image_editor' ) ) {
@@ -453,17 +611,21 @@ final class Ratesight_Image_Optimizer {
 		if ( is_wp_error( $saved ) ) {
 			return $saved;
 		}
-		if ( empty( $saved['path'] ) || ! is_file( $saved['path'] ) ) {
-			return new \WP_Error( 'rs_img_save', 'The image editor did not write a file.' );
+		$saved_path = (string) ( $saved['path'] ?? '' );
+		$saved_mime = (string) ( $saved['mime-type'] ?? $target );
+		if ( $saved_path === '' || ! self::is_valid_image_file( $saved_path, $saved_mime ) ) {
+			if ( $saved_path !== '' && is_file( $saved_path ) ) {
+				@unlink( $saved_path ); // phpcs:ignore
+			}
+			return new \WP_Error( 'rs_img_invalid', 'The encoded file failed verification.' );
 		}
 		return array(
-			'path'      => (string) $saved['path'],
-			'mime'      => (string) ( $saved['mime-type'] ?? $target ),
-			'width'     => (int) ( $saved['width'] ?? 0 ),
-			'height'    => (int) ( $saved['height'] ?? 0 ),
-			'resized'   => $resized,
-			'rotated'   => $rotated,
-			'reencoded' => true,
+			'path'    => $saved_path,
+			'mime'    => $saved_mime,
+			'width'   => (int) ( $saved['width'] ?? 0 ),
+			'height'  => (int) ( $saved['height'] ?? 0 ),
+			'resized' => $resized,
+			'rotated' => $rotated,
 		);
 	}
 
@@ -516,6 +678,9 @@ final class Ratesight_Image_Optimizer {
 					continue;
 				}
 				$path = $dir . wp_basename( $size['file'] );
+				if ( ! self::is_inside_uploads( $path ) ) {
+					continue;
+				}
 				$done = Ratesight_Image_Metadata::rewrite_file( $path, $location, true );
 				if ( $done['changed'] ) {
 					$metadata['sizes'][ $name ]['filesize'] = (int) filesize( $path );
@@ -589,18 +754,22 @@ final class Ratesight_Image_Optimizer {
 	}
 
 	/**
-	 * Copy one uploads file into the backup directory and scrub the COPY's personal and location
-	 * metadata (pixels untouched, nothing written). Returns the uploads-relative backup path.
+	 * Copy one uploads file into the backup directory and clean the COPY's personal and location
+	 * metadata (pixels untouched, nothing written). A copy that cannot be cleaned (TIFF) is deleted
+	 * and refused. Returns the uploads-relative backup path.
 	 *
 	 * @return string|\WP_Error
 	 */
 	private static function make_backup( string $path ) {
+		if ( ! self::is_inside_uploads( $path ) ) {
+			return new \WP_Error( 'rs_img_backup', 'File is outside the uploads directory.' );
+		}
 		$root = self::backup_root();
 		if ( is_wp_error( $root ) ) {
 			return $root;
 		}
 		$relative = self::uploads_relative( $path );
-		if ( $relative === '' || strpos( $relative, self::BACKUP_DIR . '/' ) === 0 ) {
+		if ( $relative === '' ) {
 			return new \WP_Error( 'rs_img_backup', 'File is outside the uploads directory.' );
 		}
 		$dest = $root . '/' . $relative;
@@ -613,7 +782,12 @@ final class Ratesight_Image_Optimizer {
 		if ( ! @copy( $path, $dest ) ) { // phpcs:ignore
 			return new \WP_Error( 'rs_img_backup', 'Backup copy failed.' );
 		}
-		Ratesight_Image_Metadata::rewrite_file( $dest, null, true );
+		$clean = Ratesight_Image_Metadata::rewrite_file( $dest, null, true );
+		$head  = (string) @file_get_contents( $dest, false, null, 0, 2 ); // phpcs:ignore
+		if ( ! $clean['ok'] && $head !== 'BM' ) { // BMP has no metadata to clean.
+			@unlink( $dest ); // phpcs:ignore
+			return new \WP_Error( 'rs_img_backup', 'Backup could not be cleaned of metadata.' );
+		}
 		return self::uploads_relative( $dest );
 	}
 
@@ -626,11 +800,40 @@ final class Ratesight_Image_Optimizer {
 		}
 	}
 
+	/**
+	 * Copy every backup over its file. All sources are checked before the first copy.
+	 *
+	 * @return string '' on success, else the reason.
+	 */
+	private static function restore_backups( array $backups ): string {
+		$pairs = array();
+		foreach ( $backups as $relative => $backup ) {
+			$dst = self::uploads_absolute( (string) $relative );
+			$src = self::uploads_absolute( (string) $backup, true );
+			if ( $dst === '' || $src === '' || ! is_file( $src ) ) {
+				return 'A backup file is missing; nothing was restored.';
+			}
+			$pairs[ $src ] = $dst;
+		}
+		foreach ( $pairs as $src => $dst ) {
+			if ( ! @copy( $src, $dst ) ) { // phpcs:ignore
+				return 'Restoring a file failed; the attachment keeps its backups.';
+			}
+		}
+		return '';
+	}
+
 	/** Deleting an attachment also deletes its backups. */
 	public static function on_delete_attachment( $post_id ): void {
-		$record = get_post_meta( (int) $post_id, self::META_KEY, true );
-		if ( is_array( $record ) && ! empty( $record['backups'] ) && is_array( $record['backups'] ) ) {
-			self::delete_backups( $record['backups'] );
+		try {
+			foreach ( array( self::META_KEY, self::JOURNAL_KEY ) as $key ) {
+				$entry = get_post_meta( (int) $post_id, $key, true );
+				if ( is_array( $entry ) && ! empty( $entry['backups'] ) && is_array( $entry['backups'] ) ) {
+					self::delete_backups( $entry['backups'] );
+				}
+			}
+		} catch ( \Throwable $e ) {
+			self::log( 'delete #' . (int) $post_id, $e );
 		}
 	}
 
@@ -641,12 +844,34 @@ final class Ratesight_Image_Optimizer {
 	/**
 	 * Optimize one existing attachment in place: same names, same format, same URLs.
 	 *
-	 * @return array { status: 'optimized'|'failed'|'skipped', message, bytes_before, bytes_after }
+	 * Journal: before the first file is replaced, JOURNAL_KEY holds the earlier metadata, the
+	 * backups (when kept) and the rollback flag. Each file is noted before and after it is
+	 * replaced. A run that dies mid-way leaves the journal; the next run restores the backups
+	 * first and starts over from the originals (or, without backups, re-processes the files,
+	 * which is safe because each step only keeps a verified smaller or resized image). After
+	 * MAX_ATTEMPTS interrupted runs the attachment is skipped with an error. Never throws.
+	 *
+	 * @return array { id, status: 'optimized'|'failed'|'skipped', message, bytes_before, bytes_after }
 	 */
 	public static function optimize_existing( int $attachment_id, array $settings ): array {
+		try {
+			return self::optimize_existing_run( $attachment_id, $settings );
+		} catch ( \Throwable $e ) {
+			self::log( 'existing #' . $attachment_id, $e );
+			$out = array( 'id' => $attachment_id, 'status' => 'failed', 'message' => 'Unexpected error; skipped.', 'bytes_before' => 0, 'bytes_after' => 0 );
+			try {
+				update_post_meta( $attachment_id, self::ERROR_KEY, array( 'code' => 'exception', 'message' => 'Unexpected error.', 'at' => time() ) );
+			} catch ( \Throwable $ignored ) {
+				// Nothing more can be done safely.
+			}
+			return $out;
+		}
+	}
+
+	private static function optimize_existing_run( int $attachment_id, array $settings ): array {
 		$out = array( 'id' => $attachment_id, 'status' => 'failed', 'message' => '', 'bytes_before' => 0, 'bytes_after' => 0 );
 		if ( get_post_meta( $attachment_id, self::META_KEY, true ) ) {
-			$out['status'] = 'skipped';
+			$out['status']  = 'skipped';
 			$out['message'] = 'Already optimized.';
 			return $out;
 		}
@@ -658,31 +883,55 @@ final class Ratesight_Image_Optimizer {
 		if ( $file === '' || ! is_file( $file ) || ! is_writable( $file ) ) {
 			return self::fail( $attachment_id, $out, 'missing_file', 'File missing or not writable.' );
 		}
-		// Marker first: if PHP dies mid-file (memory, timeout) the next batch skips this
-		// attachment instead of retrying it forever. Success removes it.
-		update_post_meta( $attachment_id, self::ERROR_KEY, array( 'code' => 'interrupted', 'message' => 'Processing did not finish.', 'at' => time() ) );
+		if ( ! self::is_inside_uploads( $file ) ) {
+			return self::fail( $attachment_id, $out, 'outside_uploads', 'File is outside the uploads directory; skipped.' );
+		}
+
+		// Resume after an interrupted run.
+		$journal  = get_post_meta( $attachment_id, self::JOURNAL_KEY, true );
+		$journal  = is_array( $journal ) ? $journal : null;
+		$attempts = $journal !== null ? (int) ( $journal['attempts'] ?? 0 ) : 0;
+		$backups  = $journal !== null && is_array( $journal['backups'] ?? null ) ? $journal['backups'] : array();
+		if ( $attempts >= self::MAX_ATTEMPTS ) {
+			return self::fail( $attachment_id, $out, 'interrupted', 'Processing was interrupted ' . $attempts . ' times; skipped. Roll back or check the file.' );
+		}
+		if ( $backups !== array() ) {
+			$problem = self::restore_backups( $backups );
+			if ( $problem !== '' ) {
+				return self::fail( $attachment_id, $out, 'resume_failed', $problem );
+			}
+			if ( is_array( $journal['prev_meta'] ?? null ) ) {
+				wp_update_attachment_metadata( $attachment_id, $journal['prev_meta'] );
+			}
+		}
 
 		$metadata = wp_get_attachment_metadata( $attachment_id );
 		$metadata = is_array( $metadata ) ? $metadata : array();
-		$previous = $metadata;
+		$previous = $journal !== null && is_array( $journal['prev_meta'] ?? null ) ? $journal['prev_meta'] : $metadata;
 		$dir      = trailingslashit( dirname( $file ) );
+		$notes    = array();
 
 		// Every file of the attachment: the full size, each generated size, WordPress's own
-		// pre-scaling original.
+		// pre-scaling original. Anything that resolves outside the uploads directory is skipped.
 		$files = array( wp_normalize_path( $file ) => 'full' );
+		$extra = array();
 		foreach ( (array) ( $metadata['sizes'] ?? array() ) as $name => $size ) {
 			if ( ! empty( $size['file'] ) ) {
-				$path = wp_normalize_path( $dir . wp_basename( $size['file'] ) );
-				if ( ! isset( $files[ $path ] ) && is_file( $path ) ) {
-					$files[ $path ] = 'size:' . $name;
-				}
+				$extra[ wp_normalize_path( $dir . wp_basename( $size['file'] ) ) ] = 'size:' . $name;
 			}
 		}
 		if ( ! empty( $metadata['original_image'] ) ) {
-			$path = wp_normalize_path( $dir . wp_basename( $metadata['original_image'] ) );
-			if ( ! isset( $files[ $path ] ) && is_file( $path ) ) {
-				$files[ $path ] = 'original_image';
+			$extra[ wp_normalize_path( $dir . wp_basename( $metadata['original_image'] ) ) ] = 'original_image';
+		}
+		foreach ( $extra as $path => $role ) {
+			if ( isset( $files[ $path ] ) || ! is_file( $path ) ) {
+				continue;
 			}
+			if ( ! self::is_inside_uploads( $path ) ) {
+				$notes[] = $role . ':outside_uploads_skipped';
+				continue;
+			}
+			$files[ $path ] = $role;
 		}
 
 		$before = 0;
@@ -691,9 +940,8 @@ final class Ratesight_Image_Optimizer {
 		}
 		$out['bytes_before'] = $before;
 
-		// Backups first, all or nothing.
-		$backups = array();
-		if ( $settings['keep_original'] ) {
+		// Backups of the ORIGINALS: made once; a resumed run reuses the journal's backups.
+		if ( $settings['keep_original'] && $backups === array() ) {
 			foreach ( array_keys( $files ) as $path ) {
 				$backup = self::make_backup( $path );
 				if ( is_wp_error( $backup ) ) {
@@ -704,26 +952,44 @@ final class Ratesight_Image_Optimizer {
 			}
 		}
 
+		// Journal BEFORE the first file is replaced.
+		$journal = array(
+			'v'         => self::RECORD_VERSION,
+			'state'     => 'started',
+			'at'        => time(),
+			'attempts'  => $attempts + 1,
+			'prev_meta' => $previous,
+			'backups'   => $backups,
+			'done'      => array(),
+			'current'   => '',
+		);
+		update_post_meta( $attachment_id, self::JOURNAL_KEY, $journal );
+		if ( $backups !== array() ) {
+			update_post_meta( $attachment_id, self::ROLLBACK_KEY, 1 );
+		}
+
 		$editable = ! self::is_animated( $file, $mime ) && self::editor_supports( $mime );
 		$resized  = false;
-		$notes    = array();
 		foreach ( $files as $path => $role ) {
+			$journal['current'] = self::uploads_relative( $path );
+			update_post_meta( $attachment_id, self::JOURNAL_KEY, $journal );
+
 			$size_mime = $mime;
 			if ( strpos( $role, 'size:' ) === 0 ) {
 				$size_mime = (string) ( $metadata['sizes'][ substr( $role, 5 ) ]['mime-type'] ?? $mime );
 			}
-			$rotated = false;
-			// WordPress's pre-scaling original is never displayed: scrub its metadata only.
+			$from_editor = false;
+			// WordPress's pre-scaling original is never displayed: clean its metadata only.
 			if ( $editable && $role !== 'original_image' && in_array( $size_mime, self::BULK_MIMES, true ) ) {
 				$edge    = $role === 'full' ? $settings['max_edge'] : 0;
 				$encoded = self::reencode( $path, $size_mime, $edge, $settings['quality'] );
 				if ( is_wp_error( $encoded ) ) {
-					$notes[] = $role . ':reencode_failed';
+					$notes[] = $role . ':reencode_skipped';
 				} elseif ( $encoded['mime'] !== $size_mime ) {
 					@unlink( $encoded['path'] ); // phpcs:ignore
 				} elseif ( $encoded['resized'] || $encoded['rotated'] || (int) filesize( $encoded['path'] ) < (int) filesize( $path ) ) {
 					if ( self::replace_file( $encoded['path'], $path ) ) {
-						$rotated = true;
+						$from_editor = true;
 						if ( $role === 'full' ) {
 							$resized = $encoded['resized'];
 							if ( $encoded['width'] > 0 && $encoded['height'] > 0 ) {
@@ -739,7 +1005,7 @@ final class Ratesight_Image_Optimizer {
 					@unlink( $encoded['path'] ); // phpcs:ignore
 				}
 			}
-			$meta = Ratesight_Image_Metadata::rewrite_file( $path, $settings['location'], ! $rotated );
+			$meta = Ratesight_Image_Metadata::rewrite_file( $path, $settings['location'], ! $from_editor );
 			if ( ! $meta['ok'] ) {
 				$notes[] = $role . ':metadata_' . $meta['reason'];
 			}
@@ -747,6 +1013,10 @@ final class Ratesight_Image_Optimizer {
 			if ( strpos( $role, 'size:' ) === 0 && is_file( $path ) ) {
 				$metadata['sizes'][ substr( $role, 5 ) ]['filesize'] = (int) filesize( $path );
 			}
+
+			$journal['done'][]  = self::uploads_relative( $path );
+			$journal['current'] = '';
+			update_post_meta( $attachment_id, self::JOURNAL_KEY, $journal );
 		}
 
 		$after = 0;
@@ -769,7 +1039,7 @@ final class Ratesight_Image_Optimizer {
 			'max_edge'     => $settings['max_edge'],
 			'resized'      => $resized,
 			'converted'    => false,
-			'stripped'     => true,
+			'stripped'     => ! preg_grep( '/:metadata_/', $notes ),
 			'gps'          => $settings['location'] !== null,
 			'bytes_before' => $before,
 			'bytes_after'  => $after,
@@ -778,9 +1048,9 @@ final class Ratesight_Image_Optimizer {
 		if ( $backups !== array() ) {
 			$record['backups']   = $backups;
 			$record['prev_meta'] = $previous;
-			update_post_meta( $attachment_id, self::ROLLBACK_KEY, 1 );
 		}
 		update_post_meta( $attachment_id, self::META_KEY, $record );
+		delete_post_meta( $attachment_id, self::JOURNAL_KEY );
 		delete_post_meta( $attachment_id, self::ERROR_KEY );
 
 		$out['status']      = 'optimized';
@@ -797,43 +1067,47 @@ final class Ratesight_Image_Optimizer {
 	}
 
 	/**
-	 * Restore one in-place optimized attachment from its backups. Uploads that were converted to a
-	 * new format are never rolled back: posts may already link to the new file.
+	 * Restore one in-place optimized (or interrupted) attachment from its backups. Uploads that
+	 * were converted to a new format are never rolled back: posts may already link to the new file.
 	 */
 	public static function rollback( int $attachment_id ): array {
-		$out    = array( 'id' => $attachment_id, 'status' => 'failed', 'message' => '' );
-		$record = get_post_meta( $attachment_id, self::META_KEY, true );
-		if ( ! is_array( $record ) || ( $record['mode'] ?? '' ) !== 'in_place' || empty( $record['backups'] ) || ! is_array( $record['backups'] ) ) {
+		$out = array( 'id' => $attachment_id, 'status' => 'failed', 'message' => '' );
+		try {
+			$record  = get_post_meta( $attachment_id, self::META_KEY, true );
+			$journal = get_post_meta( $attachment_id, self::JOURNAL_KEY, true );
+			$source  = null;
+			if ( is_array( $record ) && ( $record['mode'] ?? '' ) === 'in_place' && ! empty( $record['backups'] ) && is_array( $record['backups'] ) ) {
+				$source = $record;
+			} elseif ( ! is_array( $record ) && is_array( $journal ) && ! empty( $journal['backups'] ) && is_array( $journal['backups'] ) ) {
+				$source = $journal; // Interrupted run: the journal holds the originals.
+			}
+			if ( $source === null ) {
+				delete_post_meta( $attachment_id, self::ROLLBACK_KEY );
+				$out['status']  = 'skipped';
+				$out['message'] = 'No backups to restore.';
+				return $out;
+			}
+			$problem = self::restore_backups( $source['backups'] );
+			if ( $problem !== '' ) {
+				$out['message'] = $problem;
+				return $out;
+			}
+			if ( isset( $source['prev_meta'] ) && is_array( $source['prev_meta'] ) ) {
+				wp_update_attachment_metadata( $attachment_id, self::scrub_image_meta( $source['prev_meta'] ) );
+			}
+			self::delete_backups( $source['backups'] );
+			delete_post_meta( $attachment_id, self::META_KEY );
+			delete_post_meta( $attachment_id, self::JOURNAL_KEY );
 			delete_post_meta( $attachment_id, self::ROLLBACK_KEY );
-			$out['status']  = 'skipped';
-			$out['message'] = 'No backups to restore.';
+			delete_post_meta( $attachment_id, self::ERROR_KEY );
+			$out['status']  = 'restored';
+			$out['message'] = 'Restored from backup.';
+			return $out;
+		} catch ( \Throwable $e ) {
+			self::log( 'rollback #' . $attachment_id, $e );
+			$out['message'] = 'Unexpected error; nothing more was changed.';
 			return $out;
 		}
-		$pairs = array();
-		foreach ( $record['backups'] as $relative => $backup ) {
-			$dst = self::uploads_absolute( (string) $relative );
-			$src = self::uploads_absolute( (string) $backup, true );
-			if ( $dst === '' || $src === '' || ! is_file( $src ) ) {
-				$out['message'] = 'A backup file is missing; nothing was restored.';
-				return $out;
-			}
-			$pairs[ $src ] = $dst;
-		}
-		foreach ( $pairs as $src => $dst ) {
-			if ( ! @copy( $src, $dst ) ) { // phpcs:ignore
-				$out['message'] = 'Restoring a file failed; the attachment keeps its backups.';
-				return $out;
-			}
-		}
-		if ( isset( $record['prev_meta'] ) && is_array( $record['prev_meta'] ) ) {
-			wp_update_attachment_metadata( $attachment_id, self::scrub_image_meta( $record['prev_meta'] ) );
-		}
-		self::delete_backups( $record['backups'] );
-		delete_post_meta( $attachment_id, self::META_KEY );
-		delete_post_meta( $attachment_id, self::ROLLBACK_KEY );
-		$out['status']  = 'restored';
-		$out['message'] = 'Restored from backup.';
-		return $out;
 	}
 
 	// -------------------------------------------------------------------------

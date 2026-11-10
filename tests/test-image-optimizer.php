@@ -30,19 +30,29 @@ function sanitize_text_field( $v ) { return trim( strip_tags( (string) $v ) ); }
 function absint( $v ) { return abs( (int) $v ); }
 function sanitize_hex_color( $v ) { return $v; }
 function add_settings_error( ...$a ) { global $settings_errors; $settings_errors[] = $a; }
-function apply_filters( $hook, $value, ...$args ) { return $value; }
+function apply_filters( $hook, $value, ...$args ) { global $throw_in; if ( $throw_in === $hook ) throw new RuntimeException( 'boom' ); return $value; }
 function wp_normalize_path( $p ) { return str_replace( '\\', '/', (string) $p ); }
 function wp_basename( $p ) { return basename( (string) $p ); }
 function trailingslashit( $p ) { return rtrim( (string) $p, '/' ) . '/'; }
 function wp_get_upload_dir() { global $uploads_base; return array( 'basedir' => $uploads_base ); }
 function wp_mkdir_p( $d ) { return is_dir( $d ) || mkdir( $d, 0777, true ); }
 function wp_unique_filename( $dir, $name ) { return $name; }
-function get_attached_file( $id ) { global $attached; return $attached[ $id ] ?? ''; }
+function get_attached_file( $id ) { global $attached, $throw_in; if ( $throw_in === 'get_attached_file' ) throw new RuntimeException( 'boom' ); return $attached[ $id ] ?? ''; }
 function get_post_meta( $id, $key, $single = false ) { global $postmeta; return $postmeta[ $id ][ $key ] ?? ''; }
-function update_post_meta( $id, $key, $value ) { global $postmeta; $postmeta[ $id ][ $key ] = $value; return true; }
+function update_post_meta( $id, $key, $value ) {
+	global $postmeta, $journal_log, $attached;
+	if ( $key === '_rs_img_opt_journal' ) $journal_log[] = array( 'backups' => ! empty( $value['backups'] ), 'current' => $value['current'], 'done' => count( $value['done'] ), 'bytes' => (string) @file_get_contents( $attached[ $id ] ?? '' ) );
+	$postmeta[ $id ][ $key ] = $value;
+	return true;
+}
 function delete_post_meta( $id, $key ) { global $postmeta; unset( $postmeta[ $id ][ $key ] ); return true; }
 function wp_image_editor_supports( $args ) { global $editor_mimes; return ! empty( $editor_mimes[ $args['mime_type'] ] ); }
 function get_bloginfo( $what ) { return '6.7'; }
+function get_post_mime_type( $id ) { global $mimes; return $mimes[ $id ] ?? ''; }
+function wp_get_attachment_metadata( $id ) { global $att_meta; return $att_meta[ $id ] ?? array(); }
+function wp_update_attachment_metadata( $id, $m ) { global $att_meta; $att_meta[ $id ] = $m; return true; }
+$mimes = array(); $att_meta = array(); $journal_log = array(); $throw_in = '';
+ini_set( 'error_log', '/dev/null' );
 
 require __DIR__ . '/../includes/class-ratesight-options.php';
 require __DIR__ . '/../includes/class-ratesight-image-metadata.php';
@@ -110,7 +120,13 @@ $after  = Ratesight_Image_Optimizer::filter_handle_upload( $upload, 'upload' );
 $bytes  = file_get_contents( $file );
 check_opt( 'no-library upload: same file, URL and type (nothing converted)', $after === $upload );
 check_opt( 'no-library upload: owner name stripped, business GPS written', ! str_contains( $bytes, 'Jane Owner' ) && str_contains( $bytes, 'WGS-84' ) );
-check_opt( 'WordPress is told not to add a -scaled copy of a processed file', Ratesight_Image_Optimizer::filter_big_image_threshold( 2560, null, $file ) === false && Ratesight_Image_Optimizer::filter_big_image_threshold( 2560, null, '/other.jpg' ) === 2560 );
+check_opt( 'big-image threshold is kept when nothing was resized', Ratesight_Image_Optimizer::filter_big_image_threshold( 2560, null, $file ) === 2560 && Ratesight_Image_Optimizer::filter_big_image_threshold( 2560, null, '/other.jpg' ) === 2560 );
+$pend = new ReflectionProperty( 'Ratesight_Image_Optimizer', 'pending' );
+$pend->setAccessible( true );
+$saved_pending = $pend->getValue();
+$pend->setValue( null, array( '/resized.jpg' => array( 'resized' => true ), '/same.jpg' => array( 'resized' => false, 'max_edge' => 2000 ) ) );
+check_opt( 'big-image threshold is turned off only for a file our resize already shrank', Ratesight_Image_Optimizer::filter_big_image_threshold( 2560, null, '/resized.jpg' ) === false && Ratesight_Image_Optimizer::filter_big_image_threshold( 2560, null, '/same.jpg' ) === 2560 );
+$pend->setValue( null, $saved_pending );
 $attached[ 7 ] = $file;
 $meta = Ratesight_Image_Optimizer::filter_generate_metadata( array( 'file' => '2026/11/photo.jpg', 'sizes' => array(), 'image_meta' => array( 'camera' => 'PhoneCo X', 'credit' => 'Jane Owner', 'caption' => 'Kept' ) ), 7 );
 $rec  = $postmeta[7]['_rs_img_opt'] ?? null;
@@ -126,6 +142,109 @@ file_put_contents( $file, $jpeg );
 Ratesight_Image_Optimizer::filter_handle_upload( $upload, 'sideload' );
 $bytes = file_get_contents( $file );
 check_opt( 'no coordinates configured: stripped, no GPS invented', ! str_contains( $bytes, 'Jane Owner' ) && ! str_contains( $bytes, 'WGS-84' ) );
+
+// ── Fail open on any exception ───────────────────────────────────────────────
+set_opt( 'img_geo_lng', '-79.9958864' );
+file_put_contents( $file, $jpeg );
+$throw_in = 'ratesight_image_optimize_upload';
+check_opt( 'an exception inside the upload filter returns the upload unchanged', Ratesight_Image_Optimizer::filter_handle_upload( $upload, 'upload' ) === $upload && file_get_contents( $file ) === $jpeg );
+$throw_in = 'get_attached_file';
+$in_meta  = array( 'file' => 'x', 'sizes' => array( 'thumb' => array( 'file' => 'x-150x150.jpg' ) ) );
+check_opt( 'an exception inside the metadata filter returns the metadata unchanged', Ratesight_Image_Optimizer::filter_generate_metadata( $in_meta, 7 ) === $in_meta );
+check_opt( 'an exception inside the bulk step is reported as failed, never thrown', Ratesight_Image_Optimizer::optimize_existing( 8, Ratesight_Image_Optimizer::settings() )['status'] === 'failed' );
+$throw_in = '';
+
+// ── Encoder output verification (pure: getimagesize is core PHP) ─────────────
+$png_ok = "\x89PNG\r\n\x1A\n" . pack( 'N', 13 ) . 'IHDR' . pack( 'NN', 32, 16 ) . "\x08\x02\x00\x00\x00" . pack( 'N', crc32( 'IHDR' . pack( 'NN', 32, 16 ) . "\x08\x02\x00\x00\x00" ) );
+$probe  = $uploads_base . '/2026/11/probe.png';
+file_put_contents( $probe, '' );
+check_opt( 'a zero-byte encode never counts as a valid (smaller) image', ! Ratesight_Image_Optimizer::is_valid_image_file( $probe, 'image/png' ) );
+file_put_contents( $probe, 'garbage bytes' );
+check_opt( 'a non-image encode is rejected', ! Ratesight_Image_Optimizer::is_valid_image_file( $probe, 'image/png' ) );
+file_put_contents( $probe, $png_ok );
+check_opt( 'a real image header of the expected type is accepted', Ratesight_Image_Optimizer::is_valid_image_file( $probe, 'image/png' ) );
+check_opt( 'an image of a different type than expected is rejected', ! Ratesight_Image_Optimizer::is_valid_image_file( $probe, 'image/webp' ) );
+file_put_contents( $probe, "\x89PNG\r\n\x1A\n" . pack( 'N', 13 ) . 'IHDR' . pack( 'NN', 0, 0 ) . "\x08\x02\x00\x00\x00" . pack( 'N', 0 ) );
+check_opt( 'zero dimensions are rejected', ! Ratesight_Image_Optimizer::is_valid_image_file( $probe, 'image/png' ) );
+unlink( $probe );
+check_opt( 'reencode verifies before returning (no replace on an unverified file)', (bool) preg_match( '/saved_path === \'\' \|\| ! self::is_valid_image_file\( \$saved_path, \$saved_mime \)/', file_get_contents( __DIR__ . '/../includes/class-ratesight-image-optimizer.php' ) ) );
+
+// ── Formats the plugin cannot clean ──────────────────────────────────────────
+$p = Ratesight_Image_Optimizer::plan( 'image/tiff', 'image/tiff', true );
+check_opt( 'TIFF is only processed when converted to a cleanable type (WebP)', ! $p['refuse'] && $p['must_convert'] && $p['target'] === 'image/webp' );
+$p = Ratesight_Image_Optimizer::plan( 'image/tiff', 'image/avif', false );
+check_opt( 'TIFF with no cleanable output on this server is refused', $p['refuse'] && $p['reason'] === 'tiff_metadata_not_cleanable' );
+$p = Ratesight_Image_Optimizer::plan( 'image/jpeg', 'image/avif', true );
+check_opt( 'JPEG to AVIF is allowed (the source is cleaned before the encoder sees it)', ! $p['refuse'] && $p['target'] === 'image/avif' && ! $p['must_convert'] );
+check_opt( 'GIF / unknown types are refused', Ratesight_Image_Optimizer::plan( 'image/gif', 'image/webp', true )['refuse'] );
+$src_now = file_get_contents( __DIR__ . '/../includes/class-ratesight-image-optimizer.php' );
+check_opt( 'the source is cleaned before reencode() in the upload path', strpos( $src_now, '$pre = Ratesight_Image_Metadata::rewrite_file( $path, null, true );' ) !== false && strpos( $src_now, '$pre = Ratesight_Image_Metadata::rewrite_file' ) < strpos( $src_now, '$encoded = self::reencode( $path, $try' ) );
+set_opt( 'img_opt_format', 'original' );
+$tif = $uploads_base . '/2026/11/scan.tif';
+file_put_contents( $tif, "II*\0" . 'Jane Owner GPS' );
+$tu = array( 'file' => $tif, 'url' => 'https://example.test/wp-content/uploads/2026/11/scan.tif', 'type' => 'image/tiff' );
+$postmeta = array();
+check_opt( 'TIFF on a server that cannot convert it: left exactly as uploaded and not marked clean', Ratesight_Image_Optimizer::filter_handle_upload( $tu ) === $tu && file_get_contents( $tif ) === "II*\0Jane Owner GPS" );
+$attached[ 9 ] = $tif;
+Ratesight_Image_Optimizer::filter_generate_metadata( array( 'sizes' => array() ), 9 );
+check_opt( '... and no optimization record claims it was cleaned', ! isset( $postmeta[9]['_rs_img_opt'] ) );
+unlink( $tif );
+set_opt( 'img_opt_format', 'webp' );
+
+// ── Path confinement ─────────────────────────────────────────────────────────
+$outside = sys_get_temp_dir() . '/rs-outside-' . getmypid() . '.jpg';
+file_put_contents( $outside, $jpeg );
+$link = $uploads_base . '/2026/11/link.jpg';
+@symlink( $outside, $link );
+check_opt( 'a file inside uploads passes the path check', Ratesight_Image_Optimizer::is_inside_uploads( $file ) );
+check_opt( 'a file outside uploads fails the path check', ! Ratesight_Image_Optimizer::is_inside_uploads( $outside ) );
+check_opt( 'a symlink inside uploads that points outside fails', ! is_link( $link ) || ! Ratesight_Image_Optimizer::is_inside_uploads( $link ) );
+check_opt( '"../" escapes and missing files fail', ! Ratesight_Image_Optimizer::is_inside_uploads( $uploads_base . '/2026/11/../../../' . basename( $outside ) ) && ! Ratesight_Image_Optimizer::is_inside_uploads( $uploads_base . '/nope.jpg' ) );
+@mkdir( $uploads_base . '/ratesight-originals', 0777, true );
+file_put_contents( $uploads_base . '/ratesight-originals/b.jpg', $jpeg );
+check_opt( 'files in the backup directory are never processed as uploads', ! Ratesight_Image_Optimizer::is_inside_uploads( $uploads_base . '/ratesight-originals/b.jpg' ) );
+$attached[ 20 ] = $outside; $mimes[ 20 ] = 'image/jpeg';
+$r = Ratesight_Image_Optimizer::optimize_existing( 20, Ratesight_Image_Optimizer::settings() );
+check_opt( 'bulk: an attachment whose file is outside uploads is skipped and not written', $r['status'] === 'failed' && $postmeta[20]['_rs_img_opt_error']['code'] === 'outside_uploads' && file_get_contents( $outside ) === $jpeg );
+@unlink( $link ); unlink( $outside ); unlink( $uploads_base . '/ratesight-originals/b.jpg' );
+
+// ── Journal before replacement, resume, rollback ─────────────────────────────
+set_opt( 'img_opt_keep_original', 1 );
+$old = $uploads_base . '/2026/11/old.jpg';
+file_put_contents( $old, $jpeg );
+$attached[ 30 ] = $old; $mimes[ 30 ] = 'image/jpeg'; $att_meta[ 30 ] = array( 'width' => 16, 'height' => 16, 'file' => '2026/11/old.jpg', 'sizes' => array(), 'image_meta' => array( 'credit' => 'Jane Owner' ) );
+$journal_log = array();
+$r = Ratesight_Image_Optimizer::optimize_existing( 30, Ratesight_Image_Optimizer::settings() );
+check_opt( 'bulk in place: optimized', $r['status'] === 'optimized' && ! str_contains( file_get_contents( $old ), 'Jane Owner' ) );
+check_opt( 'journal with backups is written BEFORE the file is changed', $journal_log !== array() && $journal_log[0]['backups'] && $journal_log[0]['bytes'] === $jpeg );
+check_opt( 'journal notes the file before and after it is replaced', count( $journal_log ) === 3 && $journal_log[1]['current'] === '2026/11/old.jpg' && $journal_log[1]['bytes'] === $jpeg && $journal_log[2]['done'] === 1 );
+check_opt( 'journal removed and record written on success; rollback flag set before', ! isset( $postmeta[30]['_rs_img_opt_journal'] ) && $postmeta[30]['_rs_img_opt']['mode'] === 'in_place' && $postmeta[30]['_rs_img_opt_rollback'] === 1 );
+$backup_rel = $postmeta[30]['_rs_img_opt']['backups']['2026/11/old.jpg'];
+$backup_abs = $uploads_base . '/' . $backup_rel;
+check_opt( 'backup copy is in the backup directory and cleaned', str_starts_with( $backup_rel, 'ratesight-originals/' ) && is_file( $backup_abs ) && ! str_contains( file_get_contents( $backup_abs ), 'Jane Owner' ) && ! str_contains( file_get_contents( $backup_abs ), 'WGS-84' ) );
+$r = Ratesight_Image_Optimizer::rollback( 30 );
+check_opt( 'rollback restores the (cleaned) original and clears the markers', $r['status'] === 'restored' && ! isset( $postmeta[30]['_rs_img_opt'] ) && ! isset( $postmeta[30]['_rs_img_opt_rollback'] ) && ! is_file( $backup_abs ) && ! str_contains( file_get_contents( $old ), 'WGS-84' ) && ! str_contains( file_get_contents( $old ), 'Jane Owner' ) );
+
+// Interrupted run: journal present, file half-done. A re-run restores the backup first.
+@mkdir( dirname( $backup_abs ), 0777, true );
+$clean_original = Ratesight_Image_Metadata::rewrite_bytes( $jpeg, null );
+file_put_contents( $backup_abs, $clean_original );
+file_put_contents( $old, 'half written' );
+$postmeta[30] = array( '_rs_img_opt_journal' => array( 'attempts' => 1, 'backups' => array( '2026/11/old.jpg' => $backup_rel ), 'prev_meta' => array( 'width' => 16, 'height' => 16 ), 'done' => array(), 'current' => '2026/11/old.jpg' ), '_rs_img_opt_rollback' => 1 );
+$journal_log = array();
+$r = Ratesight_Image_Optimizer::optimize_existing( 30, Ratesight_Image_Optimizer::settings() );
+check_opt( 'resume: the original is restored from the journal backup before processing', $r['status'] === 'optimized' && $journal_log[0]['bytes'] === $clean_original && str_contains( file_get_contents( $old ), 'WGS-84' ) );
+check_opt( 'resume: the original backup is reused (no backup of a half-done file)', $postmeta[30]['_rs_img_opt']['backups'] === array( '2026/11/old.jpg' => $backup_rel ) && $att_meta[30]['width'] === 16 );
+Ratesight_Image_Optimizer::rollback( 30 );
+$postmeta[30] = array( '_rs_img_opt_journal' => array( 'attempts' => 2, 'backups' => array(), 'done' => array(), 'current' => '' ) );
+$r = Ratesight_Image_Optimizer::optimize_existing( 30, Ratesight_Image_Optimizer::settings() );
+check_opt( 'a twice-interrupted attachment is skipped with an error (no endless retry)', $r['status'] === 'failed' && $postmeta[30]['_rs_img_opt_error']['code'] === 'interrupted' );
+set_opt( 'img_opt_keep_original', 0 );
+@unlink( $old );
+foreach ( array( '/ratesight-originals/2026/11', '/ratesight-originals/2026', '/ratesight-originals' ) as $d ) {
+	foreach ( array_merge( glob( $uploads_base . $d . '/*' ) ?: array(), array( $uploads_base . $d . '/.htaccess' ) ) as $f ) if ( is_file( $f ) ) unlink( $f );
+	@rmdir( $uploads_base . $d );
+}
 
 // ── Static checks ────────────────────────────────────────────────────────────
 $src = file_get_contents( __DIR__ . '/../includes/class-ratesight-image-optimizer.php' );

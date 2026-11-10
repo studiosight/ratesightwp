@@ -36,6 +36,9 @@ final class Ratesight_Image_Metadata {
 	/** Refuse to buffer a file larger than this (bytes). */
 	const MAX_BYTES = 67108864;
 
+	/** Containers this class can clean (and write the business location into). */
+	const CLEANABLE = array( 'image/jpeg', 'image/png', 'image/webp' );
+
 	/** City / state are short labels; anything longer is cut. */
 	const MAX_LABEL = 100;
 
