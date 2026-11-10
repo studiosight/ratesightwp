@@ -53,7 +53,7 @@ $rs_yes_no  = static function ( bool $ok ): string {
 				<option value="avif" <?php selected( $rs_img['img_opt_format'], 'avif' ); ?>>AVIF when supported, otherwise WebP</option>
 				<option value="original" <?php selected( $rs_img['img_opt_format'], 'original' ); ?>>Keep the uploaded format</option>
 			</select>
-			<p class="description">When the server cannot write the chosen format, the upload keeps its own format. A conversion that would make the file larger is not kept. Animated GIF, WebP and PNG files are never re-encoded.</p>
+			<p class="description">When the server cannot write the chosen format, the upload keeps its own format. A conversion that would make the file larger is not kept. Animated GIF, WebP and PNG files are never re-encoded. AVIF encoding is slow: sizes that do not fit in the upload's time limit are written in the uploaded format (WebP for TIFF and BMP) until "Optimize existing images" below finishes them.</p>
 		</td>
 	</tr>
 	<tr>
@@ -80,7 +80,8 @@ $rs_yes_no  = static function ( bool $ok ): string {
 <h2 class="rs-section">Business location in photos</h2>
 <div class="rs-card">
 <div class="rs-card-body">
-<p class="description" style="margin-top:12px;">Location data from phones, camera serial numbers and owner names are always removed. When both coordinates are set, the business location below is written into each image instead. It is never taken from a visitor or from the photo. With no coordinates, images are only cleaned.</p>
+<p class="description" style="margin-top:12px;">While optimization is on, location data from phones, camera details and serial numbers, owner names, copyright notices, keywords and embedded titles are removed from JPEG, PNG and WebP images and every size WordPress makes of them (HEIC photos included once WordPress has converted them to JPEG). When both coordinates are set, the business location below is written into each image instead. It is never taken from a visitor or from the photo. With no coordinates, images are only cleaned.</p>
+<p class="description">Not every file can be cleaned: a HEIC, TIFF, GIF or other original that WordPress keeps as uploaded still holds its own metadata, and files over <?php echo esc_html( (string) (int) round( Ratesight_Image_Metadata::MAX_BYTES / 1048576 ) ); ?> MB (or too large for this server's PHP memory) are left exactly as uploaded.</p>
 <?php if ( $rs_partial ) : ?>
 	<p style="color:#b32d2e;"><strong>Both latitude and longitude are needed.</strong> Until both are valid, images are only cleaned.</p>
 <?php endif; ?>
@@ -124,7 +125,7 @@ $rs_yes_no  = static function ( bool $ok ): string {
 <h2 class="rs-section">Optimize existing images</h2>
 <div class="rs-card">
 <div class="rs-card-body">
-<p class="description" style="margin-top:12px;">Existing images are optimized in place: same file names, same format, same URLs, so pages that already show them keep working. Each image and all its sizes are resized to the maximum long edge, recompressed when that makes them smaller, and cleaned. Runs a few images per request while this page is open.</p>
+<p class="description" style="margin-top:12px;">Existing images are optimized in place: same file names, same format, same URLs, so pages that already show them keep working. Each image and all its sizes are resized to the maximum long edge, recompressed when that makes them smaller, and cleaned. Files over <?php echo esc_html( (string) (int) round( Ratesight_Image_Metadata::MAX_BYTES / 1048576 ) ); ?> MB are skipped. With AVIF chosen, sizes of new uploads that did not fit in the upload's time limit are kept in their original format and are encoded as AVIF here (the earlier size file is kept, because a post may link to it). Runs a few images per request while this page is open.</p>
 <p>
 	<button type="button" class="button" id="rs-img-count">Count images (dry run)</button>
 	<button type="button" class="button button-primary" id="rs-img-apply" disabled>Optimize existing images</button>
@@ -158,8 +159,8 @@ $rs_yes_no  = static function ( bool $ok ): string {
 		post( 'ratesight_img_opt_status' ).done( function ( r ) {
 			if ( ! r || ! r.success ) { $sum.text( ( r && r.data && r.data.message ) || 'Request failed.' ); return; }
 			var d = r.data;
-			$sum.text( 'Dry run: ' + d.candidates + ' image(s) to optimize, ' + d.optimized + ' already optimized, ' + d.failed + ' skipped after an error, ' + d.rollbackable + ' with backups. Nothing was written.' + ( d.enabled ? '' : ' Turn on Image optimization and save before optimizing.' ) );
-			$( '#rs-img-apply' ).prop( 'disabled', ! d.enabled || d.candidates < 1 );
+			$sum.text( 'Dry run: ' + d.candidates + ' image(s) to optimize, ' + d.optimized + ' already optimized, ' + d.failed + ' skipped after an error, ' + d.rollbackable + ' with backups' + ( d.avif_pending ? ', ' + d.avif_pending + ' with sizes still to encode as AVIF' : '' ) + '. Nothing was written.' + ( d.enabled ? '' : ' Turn on Image optimization and save before optimizing.' ) );
+			$( '#rs-img-apply' ).prop( 'disabled', ! d.enabled || ( d.candidates + ( d.avif_pending || 0 ) ) < 1 );
 			$( '#rs-img-rollback' ).prop( 'disabled', d.rollbackable < 1 );
 		} ).fail( function () { $sum.text( 'Request failed.' ); } );
 	}

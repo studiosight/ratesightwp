@@ -272,6 +272,9 @@ class Ratesight_Public {
 	/** Widget ids already printed on this page (one per page: the id must be unique). */
 	private static array $printed_widgets = array();
 
+	/** Tags built while the content was rendered before the page body: id => tag (wp_footer fallback). */
+	private static array $deferred_widgets = array();
+
 	public function shortcode_leave_reviews(): string {
 		// The carousel page (go.ratesight.com carousel-reviews-widget.aspx)
 		// already shows "Click the 5-Stars below to leave a review" with a
@@ -306,13 +309,75 @@ class Ratesight_Public {
 		if ( isset( self::$printed_widgets[ $id ] ) ) {
 			return '<!-- Ratesight: [' . $shortcode . '] is already on this page; only the first one is shown. -->';
 		}
-		self::$printed_widgets[ $id ] = true;
 
 		$query = array( 'typ' => $args['typ'], 'oid' => rawurlencode( $code_id ) ) + $args;
 		$src   = add_query_arg( $query, self::WIDGET_BASE );
-
-		return '<script id="' . esc_attr( $id ) . '" src="' . esc_url( $src ) . '"'
+		$tag   = '<script id="' . esc_attr( $id ) . '" src="' . esc_url( $src ) . '"'
 			. ' data-no-optimize="1" data-cfasync="false" data-no-defer="1"></script>';
+
+		// Themes, SEO and social plugins also render the content before the page body (on
+		// template_redirect or wp, to build a description or a cache) and throw the result away.
+		// Using the slot there left the real content with only the "already on this page"
+		// comment and a blank widget. Before the body nothing is printed and the slot is kept;
+		// if the body never prints the tag, wp_footer prints it once.
+		if ( self::is_theme_page_render() && ! self::rendering_page_body() ) {
+			self::$deferred_widgets[ $id ] = $tag;
+			if ( function_exists( 'has_action' ) && function_exists( 'add_action' )
+				&& false === has_action( 'wp_footer', array( __CLASS__, 'print_deferred_widgets' ) ) ) {
+				add_action( 'wp_footer', array( __CLASS__, 'print_deferred_widgets' ), 5 );
+			}
+			return '';
+		}
+
+		self::$printed_widgets[ $id ] = true;
+		unset( self::$deferred_widgets[ $id ] );
+		return $tag;
+	}
+
+	/**
+	 * A front-end page view rendered through the theme (where wp_head, wp_body_open and wp_footer
+	 * run). REST, AJAX, cron, feeds and admin renders keep printing the tag as before.
+	 */
+	private static function is_theme_page_render(): bool {
+		if ( ( function_exists( 'is_admin' ) && is_admin() )
+			|| ( function_exists( 'wp_doing_ajax' ) && wp_doing_ajax() )
+			|| ( function_exists( 'wp_doing_cron' ) && wp_doing_cron() )
+			|| ( defined( 'REST_REQUEST' ) && REST_REQUEST ) ) {
+			return false;
+		}
+		if ( isset( $GLOBALS['wp_query'] ) && function_exists( 'is_feed' ) && is_feed() ) {
+			return false;
+		}
+		return true;
+	}
+
+	/** Is this content going into the page body (after wp_head, after wp_body_open, or in the main loop)? */
+	private static function rendering_page_body(): bool {
+		if ( ! function_exists( 'did_action' ) ) {
+			return true;
+		}
+		if ( did_action( 'wp_body_open' ) ) {
+			return true;
+		}
+		if ( did_action( 'wp_head' ) && ! doing_action( 'wp_head' ) ) {
+			return true;
+		}
+		return function_exists( 'in_the_loop' ) && function_exists( 'is_main_query' ) && in_the_loop() && is_main_query();
+	}
+
+	/**
+	 * wp_footer fallback: a review shortcode ran only before the page body (so its tag was never
+	 * printed inline). Print each such tag once, unchanged, so the widget still loads.
+	 */
+	public static function print_deferred_widgets(): void {
+		foreach ( self::$deferred_widgets as $id => $tag ) {
+			if ( isset( self::$printed_widgets[ $id ] ) ) {
+				continue;
+			}
+			self::$printed_widgets[ $id ] = true;
+			echo $tag . "\n"; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built with esc_attr() / esc_url() in inline_widget().
+		}
+		self::$deferred_widgets = array();
 	}
 
 	public function shortcode_jobs(): string {

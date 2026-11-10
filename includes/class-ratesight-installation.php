@@ -107,6 +107,7 @@ class Ratesight_Installation {
 			'ratesight_installation_report_receipt',
 			'ratesight_claim_receipt',
 			'ratesight_enrollment_checked_version',
+			'ratesight_img_opt_lock',
 		) );
 		foreach ( array( 'gbp', 'gsc' ) as $service ) {
 			foreach ( array( 'oauth', 'selection', 'locked', 'revoked', 'disconnect_reason', 'refresh_error', 'scope_error' ) as $suffix ) {
