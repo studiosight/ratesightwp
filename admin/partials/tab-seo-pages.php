@@ -287,3 +287,10 @@ $ratesight_id = trim( (string) Ratesight_Options::get( 'code_id' ) );
 
 <div class="rs-submit"><?php submit_button( 'Save Settings' ); ?></div>
 </form>
+
+<h2 class="rs-section">Image optimization</h2>
+<div class="rs-card">
+<div class="rs-card-body">
+	<p style="margin-top:12px;">Resize, compress and convert uploads to WebP, clean photo metadata and add the business location: <a href="<?php echo esc_url( admin_url( 'admin.php?page=ratesight&tab=images' ) ); ?>">Image optimization settings</a> (<?php echo Ratesight_Options::get( 'img_opt_enabled' ) ? 'on' : 'off'; ?>).</p>
+</div>
+</div>

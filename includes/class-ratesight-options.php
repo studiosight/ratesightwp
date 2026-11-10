@@ -77,6 +77,24 @@ class Ratesight_Options {
 			// on every site by default. This is the opt-out (1 = hold them as drafts). The
 			// option name is Ratesight_Request_Auth::TRUSTED_PUBLISHER_SETTING.
 			'crm_posts_hold' => array( 'name' => 'ratesight_crm_posts_hold', 'default' => 0, 'type' => 'bool', 'group' => 'seo_pages' ),
+
+			// ── Image optimization (Ratesight_Image_Optimizer) ───────────────────
+			// Off by default: nothing about uploads changes until a site owner turns it on.
+			// Own group, saved by exactly one form (admin/partials/tab-images.php).
+			'img_opt_enabled'       => array( 'name' => 'ratesight_img_opt_enabled',       'default' => 0,      'type' => 'bool',        'group' => 'images' ),
+			// Longest edge in px for new uploads (never upscaled); 0 = do not resize.
+			'img_opt_max_edge'      => array( 'name' => 'ratesight_img_opt_max_edge',      'default' => 2000,   'type' => 'img_edge',    'group' => 'images' ),
+			// webp | avif (falls back to WebP, then the original type, when the server cannot write it) | original.
+			'img_opt_format'        => array( 'name' => 'ratesight_img_opt_format',        'default' => 'webp', 'type' => 'img_format',  'group' => 'images' ),
+			'img_opt_quality'       => array( 'name' => 'ratesight_img_opt_quality',       'default' => 82,     'type' => 'img_quality', 'group' => 'images' ),
+			// Keep a scrubbed copy of each original in uploads/ratesight-originals (enables rollback).
+			'img_opt_keep_original' => array( 'name' => 'ratesight_img_opt_keep_original', 'default' => 0,      'type' => 'bool',        'group' => 'images' ),
+			// The CLIENT's business location, written into image EXIF/XMP. Never derived from a
+			// visitor or a photo; with no valid pair, images are only stripped.
+			'img_geo_lat'           => array( 'name' => 'ratesight_img_geo_lat',           'default' => '',     'type' => 'latitude',    'group' => 'images' ),
+			'img_geo_lng'           => array( 'name' => 'ratesight_img_geo_lng',           'default' => '',     'type' => 'longitude',   'group' => 'images' ),
+			'img_geo_city'          => array( 'name' => 'ratesight_img_geo_city',          'default' => '',     'type' => 'label',       'group' => 'images' ),
+			'img_geo_state'         => array( 'name' => 'ratesight_img_geo_state',         'default' => '',     'type' => 'label',       'group' => 'images' ),
 		);
 	}
 
@@ -184,6 +202,30 @@ class Ratesight_Options {
 				return in_array( $current, array( 'legacy', 'same-city-or-hub', 'off' ), true ) ? $current : false;
 			case 'secret':
 				return self::secret_setting_intent( $value )['value'];
+			case 'img_edge':
+				if ( $value === '' || $value === null || ! is_numeric( $value ) ) return 2000;
+				$value = (int) $value;
+				return $value <= 0 ? 0 : max( 320, min( 12000, $value ) );
+			case 'img_quality':
+				if ( $value === '' || $value === null || ! is_numeric( $value ) || (int) $value <= 0 ) return 82;
+				return max( 40, min( 100, (int) $value ) );
+			case 'img_format':
+				return in_array( $value, array( 'webp', 'avif', 'original' ), true ) ? $value : 'webp';
+			case 'latitude':
+			case 'longitude':
+				$value = is_scalar( $value ) ? trim( (string) $value ) : '';
+				if ( $value === '' ) return '';
+				$limit = $type === 'latitude' ? 90 : 180;
+				if ( ! is_numeric( $value ) || abs( (float) $value ) > $limit ) {
+					if ( function_exists( 'add_settings_error' ) ) {
+						add_settings_error( 'ratesight_img_geo_' . ( $type === 'latitude' ? 'lat' : 'lng' ), 'ratesight_img_geo_invalid', ucfirst( $type ) . ' must be a decimal number between -' . $limit . ' and ' . $limit . '. It was not saved.' );
+					}
+					return '';
+				}
+				return rtrim( rtrim( sprintf( '%.7F', (float) $value ), '0' ), '.' );
+			case 'label':
+				$value = sanitize_text_field( is_scalar( $value ) ? (string) $value : '' );
+				return function_exists( 'mb_substr' ) ? mb_substr( $value, 0, 100 ) : substr( $value, 0, 100 );
 			case 'text':
 			default:
 				return sanitize_text_field( $value );

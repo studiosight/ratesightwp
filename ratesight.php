@@ -89,6 +89,8 @@ foreach ( array(
 	'includes/class-ratesight-related-links.php',
 	'includes/class-ratesight-page-api.php',
 	'includes/class-ratesight-media-alt.php',
+	'includes/class-ratesight-image-metadata.php',
+	'includes/class-ratesight-image-optimizer.php',
 	'includes/class-ratesight-crm-publish.php',
 	'includes/class-ratesight-recovery-log.php',
 	'includes/class-ratesight-redirect-health.php',
